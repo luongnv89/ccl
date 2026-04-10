@@ -2,11 +2,32 @@
 name = "claude-codex-local"
 version = "0.2.0"
 description = "Local backend bridge for Claude Code and Codex."
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
+keywords = ["claude", "codex", "llm", "local", "ollama", "lm-studio", "bridge", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Utilities",
+]
 dependencies = [
   "questionary>=2.0",
   "rich>=13.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/luongnv89/claude-codex-local"
+Repository = "https://github.com/luongnv89/claude-codex-local"
+"Bug Tracker" = "https://github.com/luongnv89/claude-codex-local/issues"
+Changelog = "https://github.com/luongnv89/claude-codex-local/blob/main/docs/CHANGELOG.md"
 
 [project.scripts]
 claude-codex-local = "poc_bridge:main"
