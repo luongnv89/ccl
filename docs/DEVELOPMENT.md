@@ -34,9 +34,9 @@ pre-commit install                 # set up git hooks
 ## Diagnostics
 
 ```bash
-./bin/poc-machine-profile   # JSON hardware + software profile
-./bin/poc-doctor            # wizard state + presence checks
-./bin/poc-recommend         # llmfit model recommendation only
+ccl-bridge profile           # JSON hardware + software profile
+claude-codex-local doctor    # wizard state + presence checks
+ccl-bridge recommend         # llmfit model recommendation only
 ```
 
 ## Testing
@@ -85,12 +85,9 @@ pre-commit run --all-files
 
 | File | Purpose |
 |------|---------|
-| `wizard.py` | Interactive setup wizard (core logic) |
-| `poc_bridge.py` | Machine profile, model recommendation, doctor |
+| `claude_codex_local/wizard.py` | Interactive setup wizard (core logic) |
+| `claude_codex_local/bridge.py` | Machine profile, model recommendation, doctor |
 | `bin/claude-codex-local` | Main wizard entrypoint |
-| `bin/poc-doctor` | Diagnostic: wizard state |
-| `bin/poc-machine-profile` | Diagnostic: hardware profile |
-| `bin/poc-recommend` | Diagnostic: model recommendation |
 | `scripts/e2e_smoke.sh` | End-to-end smoke test |
 | `.claude-codex-local/` | Runtime state (gitignored) |
 
@@ -113,7 +110,7 @@ PYTHONPATH=. python wizard.py --debug
 Inspect the machine profile JSON:
 
 ```bash
-./bin/poc-machine-profile | python3 -m json.tool
+ccl-bridge profile | python3 -m json.tool
 ```
 
 ## Adding a New Engine

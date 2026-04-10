@@ -1,8 +1,8 @@
 """
 End-to-end tests for claude-codex-local — stubbed, CI-safe.
 
-These tests verify the full wiring of the POC:
-  * poc_bridge CLI subcommands invoked via main()
+These tests verify the full wiring of the MVP:
+  * bridge CLI subcommands invoked via main()
   * wizard.run_wizard() executing all 8 steps in non-interactive mode
   * wizard.run_doctor() re-checking presence after a successful setup
   * bin/ shims spawned as real subprocesses with a fake PATH
@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
-# Helpers — install a synthetic profile + candidate list into poc_bridge.
+# Helpers — install a synthetic profile + candidate list into bridge.
 # ---------------------------------------------------------------------------
 
 
@@ -98,15 +98,15 @@ def _stub_candidates():
 
 
 # ---------------------------------------------------------------------------
-# poc_bridge CLI subcommands — invoke main() with argv injection.
+# bridge CLI subcommands — invoke main() with argv injection.
 # ---------------------------------------------------------------------------
 
 
-class TestPocBridgeCli:
+class TestBridgeCli:
     def test_profile_prints_json(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
-        monkeypatch.setattr(sys, "argv", ["poc_bridge", "profile"])
+        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "profile"])
         pb.main()
         out = capsys.readouterr().out
         data = json.loads(out)
@@ -120,7 +120,7 @@ class TestPocBridgeCli:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        monkeypatch.setattr(sys, "argv", ["poc_bridge", "recommend", "--mode", "balanced"])
+        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "recommend", "--mode", "balanced"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert data["selected_model"] == "qwen3-coder:30b"
@@ -134,7 +134,7 @@ class TestPocBridgeCli:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        monkeypatch.setattr(sys, "argv", ["poc_bridge", "doctor"])
+        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert "profile" in data and "recommendation" in data
@@ -148,13 +148,13 @@ class TestPocBridgeCli:
         bad["presence"]["engines"] = []
         monkeypatch.setattr(pb, "machine_profile", lambda: bad)
         monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
-        monkeypatch.setattr(sys, "argv", ["poc_bridge", "doctor"])
+        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert any("Missing tool: ollama" in i for i in data["issues"])
         assert any("No suitable local coding model" in i for i in data["issues"])
 
-    def test_adapters_subcommand_lists_both(self, isolated_state, monkeypatch, capsys):
+    def test_adapters_subcommand_lists_all(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
         # Keep healthchecks cheap and deterministic.
         monkeypatch.setattr(
@@ -166,11 +166,22 @@ class TestPocBridgeCli:
             "lms_info",
             lambda: {"present": True, "server_running": True, "server_port": 1234, "models": []},
         )
-        monkeypatch.setattr(sys, "argv", ["poc_bridge", "adapters"])
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "binary": "llama-server",
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "adapters"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         names = {a["name"] for a in data["adapters"]}
-        assert names == {"ollama", "lmstudio"}
+        assert names == {"ollama", "lmstudio", "llamacpp"}
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +294,7 @@ class TestWizardFullFlow:
 
 
 class TestBinShims:
-    def _spawn(self, shim_name, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None):
+    def _spawn_shim(self, shim_name, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None):
         """Invoke a bin/ shim with isolated STATE_DIR + a fake PATH."""
         bdir, _ = fake_bin
         env = os.environ.copy()
@@ -301,23 +312,44 @@ class TestBinShims:
             timeout=60,
         )
 
-    def test_poc_machine_profile_shim_emits_json(self, fake_bin, tmp_path):
-        result = self._spawn("poc-machine-profile", tmp_path=tmp_path, fake_bin=fake_bin)
+    def _spawn_bridge(
+        self, subcommand, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None
+    ):
+        """Invoke claude_codex_local.bridge as a module with isolated STATE_DIR + a fake PATH."""
+        bdir, _ = fake_bin
+        env = os.environ.copy()
+        env["PATH"] = f"{bdir}:/usr/bin:/bin"
+        env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
+        env["HOME"] = str(tmp_path / "home")
+        (tmp_path / "home").mkdir(exist_ok=True)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            [sys.executable, "-m", "claude_codex_local.bridge", subcommand, *(extra_args or [])],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+            cwd=str(REPO_ROOT),
+        )
+
+    def test_ccl_bridge_profile_emits_json(self, fake_bin, tmp_path):
+        result = self._spawn_bridge("profile", tmp_path=tmp_path, fake_bin=fake_bin)
         assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert "tools" in data
         assert "presence" in data
 
-    def test_poc_recommend_shim_returns_fallback_when_no_candidates(self, fake_bin, tmp_path):
+    def test_ccl_bridge_recommend_returns_fallback_when_no_candidates(self, fake_bin, tmp_path):
         # Default llmfit stub returns {"models": []}, so we should hit pass 5 fallback.
-        result = self._spawn("poc-recommend", tmp_path=tmp_path, fake_bin=fake_bin)
+        result = self._spawn_bridge("recommend", tmp_path=tmp_path, fake_bin=fake_bin)
         assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert data["status"] == "download-required"
         assert data["selected_model"] == "qwen2.5-coder:7b"
 
     def test_claude_codex_local_doctor_subcommand_no_state(self, fake_bin, tmp_path):
-        result = self._spawn(
+        result = self._spawn_shim(
             "claude-codex-local",
             extra_args=["doctor"],
             tmp_path=tmp_path,

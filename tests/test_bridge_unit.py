@@ -1,5 +1,5 @@
 """
-Unit tests for poc_bridge — pure functions + subprocess-mockable helpers.
+Unit tests for bridge — pure functions + subprocess-mockable helpers.
 
 These tests never touch real ollama / lms / claude / codex binaries. Anything
 that would shell out is either patched or routed through the `fake_bin`
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-import poc_bridge as pb
+import claude_codex_local.bridge as pb
 
 # ---------------------------------------------------------------------------
 # HF → Ollama / LM Studio tag mapping (pure regex lookups).
@@ -409,6 +409,270 @@ class TestAdapters:
         assert result["ok"] is True
         assert "2" in result["detail"]
 
-    def test_all_adapters_registry_contains_both(self):
+    def test_all_adapters_registry_contains_all_three(self):
         names = {a.name for a in pb.ALL_ADAPTERS}
-        assert names == {"ollama", "lmstudio"}
+        assert names == {"ollama", "lmstudio", "llamacpp"}
+
+
+# ---------------------------------------------------------------------------
+# llamacpp helpers — mock HTTP and subprocess.
+# ---------------------------------------------------------------------------
+
+
+class TestLlamaCppDetect:
+    def test_returns_present_for_llama_server(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "command_version",
+            lambda name, *a, **kw: (
+                {"present": True, "version": "b1234"}
+                if name == "llama-server"
+                else {"present": False}
+            ),
+        )
+        result = pb.llamacpp_detect()
+        assert result["present"] is True
+        assert result["binary"] == "llama-server"
+        assert result["version"] == "b1234"
+
+    def test_falls_back_to_llama_cpp_server(self, monkeypatch):
+        def fake_version(name, *a, **kw):
+            if name == "llama-cpp-server":
+                return {"present": True, "version": "b5678"}
+            return {"present": False}
+
+        monkeypatch.setattr(pb, "command_version", fake_version)
+        result = pb.llamacpp_detect()
+        assert result["present"] is True
+        assert result["binary"] == "llama-cpp-server"
+
+    def test_returns_not_present_when_all_missing(self, monkeypatch):
+        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        result = pb.llamacpp_detect()
+        assert result["present"] is False
+
+    def test_server_candidate_rejected_when_not_llama(self, monkeypatch):
+        # A generic binary named "server" (e.g., Apache helper) must not be accepted.
+        def fake_version(name, *a, **kw):
+            if name == "server":
+                return {"present": True, "version": "Apache/2.4.57"}
+            return {"present": False}
+
+        monkeypatch.setattr(pb, "command_version", fake_version)
+        result = pb.llamacpp_detect()
+        assert result["present"] is False
+
+    def test_server_candidate_accepted_when_version_contains_llama(self, monkeypatch):
+        def fake_version(name, *a, **kw):
+            if name == "server":
+                return {"present": True, "version": "llama.cpp b3447"}
+            return {"present": False}
+
+        monkeypatch.setattr(pb, "command_version", fake_version)
+        result = pb.llamacpp_detect()
+        assert result["present"] is True
+        assert result["binary"] == "server"
+
+
+class TestLlamaCppInfo:
+    def test_returns_not_present_when_binary_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            pb, "llamacpp_detect", lambda: {"present": False, "binary": "", "version": ""}
+        )
+        result = pb.llamacpp_info()
+        assert result["present"] is False
+        assert result["server_running"] is False
+
+    def test_server_running_when_models_endpoint_responds(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_detect",
+            lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
+        )
+
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"data": [{"id": "my-model.gguf"}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        import urllib.request
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeResp())
+        result = pb.llamacpp_info()
+        assert result["server_running"] is True
+        assert result["model"] == "my-model.gguf"
+
+    def test_server_not_running_when_connection_refused(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_detect",
+            lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
+        )
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        result = pb.llamacpp_info()
+        assert result["server_running"] is False
+        assert result["model"] is None
+
+
+class TestSmokeTestLlamaCppModel:
+    def test_returns_ok_true_when_ready_in_response(self, monkeypatch):
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "READY"}}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        import urllib.request
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeResp())
+        result = pb.smoke_test_llamacpp_model("my-model.gguf")
+        assert result["ok"] is True
+        assert result["response"] == "READY"
+
+    def test_returns_ok_false_when_response_not_ready(self, monkeypatch):
+        class _FakeResp:
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "Hello!"}}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        import urllib.request
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeResp())
+        result = pb.smoke_test_llamacpp_model("my-model.gguf")
+        assert result["ok"] is False
+
+    def test_returns_ok_false_on_connection_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        result = pb.smoke_test_llamacpp_model("my-model.gguf")
+        assert result["ok"] is False
+        assert "error" in result
+
+
+class TestLlamaCppAdapter:
+    def test_name_and_recommend_params(self):
+        adapter = pb.LlamaCppAdapter()
+        assert adapter.name == "llamacpp"
+        assert adapter.recommend_params("balanced") == {"provider": "llamacpp", "extra_flags": []}
+        assert adapter.recommend_params("fast") == {"provider": "llamacpp", "extra_flags": []}
+        assert adapter.recommend_params("quality") == {"provider": "llamacpp", "extra_flags": []}
+
+    def test_healthcheck_when_binary_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": False,
+                "binary": "",
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+        adapter = pb.LlamaCppAdapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is False
+        assert "not found" in result["detail"]
+
+    def test_healthcheck_when_binary_present_but_server_down(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "binary": "llama-server",
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+        adapter = pb.LlamaCppAdapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is False
+        assert "not running" in result["detail"]
+
+    def test_healthcheck_when_server_running(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "binary": "llama-server",
+                "server_running": True,
+                "server_port": 8001,
+                "model": "q.gguf",
+            },
+        )
+        adapter = pb.LlamaCppAdapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is True
+        assert "8001" in result["detail"]
+
+    def test_list_models_when_server_running_with_model(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "binary": "llama-server",
+                "server_running": True,
+                "server_port": 8001,
+                "model": "qwen.gguf",
+            },
+        )
+        adapter = pb.LlamaCppAdapter()
+        models = adapter.list_models()
+        assert len(models) == 1
+        assert models[0]["name"] == "qwen.gguf"
+        assert models[0]["format"] == "gguf"
+        assert models[0]["local"] is True
+
+    def test_list_models_when_server_not_running(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "binary": "llama-server",
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+        adapter = pb.LlamaCppAdapter()
+        assert adapter.list_models() == []
+
+    def test_run_test_delegates_to_smoke_test(self, monkeypatch):
+        monkeypatch.setattr(
+            pb, "smoke_test_llamacpp_model", lambda m: {"ok": True, "response": "READY"}
+        )
+        adapter = pb.LlamaCppAdapter()
+        result = adapter.run_test("qwen.gguf")
+        assert result["ok"] is True

@@ -36,7 +36,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-import poc_bridge as pb
+from claude_codex_local import bridge as pb
 
 console = Console()
 
@@ -164,6 +164,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("ollama (engine)", tools["ollama"])
     row("lmstudio (engine)", tools["lmstudio"])
     row("llama.cpp (engine)", tools["llamacpp"])
+    row("huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
     row("llmfit", tools["llmfit"])
     console.print(table)
 
@@ -217,6 +218,11 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
         "name": "llama.cpp",
         "cmd": "brew install llama.cpp   # or build from https://github.com/ggml-org/llama.cpp",
         "url": "https://github.com/ggml-org/llama.cpp",
+    },
+    "huggingface-cli": {
+        "name": "Hugging Face CLI",
+        "cmd": "pip install 'huggingface_hub[cli]'",
+        "url": "https://huggingface.co/docs/huggingface_hub/guides/cli",
     },
     "llmfit": {
         "name": "llmfit",
@@ -287,9 +293,144 @@ def _show_install_hint(key: str) -> None:
     console.print(f"    [cyan]{hint['cmd']}[/cyan]")
 
 
+_LLMFIT_INSTALL_SCRIPT = """\
+REPO='AlexsJones/llmfit'
+BINARY='llmfit'
+OS=$(uname -s)
+ARCH=$(uname -m)
+case "$OS" in
+  Linux) OS='unknown-linux-musl' ;;
+  Darwin) OS='apple-darwin' ;;
+  *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
+esac
+case "$ARCH" in
+  x86_64|amd64) ARCH='x86_64' ;;
+  aarch64|arm64) ARCH='aarch64' ;;
+  *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+esac
+PLATFORM="${ARCH}-${OS}"
+TAG=$(curl -fsSI "https://github.com/${REPO}/releases/latest" | grep -i '^location:' | head -1 | sed 's|.*/tag/||' | tr -d '\\r\\n')
+ASSET="${BINARY}-${TAG}-${PLATFORM}.tar.gz"
+URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+curl -fsSL "$URL" -o "$TMPDIR/$ASSET"
+if curl -fsSL --max-time 10 "${URL}.sha256" -o "$TMPDIR/${ASSET}.sha256"; then
+  (cd "$TMPDIR" && sha256sum -c "${ASSET}.sha256")
+fi
+tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR"
+install -d "$HOME/.local/bin"
+install -m 0755 "$TMPDIR/$BINARY" "$HOME/.local/bin/$BINARY"
+export PATH="$HOME/.local/bin:$PATH"
+llmfit --version
+"""
+
+
+def _ensure_llmfit() -> bool:
+    """
+    Check if llmfit is present. If not, offer to install it via the official
+    bootstrap script. Returns True if llmfit is available after the check/install.
+    """
+    if pb.command_version("llmfit").get("present"):
+        return True
+
+    warn("llmfit is not installed.")
+    _show_install_hint("llmfit")
+    install = questionary.confirm(
+        "Install llmfit now via the official bootstrap script?",
+        default=True,
+    ).ask()
+    if not install:
+        return False
+
+    try:
+        subprocess.run(["bash", "-c", _LLMFIT_INSTALL_SCRIPT], check=True)
+    except subprocess.CalledProcessError as exc:
+        fail(f"llmfit install failed: {exc}")
+        return False
+
+    # Add ~/.local/bin to PATH for this process so the re-check finds it.
+    local_bin = str(Path.home() / ".local" / "bin")
+    if local_bin not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = local_bin + os.pathsep + os.environ.get("PATH", "")
+
+    if not pb.command_version("llmfit").get("present"):
+        warn(
+            "llmfit still not found after install. "
+            "Ensure ~/.local/bin is on your PATH, then re-run the wizard with --resume."
+        )
+        return False
+
+    ok("llmfit installed successfully.")
+    return True
+
+
+def _ensure_tool(key: str) -> bool:
+    """
+    Offer to install a tool by key (matching INSTALL_HINTS).
+    For tools with a runnable install command (ollama, llamacpp, claude, codex,
+    huggingface-cli) the command is executed directly.
+    For tools requiring manual steps (lmstudio) the hint is shown and the user
+    is asked to confirm when done, then the profile is re-probed.
+    Returns True when the tool is detected as present after the attempt.
+    """
+    detect_cmd = {
+        "claude": "claude",
+        "codex": "codex",
+        "ollama": "ollama",
+        "lmstudio": "lms",
+        "llamacpp": "llama-server",
+    }.get(key, key)
+
+    if pb.command_version(detect_cmd).get("present"):
+        return True
+
+    _show_install_hint(key)
+
+    # lmstudio requires a manual GUI download — can't script it.
+    if key == "lmstudio":
+        proceed = questionary.confirm(
+            "Install LM Studio manually (see link above), then confirm when ready to re-probe?",
+            default=True,
+        ).ask()
+        if not proceed:
+            return False
+        return pb.command_version(detect_cmd).get("present", False)
+
+    # All other tools have a runnable one-liner.
+    hint = INSTALL_HINTS.get(key, {})
+    cmd_str = hint.get("cmd", "")
+    install = questionary.confirm(
+        f"Run install command now?  [{cmd_str}]",
+        default=True,
+    ).ask()
+    if not install:
+        return False
+
+    try:
+        subprocess.run(["bash", "-c", cmd_str], check=True)
+    except subprocess.CalledProcessError as exc:
+        fail(f"Install failed: {exc}")
+        return False
+
+    if not pb.command_version(detect_cmd).get("present"):
+        warn(
+            f"{key} still not found after install. "
+            "You may need to open a new terminal or add its bin directory to PATH."
+        )
+        return False
+
+    ok(f"{key} installed successfully.")
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Step 2.3 — Pick preferences
 # ---------------------------------------------------------------------------
+
+
+_ALL_HARNESSES = ["claude", "codex"]
+_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp"]
 
 
 def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
@@ -299,44 +440,82 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
     engines = presence["engines"]
 
     # Harness pick
-    if len(harnesses) == 1:
-        state.primary_harness = harnesses[0]
-        ok(f"Only one harness available: [bold]{state.primary_harness}[/bold]")
-    elif non_interactive:
+    if non_interactive:
+        if not harnesses:
+            fail("No harness installed. Cannot continue in non-interactive mode.")
+            return False
         state.primary_harness = harnesses[0]
         state.secondary_harnesses = harnesses[1:]
         ok(f"Non-interactive: picking [bold]{state.primary_harness}[/bold] as primary harness")
     else:
-        choice = questionary.select(
-            "Which harness do you want as primary?",
-            choices=harnesses,
-        ).ask()
-        if choice is None:
-            return False
-        state.primary_harness = choice
-        state.secondary_harnesses = [h for h in harnesses if h != choice]
+        # Show all known harnesses; mark uninstalled ones.
+        harness_choices = [
+            questionary.Choice(
+                h if h in harnesses else f"{h}  [not installed]",
+                value=h,
+            )
+            for h in _ALL_HARNESSES
+        ]
+        while True:
+            choice = questionary.select(
+                "Which harness do you want as primary?",
+                choices=harness_choices,
+                default=harnesses[0] if harnesses else _ALL_HARNESSES[0],
+            ).ask()
+            if choice is None:
+                return False
+            if choice not in harnesses:
+                if not _ensure_tool(choice):
+                    warn(
+                        f"{choice} is still not available. Please pick another or install it first."
+                    )
+                    continue
+                # Refresh presence after install.
+                state.profile = pb.machine_profile()
+                harnesses = state.profile["presence"]["harnesses"]
+            state.primary_harness = choice
+            state.secondary_harnesses = [h for h in harnesses if h != choice]
+            break
 
     # Engine pick
-    if len(engines) == 1:
-        state.primary_engine = engines[0]
-        ok(f"Only one engine available: [bold]{state.primary_engine}[/bold]")
-    elif non_interactive:
-        # Prefer lmstudio on Apple Silicon, else ollama, else whatever's first.
+    if non_interactive:
+        if not engines:
+            fail("No engine installed. Cannot continue in non-interactive mode.")
+            return False
         default_engine = _default_engine(engines, state.profile)
         state.primary_engine = default_engine
         state.secondary_engines = [e for e in engines if e != default_engine]
         ok(f"Non-interactive: picking [bold]{state.primary_engine}[/bold] as primary engine")
     else:
-        default_engine = _default_engine(engines, state.profile)
-        choice = questionary.select(
-            "Which engine do you want as primary?",
-            choices=engines,
-            default=default_engine,
-        ).ask()
-        if choice is None:
-            return False
-        state.primary_engine = choice
-        state.secondary_engines = [e for e in engines if e != choice]
+        # Show all known engines; mark uninstalled ones.
+        engine_choices = [
+            questionary.Choice(
+                e if e in engines else f"{e}  [not installed]",
+                value=e,
+            )
+            for e in _ALL_ENGINES
+        ]
+        default_engine = _default_engine(engines, state.profile) if engines else _ALL_ENGINES[0]
+        while True:
+            choice = questionary.select(
+                "Which engine do you want as primary?",
+                choices=engine_choices,
+                default=default_engine,
+            ).ask()
+            if choice is None:
+                return False
+            if choice not in engines:
+                if not _ensure_tool(choice):
+                    warn(
+                        f"{choice} is still not available. Please pick another or install it first."
+                    )
+                    continue
+                # Refresh presence after install.
+                state.profile = pb.machine_profile()
+                engines = state.profile["presence"]["engines"]
+            state.primary_engine = choice
+            state.secondary_engines = [e for e in engines if e != choice]
+            break
 
     ok(f"Primary: [bold]{state.primary_harness}[/bold] + [bold]{state.primary_engine}[/bold]")
     if state.secondary_harnesses or state.secondary_engines:
@@ -508,6 +687,8 @@ def _find_model_auto(engine: str, profile: dict[str, Any] | None = None) -> dict
 
 
 def _find_model_interactive(engine: str) -> dict[str, Any] | None:
+    if not _ensure_llmfit():
+        return None
     info("Running llmfit to rank coding models for this machine...")
     candidates = pb.llmfit_coding_candidates()
     if not candidates:
@@ -622,9 +803,59 @@ def _estimate_model_size(state: WizardState) -> int | None:
     return None
 
 
+def _download_gguf_via_hf_cli(repo_id: str) -> dict:
+    """
+    Download a GGUF model from Hugging Face Hub using huggingface-cli.
+
+    repo_id may be:
+      - A bare repo like "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        (downloads entire repo; huggingface-cli picks the right files)
+      - A repo + filename like "org/repo filename.gguf"
+        (downloads the specific file)
+
+    Returns {"ok": bool, "path": str|None}.
+    """
+    if not pb.huggingface_cli_detect().get("present"):
+        warn("huggingface-cli is not installed.")
+        _show_install_hint("huggingface-cli")
+        install = questionary.confirm(
+            "Install huggingface_hub[cli] now via pip?",
+            default=True,
+        ).ask()
+        if install:
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "huggingface_hub[cli]"],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                fail(f"pip install failed: {exc}")
+                return {"ok": False, "path": None}
+        if not pb.huggingface_cli_detect().get("present"):
+            warn(
+                "huggingface-cli still not found after install attempt.\n"
+                "Re-run the wizard with --resume once it is available."
+            )
+            return {"ok": False, "path": None}
+
+    # Split "repo_id filename.gguf" if the caller passed both in one string.
+    parts = repo_id.split(None, 1)
+    hf_repo = parts[0]
+    filename = parts[1] if len(parts) > 1 else None
+
+    console.print(f"\n[cyan]Downloading {repo_id} from Hugging Face Hub...[/cyan]")
+    result = pb.huggingface_download_gguf(hf_repo, filename=filename)
+    if result["ok"]:
+        ok(f"Downloaded to: {result['path']}")
+    else:
+        fail(f"Hugging Face download failed: {result['error']}")
+    return result
+
+
 def _download_model(state: WizardState) -> bool:
     engine = state.primary_engine
     tag = state.engine_model_tag
+    llamacpp_model_path: str | None = None
     console.print(f"\n[cyan]Downloading {tag} via {engine}...[/cyan]")
     try:
         if engine == "ollama":
@@ -636,16 +867,20 @@ def _download_model(state: WizardState) -> bool:
                 return False
             subprocess.run([lms, "get", tag, "-y"], check=True)
         elif engine == "llamacpp":
-            warn(
-                "llama.cpp does not manage downloads. Fetch the GGUF manually and re-run with --resume."
-            )
-            return False
+            hf_result = _download_gguf_via_hf_cli(tag)
+            if not hf_result["ok"]:
+                return False
+            llamacpp_model_path = hf_result.get("path")
     except subprocess.CalledProcessError as exc:
         fail(f"Download failed: {exc}")
         return False
-    ok(f"Downloaded {tag}")
-    # Refresh profile so 2.5 sees the new model.
+    if engine != "llamacpp":
+        ok(f"Downloaded {tag}")
+    # Refresh profile so 2.5 sees the new model; preserve llamacpp_model_path
+    # since machine_profile() never returns that key.
     state.profile = pb.machine_profile()
+    if engine == "llamacpp" and llamacpp_model_path:
+        state.profile["llamacpp_model_path"] = llamacpp_model_path
     return True
 
 
@@ -669,6 +904,19 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
             pb.lms_start_server()
         pb.lms_load_model(tag)
         result = pb.smoke_test_lmstudio_model(tag)
+    elif engine == "llamacpp":
+        # llama.cpp server must be started manually by the user with the GGUF model loaded.
+        llamacpp_status = pb.llamacpp_info()
+        if not llamacpp_status.get("server_running"):
+            model_path = state.profile.get("llamacpp_model_path", "<path/to/model.gguf>")
+            warn(
+                f"llama.cpp server is not running on port {llamacpp_status['server_port']}. "
+                f"Start it with: llama-server --port {llamacpp_status['server_port']} "
+                f"--model {model_path}"
+            )
+            result = {"ok": False, "error": "llama.cpp server not running"}
+        else:
+            result = pb.smoke_test_llamacpp_model(tag)
     else:
         warn(f"Smoke test for engine '{engine}' not implemented — skipping.")
         result = {"ok": True, "response": "(skipped)"}
@@ -767,7 +1015,7 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         }
         return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
     if engine == "llamacpp":
-        base_url = "http://localhost:8001"
+        base_url = f"http://localhost:{pb.LLAMACPP_SERVER_PORT}"
         env = {
             "ANTHROPIC_BASE_URL": base_url,
             "ANTHROPIC_API_KEY": "sk-local",  # pragma: allowlist secret
@@ -818,7 +1066,7 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
     if engine == "llamacpp":
         env = {
-            "OPENAI_BASE_URL": "http://localhost:8001/v1",
+            "OPENAI_BASE_URL": f"http://localhost:{pb.LLAMACPP_SERVER_PORT}/v1",
             "OPENAI_API_KEY": "sk-local",  # pragma: allowlist secret
         }
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
@@ -1084,7 +1332,7 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
   `source {shell_rc}`.
 - **Engine not responding?** Re-run the wizard smoke test:
   ```bash
-  ./bin/poc-doctor
+  claude-codex-local doctor
   ```
 - **Want to switch models?** Re-run the wizard:
   ```bash
@@ -1349,8 +1597,10 @@ def run_find_model_standalone() -> int:
     header("find-model — llmfit coding-model recommendation")
     profile = pb.machine_profile()
     if not profile["presence"]["llmfit"]:
-        fail("llmfit is not installed.")
-        return 1
+        if not _ensure_llmfit():
+            return 1
+        # Refresh profile after successful install.
+        profile = pb.machine_profile()
     engines = profile["presence"]["engines"] or ["ollama"]
     engine = engines[0]
     info(f"Ranking models for engine: {engine}")

@@ -37,19 +37,19 @@ Why this model:
 ### 1. Verify the box
 
 ```bash
-./bin/poc-doctor --run-codex-smoke
+claude-codex-local doctor
 ```
 
 ### 2. Inspect the machine profile
 
 ```bash
-./bin/poc-machine-profile
+ccl-bridge profile
 ```
 
 ### 3. Inspect the recommendation
 
 ```bash
-./bin/poc-recommend
+ccl-bridge recommend
 ```
 
 ### 4. Run the local Codex path
