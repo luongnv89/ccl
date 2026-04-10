@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none">
+  <!-- Rounded square background -->
+  <rect width="16" height="16" rx="3.5" fill="#111111"/>
+  <!-- Simplified starburst: 4 cardinal rays only at 16x16 scale -->
+  <line x1="8" y1="1.5" x2="8" y2="4.5"   stroke="#A1A1A1" stroke-width="0.9" stroke-linecap="round"/>
+  <line x1="8" y1="11.5" x2="8" y2="14.5" stroke="#A1A1A1" stroke-width="0.9" stroke-linecap="round"/>
+  <line x1="1.5" y1="8" x2="4.5" y2="8"   stroke="#A1A1A1" stroke-width="0.9" stroke-linecap="round"/>
+  <line x1="11.5" y1="8" x2="14.5" y2="8" stroke="#A1A1A1" stroke-width="0.9" stroke-linecap="round"/>
+  <!-- >_ prompt (neon green, small) -->
+  <path d="M5,6.5 L7,8 L5,9.5" stroke="#00FF41" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="8" y1="9.5" x2="11" y2="9.5" stroke="#00FF41" stroke-width="1" stroke-linecap="round"/>
+</svg>

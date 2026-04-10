@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Outer rounded square background for app icon -->
+  <rect width="512" height="512" rx="112" fill="#0A0A0A"/>
+  <!-- Inner mark scaled up: base 64x64 → 360x360, centered in 512
+       scale = 360/64 = 5.625
+       translate: (512-360)/2 = 76 on each axis
+       But internal mark rect starts at 0,0 so just scale and translate to center -->
+  <g transform="translate(76,76) scale(5.625)">
+    <rect width="64" height="64" rx="14" fill="#111111"/>
+    <!-- Starburst rays (stroke-width divided by scale: 2.2/5.625 ≈ 0.39, 2.8/5.625 ≈ 0.498) -->
+    <line x1="32" y1="6"  x2="32" y2="18" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="6"  y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="0.39" stroke-linecap="round"/>
+    <!-- >_ prompt -->
+    <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="0.498" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="0.498" stroke-linecap="round"/>
+  </g>
+</svg>

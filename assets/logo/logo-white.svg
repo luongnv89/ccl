@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 72" fill="none">
+  <g transform="translate(4,4)">
+    <!-- Mark background: transparent (white version — no fill so it works on any dark bg) -->
+    <rect width="64" height="64" rx="14" fill="rgba(255,255,255,0.08)" stroke="#FFFFFF" stroke-width="1.5"/>
+    <!-- Starburst rays — white -->
+    <line x1="32" y1="6"  x2="32" y2="18" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="32" y1="46" x2="32" y2="58" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="6"  y1="32" x2="18" y2="32" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="46" y1="32" x2="58" y2="32" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="rgba(255,255,255,0.5)" stroke-width="2.2" stroke-linecap="round"/>
+    <!-- >_ prompt — white full opacity -->
+    <path d="M22,27 L28,32 L22,37" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <line x1="31" y1="37" x2="39" y2="37" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round"/>
+  </g>
+  <!-- Wordmark: CCL white -->
+  <text x="84" y="47" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="34" fill="#FFFFFF" letter-spacing="-1">CCL</text>
+</svg>
