@@ -20,7 +20,10 @@ The wizard is idempotent and resumable: state is checkpointed to
 from __future__ import annotations
 
 import json
+import os
+import re
 import shlex
+import stat
 import subprocess
 import sys
 from collections.abc import Callable
@@ -49,6 +52,13 @@ GUIDE_PATH = ROOT / "guide.md"
 
 
 @dataclass
+class WireResult:
+    argv: list[str]
+    env: dict[str, str]
+    effective_tag: str
+
+
+@dataclass
 class WizardState:
     # which steps have completed successfully
     completed_steps: list[str] = field(default_factory=list)
@@ -68,6 +78,12 @@ class WizardState:
     )  # llmfit candidate metadata when available
     # launch command the wizard wired up
     launch_command: list[str] = field(default_factory=list)
+    # serialized WireResult: {"argv": [...], "env": {...}, "effective_tag": "..."}
+    wire_result: dict[str, Any] | None = None
+    # alias install metadata
+    helper_script_path: str = ""
+    shell_rc_path: str = ""
+    alias_names: list[str] = field(default_factory=list)
     # smoke test + verify outputs
     smoke_test_result: dict[str, Any] = field(default_factory=dict)
     verify_result: dict[str, Any] = field(default_factory=dict)
@@ -446,9 +462,7 @@ def _find_model_auto(engine: str, profile: dict[str, Any] | None = None) -> dict
     # 1. Already-installed model for this engine — most useful default.
     if engine == "ollama":
         installed = [
-            m["name"]
-            for m in profile.get("ollama", {}).get("models", [])
-            if m.get("local") and pb.NOTHINK_VARIANT_SUFFIX not in m["name"].split(":", 1)[0]
+            m["name"] for m in profile.get("ollama", {}).get("models", []) if m.get("local")
         ]
         # Prefer recognisable coding models first.
         for preferred in (
@@ -692,115 +706,232 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
 
     if result is None:
         return False
-    cmd, effective_tag = result
-    if effective_tag != tag:
-        info(f"Using patched model tag [bold]{effective_tag}[/bold] (was [dim]{tag}[/dim])")
-        state.engine_model_tag = effective_tag
-    state.launch_command = cmd
-    ok(f"Harness wired. Launch command: [bold]{' '.join(shlex.quote(x) for x in cmd)}[/bold]")
+
+    state.wire_result = {
+        "argv": result.argv,
+        "env": result.env,
+        "effective_tag": result.effective_tag,
+    }
+    state.engine_model_tag = result.effective_tag
+    alias_short = "cc" if harness == "claude" else "cx"
+    state.launch_command = [alias_short]
+    ok(f"Harness wired. argv: [bold]{' '.join(shlex.quote(x) for x in result.argv)}[/bold]")
     state.mark("2.6")
     return True
 
 
-def _wire_claude(engine: str, tag: str) -> tuple[list[str], str] | None:
-    """
-    Write an isolated Claude Code settings.json under the state HOME pointing at
-    the local engine. Critically sets CLAUDE_CODE_ATTRIBUTION_HEADER=0 in
-    settings.json (NOT as a shell env var — the shell value is ignored by Claude Code).
-    """
-    settings_dir = pb.STATE_HOME / ".claude"
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    settings_file = settings_dir / "settings.json"
-
-    effective_tag = tag
-
-    if engine == "ollama":
-        base_url = "http://localhost:11434"
-        auth_token = "ollama"
-        # Claude Code sends a `thinking` payload that breaks Qwen3 and wastes
-        # latency on Gemma4. Bake a derived Ollama model with the no-think /
-        # 64K-ctx fix so verify (2.7) and day-to-day use behave sanely.
-        info("Checking for Claude-Code-friendly Ollama variant of the model...")
-        effective_tag, patch_info = pb.ollama_ensure_nothink_variant(tag)
-        if patch_info["patched"]:
-            if patch_info.get("reused"):
-                ok(f"Reusing existing patched variant [bold]{effective_tag}[/bold]")
-            else:
-                ok(f"Built patched variant [bold]{effective_tag}[/bold] from {tag}")
-        else:
-            info(f"No Ollama variant patch applied ({patch_info['reason']}).")
-    elif engine == "lmstudio":
-        base_url = f"http://localhost:{pb.LMS_SERVER_PORT}"
-        auth_token = "lmstudio"
-        if _lmstudio_needs_nothink(tag):
-            warn(
-                "LM Studio + Claude Code is known to 400 on Qwen3 reasoning models "
-                "because Claude Code sends a `thinking` payload the server cannot "
-                "disable via `--chat-template-kwargs`. If verify (2.7) fails with "
-                "`400 thinking.type`, switch to engine=ollama (auto-patched) or run "
-                "llama.cpp with `--chat-template-kwargs '{\"enable_thinking\": false}'`."
-            )
-    elif engine == "llamacpp":
-        base_url = "http://localhost:8001"
-        auth_token = "sk-local"
-    else:
-        fail(f"Unknown engine for Claude wire-up: {engine}")
-        return None
-
-    settings = {
-        "env": {
-            "ANTHROPIC_BASE_URL": base_url,
-            "ANTHROPIC_AUTH_TOKEN": auth_token,
-            "ANTHROPIC_API_KEY": auth_token,
-            "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-            # Whitelist the local model ID so Claude Code skips its built-in
-            # allowlist check. Without this, `claude --model <local-tag>` prints
-            # "There's an issue with the selected model" before any request is
-            # sent to ANTHROPIC_BASE_URL. See:
-            # https://code.claude.com/docs/en/model-config#add-a-custom-model-option
-            "ANTHROPIC_CUSTOM_MODEL_OPTION": effective_tag,
-            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Local ({engine}) {effective_tag}",
-            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
-                f"Local model served by {engine} at {base_url}"
-            ),
-        },
-    }
-    settings_file.write_text(json.dumps(settings, indent=2) + "\n")
-    info(f"Wrote {settings_file}")
-
-    # Daily-use launch command must preserve the isolated HOME so Claude Code
-    # actually reads the settings.json above. Without HOME isolation, Claude
-    # Code reads the user's real ~/.claude/settings.json, hits the cloud API,
-    # and rejects the local model name. The leading `HOME=<path>` is bash
-    # inline-env syntax — launch_command is only ever rendered for display
-    # (never exec'd directly), so embedding the env assignment here is safe
-    # and keeps the copy-paste command self-contained.
-    launch_cmd = [
-        f"HOME={pb.STATE_HOME}",
-        "claude",
-        "--model",
-        effective_tag,
-    ]
-    return launch_cmd, effective_tag
-
-
-def _lmstudio_needs_nothink(tag: str) -> bool:
+def _model_known_incompatible_with_claude_code(tag: str) -> bool:
     t = tag.lower()
     return "qwen3" in t
 
 
-def _wire_codex(engine: str, tag: str) -> tuple[list[str], str] | None:
+def _wire_claude(engine: str, tag: str) -> WireResult | None:
+    """
+    Build a WireResult for the Claude harness against the chosen engine.
+
+    For Ollama we delegate to `ollama launch claude` which sets the right env
+    vars internally and execs the user's real `claude` binary against the
+    user's real `~/.claude`. For LM Studio / llama.cpp we set the inline env
+    explicitly because `ollama launch` does not apply.
+    """
+    if _model_known_incompatible_with_claude_code(tag):
+        warn(
+            f"Model '{tag}' is known to misbehave with Claude Code. Claude Code sends\n"
+            "a `thinking` payload that Qwen3 reasoning models interpret as an\n"
+            "unterminated <think> block, blowing the context budget. Recommended\n"
+            "alternatives: gemma3:27b, qwen2.5-coder:32b."
+        )
+
     if engine == "ollama":
-        pb.configure_ollama_integration("codex", tag)
-        return ["codex", "--oss", "-m", tag], tag
+        return WireResult(
+            argv=["ollama", "launch", "claude", "--model", tag],
+            env={},
+            effective_tag=tag,
+        )
     if engine == "lmstudio":
-        pb.configure_lmstudio_integration("codex", tag)
-        return ["codex", "-m", tag], tag
+        env = {
+            "ANTHROPIC_BASE_URL": f"http://localhost:{pb.LMS_SERVER_PORT}",
+            "ANTHROPIC_API_KEY": "lmstudio",  # pragma: allowlist secret
+            "ANTHROPIC_AUTH_TOKEN": "lmstudio",  # pragma: allowlist secret
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Local (lmstudio) {tag}",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                f"Local model served by lmstudio at http://localhost:{pb.LMS_SERVER_PORT}"
+            ),
+            "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+        return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
     if engine == "llamacpp":
-        return ["codex", "-m", tag], tag
+        base_url = "http://localhost:8001"
+        env = {
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_API_KEY": "sk-local",  # pragma: allowlist secret
+            "ANTHROPIC_AUTH_TOKEN": "sk-local",  # pragma: allowlist secret
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Local (llamacpp) {tag}",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                f"Local model served by llamacpp at {base_url}"
+            ),
+            "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+        return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
+    fail(f"Unknown engine for Claude wire-up: {engine}")
+    return None
+
+
+def _wire_codex(engine: str, tag: str) -> WireResult | None:
+    if engine == "ollama":
+        return WireResult(
+            argv=[
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "--oss",
+                "--local-provider=ollama",
+            ],
+            env={},
+            effective_tag=tag,
+        )
+    if engine == "lmstudio":
+        env = {
+            "OPENAI_BASE_URL": f"http://localhost:{pb.LMS_SERVER_PORT}/v1",
+            "OPENAI_API_KEY": "lmstudio",  # pragma: allowlist secret
+        }
+        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
+    if engine == "llamacpp":
+        env = {
+            "OPENAI_BASE_URL": "http://localhost:8001/v1",
+            "OPENAI_API_KEY": "sk-local",  # pragma: allowlist secret
+        }
+        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
     fail(f"Unknown engine for Codex wire-up: {engine}")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Step 2.65 — Helper script + shell aliases
+# ---------------------------------------------------------------------------
+
+
+_ALIAS_BLOCK_RE = re.compile(
+    r"^# >>> claude-codex-local >>>.*?^# <<< claude-codex-local <<<\n?",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _write_helper_script(harness: str, result: WireResult) -> Path:
+    """
+    Write a small bash helper that exports any inline env and execs the
+    wire-result argv. Returns the absolute path to the helper.
+    """
+    pb.ensure_state_dirs()
+    name = "cc" if harness == "claude" else "cx"
+    path = pb.STATE_DIR / "bin" / name
+
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Managed by claude-codex-local wizard. Re-run the wizard to update.",
+        "set -e",
+    ]
+    if result.env:
+        for key, value in result.env.items():
+            lines.append(f"export {key}={shlex.quote(value)}")
+    quoted_argv = " ".join(shlex.quote(part) for part in result.argv)
+    lines.append(f'exec {quoted_argv} "$@"')
+    body = "\n".join(lines) + "\n"
+    path.write_text(body)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def _alias_block(script_path: Path, harness: str) -> tuple[str, list[str]]:
+    quoted_path = shlex.quote(str(script_path))
+    names = ["cc", "claude-local"] if harness == "claude" else ["cx", "codex-local"]
+    body_lines = [
+        "# >>> claude-codex-local >>>",
+        "# Managed by claude-codex-local wizard. Re-run the wizard to update,",
+        "# or delete this block to remove the aliases.",
+    ]
+    for n in names:
+        body_lines.append(f"alias {n}={quoted_path}")
+    body_lines.append("# <<< claude-codex-local <<<")
+    return "\n".join(body_lines) + "\n", names
+
+
+def _detect_shell_rc() -> Path | None:
+    shell = os.environ.get("SHELL", "")
+    home = Path.home()
+    if shell.endswith("zsh") or "zsh" in shell:
+        rc = home / ".zshrc"
+        if not rc.exists():
+            rc.touch()
+        return rc
+    if shell.endswith("bash") or "bash" in shell:
+        rc = home / ".bashrc"
+        if rc.exists():
+            return rc
+        bp = home / ".bash_profile"
+        if bp.exists():
+            return bp
+        rc.touch()
+        return rc
+    return None
+
+
+def _install_shell_aliases(
+    script_path: Path, harness: str, non_interactive: bool
+) -> tuple[Path | None, list[str]]:
+    block, names = _alias_block(script_path, harness)
+    rc_path = _detect_shell_rc()
+    if rc_path is None:
+        warn("Unsupported shell — please add the following to your shell rc manually:")
+        console.print(block)
+        return None, names
+
+    if not non_interactive:
+        proceed = questionary.confirm(f"Install aliases into {rc_path}?", default=True).ask()
+        if not proceed:
+            info("Skipped alias install. Add this block manually to enable the aliases:")
+            console.print(block)
+            return None, names
+
+    existing = rc_path.read_text() if rc_path.exists() else ""
+    if _ALIAS_BLOCK_RE.search(existing):
+        new_text = _ALIAS_BLOCK_RE.sub(block, existing, count=1)
+    else:
+        sep = "" if existing.endswith("\n") or not existing else "\n"
+        prefix = "\n" if existing else ""
+        new_text = existing + sep + prefix + block
+    rc_path.write_text(new_text)
+    ok(f"Installed aliases into {rc_path}: {', '.join(names)}")
+    return rc_path, names
+
+
+def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False) -> bool:
+    header("Step 2.65 — Install helper script + shell aliases")
+    if not state.wire_result:
+        fail("No wire result on state — run step 2.6 first.")
+        return False
+    result = WireResult(
+        argv=list(state.wire_result.get("argv", [])),
+        env=dict(state.wire_result.get("env", {})),
+        effective_tag=state.wire_result.get("effective_tag", ""),
+    )
+    harness = state.primary_harness
+    script_path = _write_helper_script(harness, result)
+    state.helper_script_path = str(script_path)
+    ok(f"Wrote helper script: [bold]{script_path}[/bold]")
+
+    rc_path, names = _install_shell_aliases(script_path, harness, non_interactive)
+    state.alias_names = names
+    state.shell_rc_path = str(rc_path) if rc_path else ""
+    state.mark("2.65")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -811,39 +942,53 @@ def _wire_codex(engine: str, tag: str) -> tuple[list[str], str] | None:
 def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.7 — Verify launch command end-to-end")
     harness = state.primary_harness
+    engine = state.primary_engine
     tag = state.engine_model_tag
-    env = pb.state_env()
-    # Make sure Anthropic env vars from host do NOT leak in
-    for leaky in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
-        env.pop(leaky, None)
+    if not state.wire_result:
+        fail("No wire result on state — run step 2.6 first.")
+        return False
+    wire_env: dict[str, str] = dict(state.wire_result.get("env", {}))
 
     if harness == "claude":
-        settings_path = pb.STATE_HOME / ".claude" / "settings.json"
-        cmd = [
-            "claude",
-            "--bare",
-            "--settings",
-            str(settings_path),
-            "--model",
-            tag,
-            "--dangerously-skip-permissions",
-            "-p",
-            "Reply with exactly READY",
-        ]
+        if engine == "ollama":
+            cmd = [
+                "ollama",
+                "launch",
+                "claude",
+                "--model",
+                tag,
+                "--",
+                "-p",
+                "Reply with exactly READY",
+                "--model",
+                tag,
+            ]
+        else:
+            cmd = list(state.wire_result["argv"]) + ["-p", "Reply with exactly READY"]
     elif harness == "codex":
-        cmd = ["codex", "exec", "--skip-git-repo-check", "-m", tag]
-        if state.primary_engine == "ollama":
+        if engine == "ollama":
+            cmd = [
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "exec",
+                "--skip-git-repo-check",
+                "--oss",
+                "--local-provider=ollama",
+                "Reply with exactly READY",
+            ]
+        else:
             cmd = [
                 "codex",
                 "exec",
                 "--skip-git-repo-check",
-                "--oss",
                 "-m",
                 tag,
                 "Reply with exactly READY",
             ]
-        else:
-            cmd.append("Reply with exactly READY")
     else:
         fail(f"Unknown harness: {harness}")
         return False
@@ -854,7 +999,7 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
             cmd,
             capture_output=True,
             text=True,
-            env=env,
+            env={**os.environ, **wire_env},
             timeout=300,
         )
     except subprocess.TimeoutExpired:
@@ -896,70 +1041,72 @@ This file was generated by `claude-codex-local` on your machine.
 - **Harness**: `{harness}`
 - **Engine**: `{engine}`
 - **Model**: `{model}`
-- **Isolated HOME**: `{state_home}`
+- **Aliases**: `{alias_short}`, `{alias_long}` (installed in `{shell_rc}`)
+- **Helper script**: `{helper_script}`
 
 ## Daily use
 
-Run this single command to start your local coding session:
+Open a new terminal (or `source {shell_rc}`) and run:
 
 ```bash
-{launch_cmd}
+{alias_short}
 ```
 
-The leading `HOME={state_home}` is critical: it points Claude Code at the
-isolated `.claude/settings.json` the wizard wrote, which contains the
-`ANTHROPIC_BASE_URL` override and the `ANTHROPIC_CUSTOM_MODEL_OPTION`
-whitelist for your local model ID. Without it, Claude Code reads your real
-`~/.claude/settings.json`, hits the cloud API, and rejects the local model
-name with "There's an issue with the selected model".
+That's it. The alias execs `{helper_script}`, which either runs
+`ollama launch {harness}` (Ollama path) or sets the right env vars and
+execs `{harness}` directly (LM Studio / llama.cpp path).
 
-Your official `~/.claude` and `~/.codex` directories are untouched. You can
-switch back to cloud mode at any time by running `claude` or `codex`
-directly (without the `HOME=` prefix).
+Your real `~/.claude` and `~/.codex` are used as-is, so all your skills,
+statusline, agents, plugins, and MCP servers keep working.
+
+You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 
 ## Troubleshooting
 
-- **Slow second turn in Claude Code?** Check that
-  `CLAUDE_CODE_ATTRIBUTION_HEADER=0` is set inside
-  `{state_home}/.claude/settings.json`. It will not work as a shell env var.
-- **Engine not responding?** Re-run the smoke test:
+- **`{alias_short}: command not found`?** Open a new terminal or run
+  `source {shell_rc}`.
+- **Engine not responding?** Re-run the wizard smoke test:
   ```bash
   ./bin/poc-doctor
   ```
-- **Model missing?** Re-run the wizard — it will detect the gap and offer to
-  re-download: `python3 -m wizard`
-- **Switch to a different model?** Run the standalone `find-model` helper:
+- **Want to switch models?** Re-run the wizard:
   ```bash
-  python3 -m wizard find-model
+  python3 -m wizard
   ```
 
 ## Return to official mode
 
-The wizard never mutates your global `~/.claude` or `~/.codex` config.
-Just run `claude` or `codex` directly (outside the wrapper) and you are
-back on cloud.
+Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
+`codex` directly (without `{alias_short}`) to use the cloud backend.
 
 ## Rollback
 
-To wipe all local bridge state:
+To wipe the local bridge:
 
-```bash
-rm -rf {state_dir}
-rm -f {guide_path}
-```
+1. Delete the fenced block from `{shell_rc}` (between the
+   `# >>> claude-codex-local >>>` and `# <<< claude-codex-local <<<`
+   markers).
+2. `rm -rf {state_dir}`
+3. `rm -f {guide_path}`
 """
 
 
 def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.8 — Generate personalized guide.md")
-    launch_cmd = " ".join(shlex.quote(x) for x in state.launch_command)
+    alias_names = state.alias_names or (
+        ["cc", "claude-local"] if state.primary_harness == "claude" else ["cx", "codex-local"]
+    )
+    alias_short = alias_names[0]
+    alias_long = alias_names[1] if len(alias_names) > 1 else alias_names[0]
     content = GUIDE_TEMPLATE.format(
         harness=state.primary_harness,
         engine=state.primary_engine,
         model=state.engine_model_tag,
-        state_home=pb.STATE_HOME,
+        alias_short=alias_short,
+        alias_long=alias_long,
+        shell_rc=state.shell_rc_path or "(your shell rc)",
+        helper_script=state.helper_script_path or "(helper script)",
         state_dir=pb.STATE_DIR,
-        launch_cmd=launch_cmd,
         guide_path=GUIDE_PATH,
     )
     GUIDE_PATH.write_text(content)
@@ -979,6 +1126,7 @@ STEPS: list[tuple[str, str, Callable[[WizardState, bool], bool]]] = [
     ("2.4", "Pick a model", step_2_4_pick_model),
     ("2.5", "Smoke test engine + model", step_2_5_smoke_test),
     ("2.6", "Wire up harness", step_2_6_wire_harness),
+    ("2.65", "Install helper script + shell aliases", step_2_65_install_aliases),
     ("2.7", "Verify launch command", step_2_7_verify),
     ("2.8", "Generate guide.md", step_2_8_generate_guide),
 ]
@@ -1018,11 +1166,16 @@ def run_wizard(
             fail(f"Step {step_id} ({title}) did not complete. Re-run with --resume to continue.")
             return 1
 
+    alias_short = (
+        state.alias_names[0]
+        if state.alias_names
+        else ("cc" if state.primary_harness == "claude" else "cx")
+    )
     console.print()
     console.print(
         Panel.fit(
             f"[bold green]Setup complete![/bold green]\n\n"
-            f"Launch your local coding session with:\n  [cyan]{' '.join(shlex.quote(x) for x in state.launch_command)}[/cyan]\n\n"
+            f"Open a new terminal and run: [cyan]{alias_short}[/cyan]\n\n"
             f"See [bold]{GUIDE_PATH}[/bold] for the full guide.",
             border_style="green",
         )
@@ -1123,14 +1276,14 @@ def run_doctor() -> int:
             "installed" if installed else "missing — re-run wizard to re-create/pull",
         )
 
-    # Isolated settings file (Claude only)
-    if state.primary_harness == "claude":
-        settings_path = pb.STATE_HOME / ".claude" / "settings.json"
+    # Helper script (cc / cx)
+    if state.helper_script_path:
+        script_path = Path(state.helper_script_path)
         add_row(
-            "isolated settings",
-            str(settings_path),
-            settings_path.exists(),
-            "present" if settings_path.exists() else "missing — re-run step 2.6",
+            "helper script",
+            state.helper_script_path,
+            script_path.exists(),
+            "present" if script_path.exists() else "missing — re-run step 2.65",
         )
 
     # guide.md

@@ -20,8 +20,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -136,18 +134,11 @@ class TestPocBridgeCli:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        # ensure_config would try to shell out; stub both sides.
-        monkeypatch.setattr(
-            pb,
-            "configure_ollama_integration",
-            lambda target, model: {"target": target, "model": model},
-        )
         monkeypatch.setattr(sys, "argv", ["poc_bridge", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert "profile" in data and "recommendation" in data
         assert data["recommendation"]["selected_model"] == "qwen3-coder:30b"
-        assert data["config_written"]["codex"]["model"] == "qwen3-coder:30b"
 
     def test_doctor_flags_missing_tools(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
@@ -157,40 +148,11 @@ class TestPocBridgeCli:
         bad["presence"]["engines"] = []
         monkeypatch.setattr(pb, "machine_profile", lambda: bad)
         monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
-        monkeypatch.setattr(
-            pb,
-            "configure_ollama_integration",
-            lambda target, model: {"target": target, "model": model},
-        )
         monkeypatch.setattr(sys, "argv", ["poc_bridge", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert any("Missing tool: ollama" in i for i in data["issues"])
         assert any("No suitable local coding model" in i for i in data["issues"])
-
-    def test_ensure_config_codex_ollama_writes_state(self, isolated_state, monkeypatch, capsys):
-        pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", _stub_candidates)
-        monkeypatch.setattr(
-            pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
-        )
-        monkeypatch.setattr(
-            pb,
-            "configure_ollama_integration",
-            lambda target, model: {
-                "target": target,
-                "model": model,
-                "state_dir": str(pb.STATE_DIR),
-            },
-        )
-        monkeypatch.setattr(
-            sys, "argv", ["poc_bridge", "ensure-config", "codex", "--model", "qwen3-coder:30b"]
-        )
-        pb.main()
-        data = json.loads(capsys.readouterr().out)
-        assert data["target"] == "codex"
-        assert data["model"] == "qwen3-coder:30b"
 
     def test_adapters_subcommand_lists_both(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
@@ -229,11 +191,6 @@ class TestWizardFullFlow:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        monkeypatch.setattr(
-            pb,
-            "ollama_ensure_nothink_variant",
-            lambda tag: (tag, {"patched": False, "reason": "stubbed"}),
-        )
         # step 2.7 calls subprocess.run on the verify command directly.
         monkeypatch.setattr(wiz.subprocess, "run", _stub_subprocess_success)
 
@@ -241,17 +198,34 @@ class TestWizardFullFlow:
         assert rc == 0
 
         state = wiz.WizardState.load()
-        assert set(state.completed_steps) >= {"2.1", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"}
+        assert set(state.completed_steps) >= {
+            "2.1",
+            "2.3",
+            "2.4",
+            "2.5",
+            "2.6",
+            "2.65",
+            "2.7",
+            "2.8",
+        }
         assert state.primary_harness == "claude"
         assert state.primary_engine == "ollama"
         assert state.engine_model_tag == "qwen3-coder:30b"
         assert state.verify_result["ok"] is True
 
-        # Verifies step 2.6 wrote the isolated Claude settings.json.
-        settings = pb.STATE_HOME / ".claude" / "settings.json"
-        assert settings.exists()
-        cfg = json.loads(settings.read_text())
-        assert cfg["env"]["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+        # Verifies step 2.65 wrote the helper script.
+        helper = pb.STATE_DIR / "bin" / "cc"
+        assert helper.exists()
+        assert os.access(helper, os.X_OK)
+
+        # Verifies the shell rc was updated with the alias block.
+        from pathlib import Path
+
+        rc_path = Path.home() / ".zshrc"
+        assert rc_path.exists()
+        rc_body = rc_path.read_text()
+        assert "# >>> claude-codex-local >>>" in rc_body
+        assert "alias cc=" in rc_body
 
         # Verifies step 2.8 wrote a guide.md.
         assert wiz.GUIDE_PATH.exists()
@@ -272,49 +246,11 @@ class TestWizardFullFlow:
         assert "2.5" not in state.completed_steps
         assert "2.4" in state.completed_steps
 
-    def test_resume_skips_completed_steps(self, isolated_state, monkeypatch):
-        pb, wiz, state_dir = isolated_state
-        # First run: succeed through 2.5, fail at 2.6 via a forced error.
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
-        monkeypatch.setattr(
-            pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
-        )
-
-        call_count = {"nothink": 0}
-
-        def flaky_variant(tag):
-            call_count["nothink"] += 1
-            if call_count["nothink"] == 1:
-                raise RuntimeError("simulated wire failure")
-            return tag, {"patched": False, "reason": "stubbed"}
-
-        monkeypatch.setattr(pb, "ollama_ensure_nothink_variant", flaky_variant)
-        monkeypatch.setattr(wiz.subprocess, "run", _stub_subprocess_success)
-
-        with pytest.raises(RuntimeError):
-            wiz.run_wizard(non_interactive=True)
-
-        state_before = wiz.WizardState.load()
-        assert "2.5" in state_before.completed_steps
-        assert "2.6" not in state_before.completed_steps
-
-        # Second run with --resume: should skip 2.1-2.5 and succeed at 2.6.
-        rc = wiz.run_wizard(resume=True, non_interactive=True)
-        assert rc == 0
-        state_after = wiz.WizardState.load()
-        assert "2.6" in state_after.completed_steps
-        assert "2.8" in state_after.completed_steps
-
     def test_doctor_reports_clean_state_after_setup(self, isolated_state, monkeypatch, capsys):
         pb, wiz, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
-        )
-        monkeypatch.setattr(
-            pb,
-            "ollama_ensure_nothink_variant",
-            lambda tag: (tag, {"patched": False, "reason": "stubbed"}),
         )
         monkeypatch.setattr(wiz.subprocess, "run", _stub_subprocess_success)
 
@@ -322,22 +258,17 @@ class TestWizardFullFlow:
         rc = wiz.run_doctor()
         assert rc == 0
 
-    def test_doctor_detects_missing_settings_file(self, isolated_state, monkeypatch):
+    def test_doctor_detects_missing_helper_script(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        monkeypatch.setattr(
-            pb,
-            "ollama_ensure_nothink_variant",
-            lambda tag: (tag, {"patched": False, "reason": "stubbed"}),
-        )
         monkeypatch.setattr(wiz.subprocess, "run", _stub_subprocess_success)
         wiz.run_wizard(non_interactive=True)
 
-        # Nuke the settings file and confirm doctor notices.
-        (pb.STATE_HOME / ".claude" / "settings.json").unlink()
+        # Nuke the helper script and confirm doctor notices.
+        (pb.STATE_DIR / "bin" / "cc").unlink()
         rc = wiz.run_doctor()
         assert rc == 1
 

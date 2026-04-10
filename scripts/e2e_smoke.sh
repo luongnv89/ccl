@@ -37,7 +37,6 @@ echo "=== E2E: poc_bridge ==="
 run "poc_bridge --help"                "$PY" -m poc_bridge --help
 run "poc_bridge profile --help"        "$PY" -m poc_bridge profile --help
 run "poc_bridge recommend --help"      "$PY" -m poc_bridge recommend --help
-run "poc_bridge ensure-config --help"  "$PY" -m poc_bridge ensure-config --help
 run "poc_bridge doctor --help"         "$PY" -m poc_bridge doctor --help
 run "poc_bridge adapters --help"       "$PY" -m poc_bridge adapters --help
 run "poc_bridge adapters"              "$PY" -m poc_bridge adapters

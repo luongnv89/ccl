@@ -35,7 +35,8 @@ if str(REPO_ROOT) not in sys.path:
 def isolated_state(tmp_path, monkeypatch):
     """
     Point STATE_DIR at tmp_path/state and reload poc_bridge + wizard so their
-    module-level ROOT/STATE_DIR/STATE_HOME constants pick up the override.
+    module-level ROOT/STATE_DIR constants pick up the override. Also reroutes
+    Path.home() to tmp_path so shell-alias installs land in the sandbox.
     Returns (poc_bridge_module, wizard_module, state_dir).
     """
     state_dir = tmp_path / "state"
@@ -48,6 +49,10 @@ def isolated_state(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
+    # Deterministic shell detection for the alias-installer tests.
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    # Make Path.home() resolve to the sandbox so shell-rc edits stay confined.
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
 
     # Reload poc_bridge first, then wizard (wizard imports pb).
     import poc_bridge as pb_mod

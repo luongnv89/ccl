@@ -6,7 +6,6 @@ import json
 import os
 import platform
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -17,7 +16,6 @@ from typing import Any, Protocol
 ROOT = Path(__file__).resolve().parent
 ORIG_HOME = Path(os.environ.get("HOME", str(Path.home())))
 STATE_DIR = Path(os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", ROOT / ".claude-codex-local"))
-STATE_HOME = STATE_DIR / "home"
 
 LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
 
@@ -255,17 +253,12 @@ def command_version(name: str, args: list[str] | None = None) -> dict[str, Any]:
 
 
 def state_env() -> dict[str, str]:
-    env = ensure_path()
-    env["HOME"] = str(STATE_HOME)
-    env["XDG_CONFIG_HOME"] = str(STATE_HOME / ".config")
-    env["XDG_DATA_HOME"] = str(STATE_HOME / ".local/share")
-    return env
+    return ensure_path()
 
 
 def ensure_state_dirs() -> None:
-    (STATE_HOME / ".config").mkdir(parents=True, exist_ok=True)
-    (STATE_HOME / ".local/share").mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    (STATE_DIR / "bin").mkdir(parents=True, exist_ok=True)
 
 
 def require(cmd: str) -> None:
@@ -329,155 +322,6 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
         return {"ok": False, "error": "timeout after 180s"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-
-
-def configure_ollama_integration(target: str, model: str) -> dict[str, Any]:
-    ensure_state_dirs()
-    require("ollama")
-    shell_cmd = (
-        f"printf 'n\\n' | ollama launch {shlex.quote(target)} --config --model {shlex.quote(model)}"
-    )
-    cp = run_shell(shell_cmd, env=state_env())
-    return {
-        "target": target,
-        "model": model,
-        "state_dir": str(STATE_DIR),
-        "home": str(STATE_HOME),
-        "stdout": cp.stdout.strip(),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Ollama "no-think" variant builder
-#
-# Claude Code sends a `thinking` field in its chat payload that confuses Qwen3
-# reasoning models (they emit <think> blocks that never close, blowing the
-# context budget) and wastes latency on Gemma4. The fix is to bake a derived
-# model via `ollama create` with a family-appropriate Modelfile:
-#
-#   - Qwen3 / Qwen3-Coder  → SYSTEM "/no_think" + recommended sampling
-#   - Gemma4               → no think toggle; just ensure 64K ctx + sampling
-#   - Qwen2.5-Coder        → already non-thinking; just ensure 64K ctx
-#
-# Reference: blog-posts/2026-04-03-run-claude-code-codex-local-gemma4.
-# ---------------------------------------------------------------------------
-
-NOTHINK_VARIANT_SUFFIX = "-cclocal"
-
-
-def _ollama_model_family(tag: str) -> str:
-    t = tag.lower()
-    # Strip version suffix so we match against the model name only.
-    name = t.split(":", 1)[0]
-    if name.endswith(NOTHINK_VARIANT_SUFFIX):
-        return "already-patched"
-    if "qwen3" in t:
-        return "qwen3"
-    if "qwen2.5" in t or "qwen2_5" in t:
-        return "qwen2.5"
-    if "gemma4" in t or "gemma-4" in t:
-        return "gemma4"
-    return "unknown"
-
-
-def ollama_nothink_modelfile(base_tag: str) -> str | None:
-    """
-    Return the Modelfile body for a Claude-Code-friendly variant of `base_tag`,
-    or None if no patch is needed/known for this model family.
-    """
-    family = _ollama_model_family(base_tag)
-    if family == "qwen3":
-        return (
-            f"FROM {base_tag}\n"
-            f"PARAMETER num_ctx 65536\n"
-            f"PARAMETER temperature 0.7\n"
-            f"PARAMETER top_p 0.8\n"
-            f"PARAMETER top_k 20\n"
-            f'SYSTEM "/no_think"\n'
-        )
-    if family == "gemma4":
-        return (
-            f"FROM {base_tag}\n"
-            f"PARAMETER num_ctx 65536\n"
-            f"PARAMETER temperature 1.0\n"
-            f"PARAMETER top_p 0.95\n"
-            f"PARAMETER top_k 64\n"
-        )
-    if family == "qwen2.5":
-        return f"FROM {base_tag}\nPARAMETER num_ctx 65536\n"
-    return None
-
-
-def ollama_variant_tag(base_tag: str) -> str:
-    """Return the derived tag name for the Claude-Code-friendly variant."""
-    if ":" in base_tag:
-        name, ver = base_tag.split(":", 1)
-        return f"{name}{NOTHINK_VARIANT_SUFFIX}:{ver}"
-    return f"{base_tag}{NOTHINK_VARIANT_SUFFIX}"
-
-
-def ollama_ensure_nothink_variant(base_tag: str) -> tuple[str, dict[str, Any]]:
-    """
-    Ensure a Claude-Code-friendly Ollama variant of `base_tag` exists.
-
-    Returns (effective_tag, info). If no patch is applicable or creation fails,
-    the original tag is returned unchanged and info['patched'] is False.
-    """
-    info: dict[str, Any] = {"base_tag": base_tag, "patched": False, "reason": ""}
-    body = ollama_nothink_modelfile(base_tag)
-    if body is None:
-        info["reason"] = f"no known no-think fix for '{base_tag}'"
-        return base_tag, info
-
-    variant = ollama_variant_tag(base_tag)
-
-    # Skip if the variant already exists on disk.
-    for m in parse_ollama_list():
-        if m.get("name") == variant:
-            info.update(patched=True, variant_tag=variant, reused=True)
-            return variant, info
-
-    ensure_state_dirs()
-    modelfile_path = STATE_DIR / f"Modelfile.{variant.replace(':', '_').replace('/', '_')}"
-    modelfile_path.write_text(body)
-
-    try:
-        run(["ollama", "create", variant, "-f", str(modelfile_path)], timeout=600)
-    except subprocess.TimeoutExpired:
-        info["reason"] = "ollama create timed out"
-        return base_tag, info
-    except subprocess.CalledProcessError as exc:
-        info["reason"] = f"ollama create failed: {exc.stderr or exc.stdout or exc}"
-        return base_tag, info
-    except Exception as exc:
-        info["reason"] = f"ollama create error: {exc}"
-        return base_tag, info
-
-    info.update(patched=True, variant_tag=variant, reused=False, modelfile=str(modelfile_path))
-    return variant, info
-
-
-def configure_lmstudio_integration(target: str, model: str) -> dict[str, Any]:
-    """
-    For LM Studio the 'config' step is just ensuring state dirs exist and
-    recording the selection — the server is managed separately via `lms server start`.
-    """
-    ensure_state_dirs()
-    return {
-        "target": target,
-        "model": model,
-        "runtime": "lmstudio",
-        "state_dir": str(STATE_DIR),
-        "home": str(STATE_HOME),
-        "note": "LM Studio manages its own server; use `lms server start` and `lms load` separately.",
-    }
-
-
-def ensure_config(target: str, model: str, runtime: str) -> dict[str, Any]:
-    """Dispatch to the right integration config based on runtime."""
-    if runtime == "lmstudio":
-        return configure_lmstudio_integration(target, model)
-    return configure_ollama_integration(target, model)
 
 
 # ---------------------------------------------------------------------------
@@ -1273,12 +1117,6 @@ def doctor(run_codex_smoke: bool, mode: str = "balanced") -> dict[str, Any]:
         issues.append("No suitable local coding model is installed.")
         fixes.extend(recommendation["next_steps"])
 
-    rt = recommendation["runtime"]
-    config_written: dict[str, Any] = {
-        "codex": ensure_config("codex", recommendation["selected_model"], rt),
-        "claude": ensure_config("claude", recommendation["selected_model"], rt),
-    }
-
     codex_smoke = (
         smoke_test_codex(recommendation["selected_model"], recommendation["runtime"])
         if run_codex_smoke
@@ -1294,7 +1132,6 @@ def doctor(run_codex_smoke: bool, mode: str = "balanced") -> dict[str, Any]:
         "recommendation": recommendation,
         "issues": issues,
         "fixes": fixes,
-        "config_written": config_written,
         "codex_smoke": codex_smoke,
     }
 
@@ -1325,11 +1162,6 @@ def main() -> None:
         help="Preset: balanced (default), fast (smallest/fastest), quality (highest score)",
     )
 
-    ensure_cmd = sub.add_parser("ensure-config")
-    ensure_cmd.add_argument("target", choices=["codex", "claude"])
-    ensure_cmd.add_argument("--model")
-    ensure_cmd.add_argument("--mode", choices=MODE_CHOICES, default="balanced")
-
     doctor_cmd = sub.add_parser("doctor")
     doctor_cmd.add_argument("--run-codex-smoke", action="store_true")
     doctor_cmd.add_argument("--mode", choices=MODE_CHOICES, default="balanced")
@@ -1343,10 +1175,6 @@ def main() -> None:
         print_payload(machine_profile())
     elif args.command == "recommend":
         print_payload(select_best_model(machine_profile(), args.mode))
-    elif args.command == "ensure-config":
-        rec = select_best_model(machine_profile(), args.mode)
-        model = args.model or rec["selected_model"]
-        print_payload(ensure_config(args.target, model, rec["runtime"]))
     elif args.command == "doctor":
         print_payload(doctor(args.run_codex_smoke, args.mode))
     elif args.command == "adapters":

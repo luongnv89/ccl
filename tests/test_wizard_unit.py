@@ -5,7 +5,7 @@ logic, presence checks, and the Claude/Codex wiring helpers.
 
 from __future__ import annotations
 
-import json
+import os
 
 # ---------------------------------------------------------------------------
 # WizardState persistence — roundtrip + mark + resilience to a missing file.
@@ -175,73 +175,50 @@ class TestModelAlreadyInstalled:
 
 
 # ---------------------------------------------------------------------------
-# _lmstudio_needs_nothink — tag-pattern check.
+# _model_known_incompatible_with_claude_code — tag-pattern check.
 # ---------------------------------------------------------------------------
 
 
-class TestLmstudioNeedsNothink:
-    def test_qwen3_needs_nothink(self, isolated_state):
+class TestModelIncompatibility:
+    def test_qwen3_is_incompatible(self, isolated_state):
         _, wiz, _ = isolated_state
-        assert wiz._lmstudio_needs_nothink("qwen/qwen3-coder-30b") is True
+        assert wiz._model_known_incompatible_with_claude_code("qwen/qwen3-coder-30b") is True
 
-    def test_qwen25_does_not_need_nothink(self, isolated_state):
+    def test_qwen25_is_compatible(self, isolated_state):
         _, wiz, _ = isolated_state
-        assert wiz._lmstudio_needs_nothink("qwen/qwen2.5-coder-7b") is False
+        assert wiz._model_known_incompatible_with_claude_code("qwen/qwen2.5-coder-7b") is False
 
-    def test_llama_does_not_need_nothink(self, isolated_state):
+    def test_llama_is_compatible(self, isolated_state):
         _, wiz, _ = isolated_state
-        assert wiz._lmstudio_needs_nothink("meta-llama/llama-3-8b") is False
+        assert wiz._model_known_incompatible_with_claude_code("meta-llama/llama-3-8b") is False
 
 
 # ---------------------------------------------------------------------------
-# _wire_claude — writes isolated settings.json, returns the launch command.
+# _wire_claude — returns a WireResult, no settings.json written.
 # ---------------------------------------------------------------------------
 
 
 class TestWireClaude:
-    def test_ollama_writes_settings_and_builds_cmd(self, isolated_state, monkeypatch):
-        pb, wiz, _ = isolated_state
-        # Short-circuit the no-think variant builder (no real ollama).
-        monkeypatch.setattr(
-            pb,
-            "ollama_ensure_nothink_variant",
-            lambda tag: (tag, {"patched": False, "reason": "unit test"}),
-        )
-        cmd, tag = wiz._wire_claude("ollama", "qwen3-coder:30b")
-        assert cmd == [
-            f"HOME={pb.STATE_HOME}",
-            "claude",
-            "--model",
-            "qwen3-coder:30b",
-        ]
-        assert tag == "qwen3-coder:30b"
+    def test_ollama_returns_ollama_launch_argv(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = wiz._wire_claude("ollama", "qwen3-coder:30b")
+        assert result.argv == ["ollama", "launch", "claude", "--model", "qwen3-coder:30b"]
+        assert result.env == {}
+        assert result.effective_tag == "qwen3-coder:30b"
 
-        settings_file = pb.STATE_HOME / ".claude" / "settings.json"
-        assert settings_file.exists()
-        body = json.loads(settings_file.read_text())
-        assert body["env"]["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
-        assert body["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
-        assert body["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "qwen3-coder:30b"
-        assert "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME" in body["env"]
-
-    def test_ollama_picks_patched_variant_tag(self, isolated_state, monkeypatch):
+    def test_lmstudio_returns_inline_env(self, isolated_state):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(
-            pb,
-            "ollama_ensure_nothink_variant",
-            lambda tag: ("qwen3-coder-cclocal:30b", {"patched": True, "reused": False}),
-        )
-        cmd, tag = wiz._wire_claude("ollama", "qwen3-coder:30b")
-        assert tag == "qwen3-coder-cclocal:30b"
-        assert cmd[-1] == "qwen3-coder-cclocal:30b"
+        result = wiz._wire_claude("lmstudio", "qwen/qwen2.5-coder-7b")
+        assert result.argv == ["claude", "--model", "qwen/qwen2.5-coder-7b"]
+        assert result.env["ANTHROPIC_BASE_URL"] == f"http://localhost:{pb.LMS_SERVER_PORT}"
+        assert result.env["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "qwen/qwen2.5-coder-7b"
+        assert result.env["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 
-    def test_lmstudio_uses_lms_port(self, isolated_state):
-        pb, wiz, _ = isolated_state
-        cmd, tag = wiz._wire_claude("lmstudio", "qwen/qwen3-coder-30b")
-        settings_file = pb.STATE_HOME / ".claude" / "settings.json"
-        body = json.loads(settings_file.read_text())
-        assert f"{pb.LMS_SERVER_PORT}" in body["env"]["ANTHROPIC_BASE_URL"]
-        assert body["env"]["ANTHROPIC_AUTH_TOKEN"] == "lmstudio"
+    def test_llamacpp_returns_inline_env(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = wiz._wire_claude("llamacpp", "some-gguf")
+        assert result.argv == ["claude", "--model", "some-gguf"]
+        assert result.env["ANTHROPIC_BASE_URL"] == "http://localhost:8001"
 
     def test_unknown_engine_returns_none(self, isolated_state):
         _, wiz, _ = isolated_state
@@ -249,39 +226,141 @@ class TestWireClaude:
 
 
 # ---------------------------------------------------------------------------
-# _wire_codex — dispatch by engine, with the config-writing side-effects mocked.
+# _wire_codex — returns WireResult with engine-specific argv/env.
 # ---------------------------------------------------------------------------
 
 
 class TestWireCodex:
-    def test_ollama_path(self, isolated_state, monkeypatch):
-        pb, wiz, _ = isolated_state
-        called = {}
-        monkeypatch.setattr(
-            pb,
-            "configure_ollama_integration",
-            lambda target, model: called.setdefault("args", (target, model)) or {"ok": True},
-        )
-        cmd, tag = wiz._wire_codex("ollama", "qwen3-coder:30b")
-        assert called["args"] == ("codex", "qwen3-coder:30b")
-        assert cmd == ["codex", "--oss", "-m", "qwen3-coder:30b"]
+    def test_ollama_path(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = wiz._wire_codex("ollama", "qwen3-coder:30b")
+        assert result.argv[:5] == ["ollama", "launch", "codex", "--model", "qwen3-coder:30b"]
+        assert "--oss" in result.argv
+        assert result.env == {}
 
-    def test_lmstudio_path(self, isolated_state, monkeypatch):
+    def test_lmstudio_path(self, isolated_state):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(
-            pb, "configure_lmstudio_integration", lambda target, model: {"ok": True}
-        )
-        cmd, tag = wiz._wire_codex("lmstudio", "qwen/qwen3-coder-30b")
-        assert cmd == ["codex", "-m", "qwen/qwen3-coder-30b"]
+        result = wiz._wire_codex("lmstudio", "qwen/qwen3-coder-30b")
+        assert result.argv == ["codex", "-m", "qwen/qwen3-coder-30b"]
+        assert result.env["OPENAI_BASE_URL"] == f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
+        assert result.env["OPENAI_API_KEY"] == "lmstudio"
 
     def test_llamacpp_path(self, isolated_state):
         _, wiz, _ = isolated_state
-        cmd, tag = wiz._wire_codex("llamacpp", "some-gguf")
-        assert cmd == ["codex", "-m", "some-gguf"]
+        result = wiz._wire_codex("llamacpp", "some-gguf")
+        assert result.argv == ["codex", "-m", "some-gguf"]
+        assert result.env["OPENAI_BASE_URL"] == "http://localhost:8001/v1"
 
     def test_unknown_engine(self, isolated_state):
         _, wiz, _ = isolated_state
         assert wiz._wire_codex("bogus", "x") is None
+
+
+# ---------------------------------------------------------------------------
+# Helper script writer — bash file under .claude-codex-local/bin/.
+# ---------------------------------------------------------------------------
+
+
+class TestHelperScriptWriter:
+    def test_ollama_script_uses_ollama_launch_no_exports(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["ollama", "launch", "claude", "--model", "qwen2.5-coder:7b"],
+            env={},
+            effective_tag="qwen2.5-coder:7b",
+        )
+        path = wiz._write_helper_script("claude", result)
+        body = path.read_text()
+        assert 'exec ollama launch claude --model qwen2.5-coder:7b "$@"' in body
+        assert "export " not in body
+        assert os.access(path, os.X_OK)
+
+    def test_lmstudio_script_exports_env_and_execs_claude(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude", "--model", "qwen/qwen2.5-coder-7b"],
+            env={
+                "ANTHROPIC_BASE_URL": f"http://localhost:{pb.LMS_SERVER_PORT}",
+                "ANTHROPIC_API_KEY": "lmstudio",
+            },
+            effective_tag="qwen/qwen2.5-coder-7b",
+        )
+        path = wiz._write_helper_script("claude", result)
+        body = path.read_text()
+        assert "export ANTHROPIC_BASE_URL=" in body
+        assert "exec claude --model" in body and '"$@"' in body
+        assert os.access(path, os.X_OK)
+
+
+# ---------------------------------------------------------------------------
+# Shell alias installer — fenced block, idempotent overwrite.
+# ---------------------------------------------------------------------------
+
+
+class TestShellAliasInstaller:
+    def _make_script(self, tmp_path):
+        path = tmp_path / "cc"
+        path.write_text("#!/bin/sh\necho hi\n")
+        path.chmod(0o755)
+        return path
+
+    def test_fresh_install_into_empty_rc(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text("")
+        script = self._make_script(tmp_path)
+        rc_path, names = wiz._install_shell_aliases(script, "claude", non_interactive=True)
+        assert rc_path == rc
+        body = rc.read_text()
+        assert "# >>> claude-codex-local >>>" in body
+        assert "alias cc=" in body
+        assert "alias claude-local=" in body
+        assert "cc" in names
+
+    def test_overwrite_replaces_existing_block(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text(
+            "# >>> claude-codex-local >>>\nalias cc='/old/path'\n# <<< claude-codex-local <<<\n"
+        )
+        script = self._make_script(tmp_path)
+        wiz._install_shell_aliases(script, "claude", non_interactive=True)
+        body = rc.read_text()
+        # Should be exactly one block
+        assert body.count("# >>> claude-codex-local >>>") == 1
+        assert "/old/path" not in body
+        assert str(script) in body
+
+    def test_preserves_surrounding_content(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text(
+            "export FOO=bar\n"
+            "# >>> claude-codex-local >>>\n"
+            "alias cc='/old/path'\n"
+            "# <<< claude-codex-local <<<\n"
+            "export BAZ=qux\n"
+        )
+        script = self._make_script(tmp_path)
+        wiz._install_shell_aliases(script, "claude", non_interactive=True)
+        body = rc.read_text()
+        assert "export FOO=bar" in body
+        assert "export BAZ=qux" in body
+        assert body.count("# >>> claude-codex-local >>>") == 1
+
+    def test_unknown_shell_returns_none(self, isolated_state, tmp_path, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv("SHELL", "/bin/fish")
+        script = self._make_script(tmp_path)
+        rc_path, names = wiz._install_shell_aliases(script, "claude", non_interactive=True)
+        assert rc_path is None
+        assert "cc" in names
 
 
 # ---------------------------------------------------------------------------
@@ -331,20 +410,6 @@ class TestFindModelAuto:
         }
         result = wiz._find_model_auto("ollama", profile)
         assert result["tag"] == "qwen2.5-coder:7b"
-
-    def test_skips_cclocal_variants(self, isolated_state):
-        pb, wiz, _ = isolated_state
-        profile = {
-            "ollama": {
-                "models": [
-                    {"name": f"qwen3-coder{pb.NOTHINK_VARIANT_SUFFIX}:30b", "local": True},
-                    {"name": "qwen3-coder:30b", "local": True},
-                ]
-            },
-            "lmstudio": {"models": []},
-        }
-        result = wiz._find_model_auto("ollama", profile)
-        assert result["tag"] == "qwen3-coder:30b"
 
     def test_lmstudio_prefers_coder_model(self, isolated_state):
         _, wiz, _ = isolated_state

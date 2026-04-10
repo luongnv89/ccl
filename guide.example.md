@@ -9,59 +9,53 @@
 
 ## What was set up
 
-- **Harness**: `claude`
-- **Engine**: `ollama`
-- **Model**: `<model-name>:<size>`
-- **Isolated HOME**: `<REPO_ROOT>/.claude-codex-local/home`
+- **Harness**: `<harness>`
+- **Engine**: `<engine>`
+- **Model**: `<model>:<size>`
+- **Aliases**: `cc`, `claude-local` (installed in `~/.zshrc`)
+- **Helper script**: `<REPO_ROOT>/.claude-codex-local/bin/cc`
 
 ## Daily use
 
-Run this single command to start your local coding session:
+Open a new terminal (or `source ~/.zshrc`) and run:
 
 ```bash
-HOME=<REPO_ROOT>/.claude-codex-local/home claude --model <model-name>:<size>
+cc
 ```
 
-The leading `HOME=<REPO_ROOT>/.claude-codex-local/home` is critical: it
-points Claude Code at the isolated `.claude/settings.json` the wizard
-wrote, which contains the `ANTHROPIC_BASE_URL` override and the
-`ANTHROPIC_CUSTOM_MODEL_OPTION` whitelist for your local model ID.
-Without it, Claude Code reads your real `~/.claude/settings.json`, hits
-the cloud API, and rejects the local model name with "There's an issue
-with the selected model".
+That's it. The alias execs `<REPO_ROOT>/.claude-codex-local/bin/cc`, which
+either runs `ollama launch <harness>` (Ollama path) or sets the right env
+vars and execs `<harness>` directly (LM Studio / llama.cpp path).
 
-Your official `~/.claude` and `~/.codex` directories are untouched. You
-can switch back to cloud mode at any time by running `claude` or `codex`
-directly (without the `HOME=` prefix).
+Your real `~/.claude` and `~/.codex` are used as-is, so all your skills,
+statusline, agents, plugins, and MCP servers keep working.
+
+You can still pass extra args: `cc -p "what does foo.py do?"`.
 
 ## Troubleshooting
 
-- **Slow second turn in Claude Code?** Check that
-  `CLAUDE_CODE_ATTRIBUTION_HEADER=0` is set inside
-  `<REPO_ROOT>/.claude-codex-local/home/.claude/settings.json`. It will not
-  work as a shell env var.
-- **Engine not responding?** Re-run the smoke test:
+- **`cc: command not found`?** Open a new terminal or run
+  `source ~/.zshrc`.
+- **Engine not responding?** Re-run the wizard smoke test:
   ```bash
   ./bin/poc-doctor
   ```
-- **Model missing?** Re-run the wizard — it will detect the gap and offer
-  to re-download: `python3 -m wizard`
-- **Switch to a different model?** Run the standalone `find-model` helper:
+- **Want to switch models?** Re-run the wizard:
   ```bash
-  python3 -m wizard find-model
+  python3 -m wizard
   ```
 
 ## Return to official mode
 
-The wizard never mutates your global `~/.claude` or `~/.codex` config.
-Just run `claude` or `codex` directly (outside the wrapper) and you are
-back on cloud.
+Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
+`codex` directly (without `cc`) to use the cloud backend.
 
 ## Rollback
 
-To wipe all local bridge state:
+To wipe the local bridge:
 
-```bash
-rm -rf <REPO_ROOT>/.claude-codex-local
-rm -f <REPO_ROOT>/guide.md
-```
+1. Delete the fenced block from `~/.zshrc` (between the
+   `# >>> claude-codex-local >>>` and `# <<< claude-codex-local <<<`
+   markers).
+2. `rm -rf <REPO_ROOT>/.claude-codex-local`
+3. `rm -f <REPO_ROOT>/guide.md`
