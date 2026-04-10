@@ -1,0 +1,2 @@
+questionary>=2.0
+rich>=13.0

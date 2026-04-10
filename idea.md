@@ -112,6 +112,32 @@ Use `llmfit` to:
 - local fallback config is stored separately
 - switching between official and local should be explicit and reversible
 
+## First-Run User Flow (v1.2)
+
+The tool is built around a single interactive first-run experience that takes a user from "just installed" to "working local coding session" without manual surgery.
+
+1. **Install** — user installs the tool via a single package command.
+2. **First run** — user runs the tool for the first time and is dropped into a guided, interactive flow:
+   - **2.1 Discover environment** — detect installed harnesses (Claude Code, Codex), engines (Ollama, LM Studio, llama.cpp), `llmfit`, and remaining disk space. Verify that the user has at least one harness, one engine, and `llmfit`.
+   - **2.2 Install missing pieces** — if any required component is missing, interactively ask the user which one to install and spawn a sub-process to install it.
+   - **2.3 Choose preferences** — if multiple harnesses or engines are present, ask the user to pick a primary. Save the primary choice to config but remember secondary choices as fallbacks. Users can opt to enable both Claude and Codex paths.
+   - **2.4 Pick a model** — the user drives this step. The tool asks: *"Which model do you want to use?"* and accepts one of:
+     - a direct model name (mapped into the selected engine's naming scheme if needed), or
+     - an opt-in `find-model` path that runs `llmfit` against the machine profile and ranks candidates, then lets the user pick one from the list.
+     - Once a model is chosen, the standard download/disk branches apply:
+       - if the model already exists locally → continue.
+       - if the model is missing and fits in free space → ask the user to confirm download.
+       - if the model is missing and larger than free space → ask the user to free space before downloading.
+       - if the user cancels the download → re-ask for a different model, or exit cleanly.
+     - The final choice is persisted in config. `find-model` is always available later as a standalone subcommand for users who want a recommendation on demand.
+   - **2.5 Smoke test engine + model** — run a minimal test with the selected engine and selected model to verify it actually works.
+   - **2.6 Wire up the harness** — configure the selected harness to start with the selected engine + selected model via a single command.
+   - **2.7 Verify the final command** — run an end-to-end test of the exact command the user will use day-to-day.
+   - **2.8 Write `guide.md`** — generate a short personalized guide telling the user exactly how to launch their chosen harness against the local model from now on.
+3. **Daily use** — user runs their favorite harness against the local model via the single configured command.
+
+Every step is idempotent: re-running the tool should re-use existing config, skip already-done steps, and only re-prompt on changes or failures.
+
 ## Discussion Notes
 
 ### Strong positioning insight
@@ -128,6 +154,20 @@ Make it a **backend bridge + optimizer + switcher**, not a full agent harness fr
 - local backend mode with no major workflow change
 - support Claude/Codex users directly
 - explicit switch back to official cloud tooling
+
+### Implementation language (round check)
+
+The tool is CLI-first, needs to shell out to other processes (harnesses, engines, `llmfit`), inspect hardware, probe local HTTP endpoints, drive an interactive TTY, write config files, and run on macOS + Linux (Windows later).
+
+| Language | Pros | Cons | Fit |
+|----------|------|------|-----|
+| **Bash** | Zero runtime deps, trivial to install, great at shelling out | Weak at structured data, interactive UX, hardware detection, and cross-platform quirks; brittle at scale | Poor — fine for tiny helpers, not for an 8-step interactive flow |
+| **Python** | Rich ecosystem (psutil, rich/textual, httpx), fast to build interactive flows, already the language of `llmfit` and `poc_bridge.py`, matches existing repo state | Distribution is messy (venv, pip, pyproject), slower cold start | **Strong fit** for MVP — speed of iteration matters more than binary size here |
+| **Node.js** | Great interactive CLI libs (ink, prompts, oclif), cross-platform, easy npm install | Another runtime to require, weaker hardware-introspection story than Python, not the language of `llmfit` | Reasonable alternative, but adds a second ecosystem with no clear win |
+| **Go** | Single static binary, fast, great for cross-platform CLIs, strong concurrency for parallel runtime probes | Slower to iterate on an interactive wizard, less mature TUI ecosystem, need to re-implement anything `llmfit` exposes in Python | Good for a v2 rewrite once the flow is proven |
+| **Rust** | Single static binary, strong TUI (ratatui), safe | Highest iteration cost, overkill for a setup-wizard CLI, slowest to prototype | Not recommended for MVP |
+
+**Recommendation**: build the MVP in **Python**. It matches the existing POC (`poc_bridge.py`), keeps parity with `llmfit`'s native language, and has the best libraries for a guided interactive setup (e.g. `rich`, `questionary`, `psutil`, `httpx`). Once the flow and adapters are stable, a **Go** rewrite is the natural path to a single-binary distribution without a Python runtime requirement.
 
 ### Risks already identified
 - expectation trap if marketed as “offline Claude Code”

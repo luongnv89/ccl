@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# claude-local — run the Claude CLI against a local LLM backend.
+#
+# Mirrors how codex-local works:
+#   - detect best local model via poc_bridge.py recommend
+#   - isolate Claude state under STATE_DIR so official config is untouched
+#   - proxy all arguments through to the claude CLI
+#
+# Environment overrides:
+#   CLAUDE_CODEX_LOCAL_MODEL   force a specific model name
+#   CLAUDE_CODEX_LOCAL_MODE    balanced (default) | fast | quality
+#   CLAUDE_CODEX_LOCAL_STATE_DIR  override state dir (default: <repo>/.claude-codex-local)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE_DIR="${CLAUDE_CODEX_LOCAL_STATE_DIR:-$ROOT/.claude-codex-local}"
+MODE="${CLAUDE_CODEX_LOCAL_MODE:-balanced}"
+
+REC="$(python3 "$ROOT/poc_bridge.py" recommend --mode "$MODE")"
+MODEL="${CLAUDE_CODEX_LOCAL_MODEL:-$(printf '%s' "$REC" | python3 -c 'import json,sys; print(json.load(sys.stdin)["selected_model"])')}"
+RUNTIME="$(printf '%s' "$REC" | python3 -c 'import json,sys; print(json.load(sys.stdin)["runtime"])')"
+STATUS="$(printf '%s' "$REC" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+
+if [ "$STATUS" = "download-required" ]; then
+  printf 'claude-local: no local model ready. Run: bin/poc-recommend --mode %s\n' "$MODE" >&2
+  exit 1
+fi
+
+# Map runtime to the Claude --local-provider value (Claude CLI uses same provider names as Codex).
+case "$RUNTIME" in
+  lmstudio) PROVIDER="lmstudio" ;;
+  *)        PROVIDER="ollama" ;;
+esac
+
+python3 "$ROOT/poc_bridge.py" ensure-config claude --model "$MODEL" --mode "$MODE" >/dev/null
+
+# Isolate Claude state so official ~/.claude config is never mutated.
+export HOME="$STATE_DIR/home"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+
+printf 'claude-local: runtime=%s provider=%s model=%s mode=%s state=%s\n' \
+  "$RUNTIME" "$PROVIDER" "$MODEL" "$MODE" "$STATE_DIR" >&2
+
+exec claude --local-provider "$PROVIDER" -m "$MODEL" "$@"

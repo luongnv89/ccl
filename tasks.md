@@ -1,7 +1,8 @@
 # Development Tasks
 
-> Generated from: `prd.md`
-> Generated on: 2026-04-09
+> Generated from: `prd.md` v1.2
+> Generated on: 2026-04-10
+> Implementation language: **Python** (MVP). Candidate rewrite in Go post-MVP.
 
 ## Overview
 
@@ -218,19 +219,30 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 
 ---
 
-### Task 2.4: Create setup flow
+### Task 2.4: Create interactive first-run wizard (8-step flow)
 
-**Description**: Build the actual setup command users run once to get into local mode with minimal friction.
+**Description**: Build the interactive first-run experience that takes the user from "just installed" to "working single-command local coding session" without manual surgery. This is the product's main surface area.
+
+**Sub-tasks** (map 1:1 to PRD §4.1 steps 2.1–2.8):
+
+- [ ] **2.1 Discover environment** — detect Claude Code, Codex, Ollama, LM Studio, llama.cpp, `llmfit`, and free disk space. Verify at least one harness + one engine + `llmfit` are present.
+- [ ] **2.2 Install missing components** — interactively prompt for which missing component to install and spawn a sub-process installer. Re-run discovery after each install.
+- [ ] **2.3 Pick preferences** — if multiple harnesses or engines are present, prompt for the primary. Persist the primary to config and keep secondaries as fallbacks. Allow enabling both Claude and Codex paths.
+- [ ] **2.4 Pick a model (user-first)** — ask the user which model they want to use. Default path: accept a direct model name and map it into the selected engine's scheme. Opt-in path: run `llmfit` against the machine profile, show a ranked list, and let the user pick. Expose `find-model` as a standalone subcommand too. Regardless of path, handle the download branches: already installed / fits and confirmed / too big and cleanup path / cancelled → re-ask or exit.
+- [ ] **2.5 Smoke test engine + model** — run a minimal coding prompt through the selected engine + model and fail fast on errors.
+- [ ] **2.6 Wire up harness** — write config so the selected harness starts against the selected engine + model via a single command.
+- [ ] **2.7 Verify launch command** — actually run the single launch command end-to-end and confirm success.
+- [ ] **2.8 Generate `guide.md`** — write a personalized `guide.md` with the exact launch command, harness, engine, model, and troubleshooting tips.
 
 **Acceptance Criteria**:
-- [ ] Setup runs runtime detection + machine profiling + scoring in one flow
-- [ ] Setup writes local config safely
-- [ ] Setup validates one backend connection before finishing
-- [ ] Setup output clearly tells the user what was selected and what to do next
+- [ ] The wizard is idempotent: re-running after a partial failure resumes cleanly
+- [ ] Every prompt is skippable via non-interactive flags for scripting
+- [ ] Config is written atomically and never touches official Claude/Codex config
+- [ ] Final state: either a working single-command launcher + `guide.md`, or a cancelled setup with a clear explanation
 
-**Dependencies**: Task 1.3
+**Dependencies**: Task 1.3, Task 2.1, Task 2.2, Task 2.3
 
-**PRD Reference**: F4, 4.1 First-time setup flow, 5.1 Performance
+**PRD Reference**: F4, F15, F16, F17, F18, F19, F20, F21, §4.1 First-time setup flow
 
 ---
 
@@ -385,6 +397,24 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 - PRD reference: 9.2 Assumptions
 
 ---
+
+## Technical Decisions
+
+### Implementation language: Python (MVP)
+
+The MVP is built in **Python**, distributed via `pipx` or a thin install script. Rationale:
+
+- Matches the existing `poc_bridge.py` and `llmfit` ecosystem in this repo.
+- Best-in-class interactive-CLI libraries for the 8-step wizard (`rich`, `questionary`, `textual`).
+- Mature hardware introspection via `psutil`.
+- Fastest iteration path while the flow and adapters are still being proven.
+
+Alternatives considered:
+
+- **Bash** — rejected; too fragile for a structured interactive wizard.
+- **Node.js** — viable, but adds a second ecosystem with no clear advantage over Python for this workload.
+- **Go** — best candidate for a **v2 rewrite** once the flow stabilizes and single-binary distribution becomes more valuable than iteration speed.
+- **Rust** — overkill for a setup wizard at MVP stage.
 
 ## Ambiguous Requirements
 

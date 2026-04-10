@@ -11,7 +11,7 @@ Core idea:
 
 This repo now has a real POC for the narrowest sensible path:
 
-- runtime: **Ollama**
+- runtimes: **LM Studio (MLX, preferred on Apple Silicon)** and **Ollama (fallback)**
 - real proved harness: **Codex CLI**
 - config-prepared harness: **Claude Code**
 - model-fit helper: **llmfit**
@@ -19,50 +19,56 @@ This repo now has a real POC for the narrowest sensible path:
 
 ## Quickstart
 
-### Prereqs assumed
+### Prereqs
 
-Already installed on the machine:
+At least one harness (Claude Code or Codex), at least one engine (Ollama, LM
+Studio, or llama.cpp), and `llmfit` on `PATH`. The wizard will tell you what's
+missing and how to install it.
 
-- `ollama`
-- `claude`
-- `codex`
+### First run (interactive wizard)
 
-Installed during this POC and expected on `PATH`:
-
-- `llmfit` (tested with `0.9.3`)
-
-### Minimal setup
-
-Pull the tiny local coder model if it is not already present:
+Install the Python dependencies (one-time):
 
 ```bash
-ollama pull qwen2.5-coder:0.5b
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-Inspect the machine and recommendation:
+Run the 8-step interactive setup:
 
 ```bash
-./bin/poc-machine-profile
-./bin/poc-recommend
+./bin/claude-codex-local
 ```
 
-Run the doctor + smoke test:
+The wizard will:
+
+1. discover what you already have (harnesses, engines, llmfit, free disk)
+2. tell you what's missing and how to install it
+3. ask which harness + engine you want to use
+4. ask which model you want (or help you pick via `llmfit`)
+5. smoke-test the engine with that model
+6. wire up an **isolated** harness config (your real `~/.claude` / `~/.codex` are untouched)
+7. verify the launch command works end-to-end
+8. write a personalized `guide.md` with your exact daily-use command
+
+### Useful flags
 
 ```bash
-./bin/poc-doctor --run-codex-smoke
-./bin/codex-local exec --skip-git-repo-check 'reply with exactly READY'
+./bin/claude-codex-local setup --harness claude --engine ollama   # skip the prefs picker
+./bin/claude-codex-local setup --non-interactive                  # CI-friendly
+./bin/claude-codex-local setup --resume                           # pick up after a failed step
+./bin/claude-codex-local find-model                               # standalone llmfit recommendation
 ```
 
-Launch the local Codex path:
+### Legacy POC helpers
+
+The earlier POC scripts still work for one-off diagnostics:
 
 ```bash
-./bin/codex-local
-```
-
-Prepare the local Claude config path:
-
-```bash
-./bin/claude-local-config
+./bin/poc-machine-profile   # dump the full machine profile as JSON
+./bin/poc-doctor            # run the old doctor + Codex smoke test
+./bin/poc-recommend         # llmfit-only recommendation (older shape)
+./bin/codex-local           # legacy Codex wrapper (pre-wizard)
 ```
 
 ## Repo-local state
@@ -81,6 +87,7 @@ You can override that with `CLAUDE_CODEX_LOCAL_STATE_DIR`.
 - `validate.md`
 - `prd.md`
 - `tasks.md`
+- `docs/poc-wizard.md` — **current** 8-step wizard architecture
 - `docs/poc-bootstrap.md`
 - `docs/poc-architecture.md`
 - `docs/poc-proof.md`

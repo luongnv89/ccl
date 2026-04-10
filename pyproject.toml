@@ -1,0 +1,19 @@
+[project]
+name = "claude-codex-local"
+version = "0.2.0"
+description = "Local backend bridge for Claude Code and Codex."
+requires-python = ">=3.10"
+dependencies = [
+  "questionary>=2.0",
+  "rich>=13.0",
+]
+
+[project.scripts]
+claude-codex-local = "poc_bridge:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["poc_bridge", "wizard"]

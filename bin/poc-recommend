@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Usage: poc-recommend [--mode balanced|fast|quality]
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec python3 "$ROOT/poc_bridge.py" recommend "$@"

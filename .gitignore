@@ -1,3 +1,5 @@
 .tmp/
 .claude-codex-local/
 __pycache__/
+guide.md
+.venv/

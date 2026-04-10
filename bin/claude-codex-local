@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# claude-codex-local — interactive first-run wizard entry point.
+#
+# Prefers the repo-local virtualenv (.venv) for questionary + rich,
+# then falls back to the system python3.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  PY="$ROOT/.venv/bin/python"
+else
+  PY="${PYTHON:-python3}"
+fi
+
+exec "$PY" "$ROOT/wizard.py" "$@"
