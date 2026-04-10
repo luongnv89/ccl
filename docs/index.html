@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>claude-codex-local — Your AI coding tools, running locally</title>
-  <meta name="description" content="A local backend bridge for Claude Code and Codex CLI. One setup wizard. One alias. Your full workflow intact — even when the cloud quota runs out." />
+  <title>claude-codex-local — Hit your limit? Need privacy? Just swap the model.</title>
+  <meta name="description" content="When quotas hit or code can't leave your machine — one alias swaps Claude Code or Codex to a local model. Every skill, agent, and MCP server intact." />
   <meta property="og:title" content="claude-codex-local" />
-  <meta property="og:description" content="Your Claude Code & Codex, now running locally. Zero workflow change." />
+  <meta property="og:description" content="Hit your limit? Need privacy? Just swap the model — everything else stays." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
@@ -183,8 +183,36 @@
 
     /* ── Hero ───────────────────────────────────────────────── */
     #hero {
-      padding: 120px 0 96px;
-      text-align: center;
+      padding: 100px 0 80px;
+    }
+
+    .hero-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .hero-left {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      text-align: left;
+    }
+
+    .hero-right {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    @media (max-width: 860px) {
+      .hero-layout {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+      .hero-left { align-items: center; text-align: center; }
+      .hero-right { justify-content: center; }
     }
 
     .hero-badge {
@@ -214,7 +242,7 @@
     }
 
     h1.hero-headline {
-      font-size: clamp(32px, 6vw, 64px);
+      font-size: clamp(24px, 4vw, 44px);
       font-weight: 800;
       line-height: 1.1;
       letter-spacing: -0.02em;
@@ -225,8 +253,8 @@
       margin-right: auto;
     }
 
-    h1.hero-headline .accent-green { color: var(--green); }
-    h1.hero-headline .accent-cyan  { color: var(--cyan); }
+    h1.hero-headline .accent-claude { color: #D97757; }  /* Anthropic / Claude Code brand coral */
+    h1.hero-headline .accent-codex  { color: #58a6ff; }  /* Codex CLI brand blue */
 
     .hero-sub {
       font-size: clamp(16px, 2.5vw, 20px);
@@ -294,8 +322,9 @@
 
     /* ── Terminal preview ───────────────────────────────────── */
     .hero-terminal {
-      max-width: 680px;
-      margin: 64px auto 0;
+      width: 100%;
+      max-width: 520px;
+      margin: 0;
       background: #010409;
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
@@ -850,75 +879,104 @@
 <!-- ── Hero ─────────────────────────────────────────────────── -->
 <section id="hero">
   <div class="container">
-    <div class="hero-badge reveal">
-      <span class="hero-badge-dot"></span>
-      v0.2.0 Alpha · Open Source
-    </div>
+    <div class="hero-layout">
 
-    <h1 class="hero-headline reveal">
-      Your <span class="accent-green">Claude Code</span> &amp; <span class="accent-cyan">Codex</span>,<br>
-      Now Running Locally
-    </h1>
-
-    <p class="hero-sub reveal">
-      One setup wizard. One alias. Your full workflow intact —
-      even when the cloud quota runs out.
-    </p>
-
-    <div class="hero-actions reveal">
-      <a href="#install" class="btn-primary">
-        Get Started Free
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 8h10M9 4l4 4-4 4"/>
-        </svg>
-      </a>
-      <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="btn-secondary">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        View on GitHub
-      </a>
-    </div>
-
-    <div class="trust-bar reveal">
-      <span>MIT License</span>
-      <span class="trust-sep">·</span>
-      <span>Python 3.10+</span>
-      <span class="trust-sep">·</span>
-      <span>Ollama</span>
-      <span class="trust-sep">·</span>
-      <span>LM Studio</span>
-      <span class="trust-sep">·</span>
-      <span>llama.cpp</span>
-    </div>
-
-    <div class="hero-terminal reveal">
-      <div class="term-titlebar">
-        <div class="term-dots">
-          <div class="term-dot red"></div>
-          <div class="term-dot yellow"></div>
-          <div class="term-dot green"></div>
+      <!-- Left: message + CTA -->
+      <div class="hero-left">
+        <div class="hero-badge reveal">
+          <span class="hero-badge-dot"></span>
+          v0.2.0 Alpha · Open Source
         </div>
-        <div class="term-title">bash — terminal</div>
-      </div>
-      <div class="term-body">
-        <div class="term-line">
-          <span class="term-ps1">~/projects $</span>
-          <span class="term-cmd">claude-codex-local</span>
+
+        <h1 class="hero-headline reveal">
+          Hit your limit? Need privacy?<br>
+          <span class="accent-claude">Just swap the model.</span>
+        </h1>
+
+        <p class="hero-sub reveal">
+          One alias. <span class="accent-claude">Claude Code</span> or <span class="accent-codex">Codex</span> on a local model.
+          Skills, agents, MCP servers — all intact.
+        </p>
+
+        <div class="hero-actions reveal">
+          <a href="#install" class="btn-primary">
+            Get Started Free
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 8h10M9 4l4 4-4 4"/>
+            </svg>
+          </a>
+          <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            View on GitHub
+          </a>
         </div>
-        <div class="term-out cyan">✦ claude-codex-local v0.2.0</div>
-        <div class="term-out dim">  Discovering your environment…</div>
-        <div class="term-out green">  ✓ Ollama detected (v0.3.12)</div>
-        <div class="term-out green">  ✓ Claude Code detected</div>
-        <div class="term-out green">  ✓ llmfit available</div>
-        <div class="term-out">  ─────────────────────────────</div>
-        <div class="term-out orange">  ★ Recommended model: gemma4:26b</div>
-        <div class="term-out dim">    Fits your 32GB RAM · 4-bit quant</div>
-        <div class="term-out">  ─────────────────────────────</div>
-        <div class="term-line" style="margin-top:4px">
-          <span class="term-ps1">~/projects $</span>
-          <span class="term-cmd">cc</span>
-          <span class="cursor"></span>
+
+        <div class="trust-bar reveal">
+          <span>MIT License</span>
+          <span class="trust-sep">·</span>
+          <span>Python 3.10+</span>
+          <span class="trust-sep">·</span>
+          <span>Ollama</span>
+          <span class="trust-sep">·</span>
+          <span>LM Studio</span>
+          <span class="trust-sep">·</span>
+          <span>llama.cpp</span>
         </div>
       </div>
+
+      <!-- Right: terminal demo -->
+      <div class="hero-right">
+        <div class="hero-terminal reveal">
+          <div class="term-titlebar">
+            <div class="term-dots">
+              <div class="term-dot red"></div>
+              <div class="term-dot yellow"></div>
+              <div class="term-dot green"></div>
+            </div>
+            <div class="term-title">bash — terminal</div>
+          </div>
+          <div class="term-body" style="padding:0;background:#1c1c2e;">
+            <!-- main content area -->
+            <div style="padding:16px 20px;">
+              <div style="color:#7c7c9a;font-size:13px;margin-bottom:12px;">cc</div>
+              <div style="color:#9090a8;font-size:13px;margin-bottom:14px;">Launching Claude Code with gemma4:26b...</div>
+              <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:18px;">
+                <!-- red pixel robot SVG -->
+                <svg width="36" height="36" viewBox="0 0 8 8" style="image-rendering:pixelated;flex-shrink:0;" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="1" y="0" width="1" height="1" fill="#cc3333"/>
+                  <rect x="6" y="0" width="1" height="1" fill="#cc3333"/>
+                  <rect x="1" y="1" width="6" height="1" fill="#cc3333"/>
+                  <rect x="0" y="2" width="8" height="3" fill="#cc3333"/>
+                  <rect x="1" y="3" width="1" height="1" fill="#1c1c2e"/>
+                  <rect x="6" y="3" width="1" height="1" fill="#1c1c2e"/>
+                  <rect x="3" y="4" width="2" height="1" fill="#1c1c2e"/>
+                  <rect x="1" y="5" width="2" height="1" fill="#cc3333"/>
+                  <rect x="5" y="5" width="2" height="1" fill="#cc3333"/>
+                  <rect x="1" y="6" width="2" height="2" fill="#cc3333"/>
+                  <rect x="5" y="6" width="2" height="2" fill="#cc3333"/>
+                </svg>
+                <div style="font-family:var(--mono);font-size:13px;line-height:1.7;">
+                  <div><span style="color:#e8e8f0;font-weight:600;">Claude Code</span> <span style="color:#6c6c84;">v2.1.100</span></div>
+                  <div style="color:#6c6c84;">gemma4:26b with medium effort · API Usage Billing</div>
+                  <div style="color:#6c6c84;">~/myproject/my-app</div>
+                </div>
+              </div>
+              <div style="border-top:1px solid #2e2e46;margin:0 -20px;"></div>
+              <div style="padding-top:12px;display:flex;align-items:center;gap:8px;">
+                <span style="color:#e8e8f0;font-size:14px;">❯</span>
+                <span style="display:inline-block;width:9px;height:16px;background:#e8e8f0;animation:blink 1.1s step-end infinite;vertical-align:middle;"></span>
+              </div>
+              <div style="border-top:1px solid #2e2e46;margin:12px -20px 0;"></div>
+            </div>
+            <!-- status bar -->
+            <div style="background:#141424;padding:6px 20px;font-family:var(--mono);font-size:11px;color:#5a5a72;line-height:1.6;">
+              <div>my-app | main [1] | <span style="color:#8888a8;">gemma4:26b</span> | 39e7a1ed-7086-41ab</div>
+              <div>-- INSERT -- ⏵⏵ accept edits on <span style="color:#7070a0;">(shift+tab to cycle)</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
