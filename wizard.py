@@ -743,8 +743,12 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         )
 
     if engine == "ollama":
+        # Trailing "--" is important: the helper script appends "$@" after
+        # this argv, and `ollama launch` would otherwise eat any user flag
+        # (e.g. `cc -p "hi"` -> `ollama launch` rejects `-p`). The `--`
+        # tells `ollama launch` to forward everything after it to `claude`.
         return WireResult(
-            argv=["ollama", "launch", "claude", "--model", tag],
+            argv=["ollama", "launch", "claude", "--model", tag, "--"],
             env={},
             effective_tag=tag,
         )
@@ -783,6 +787,15 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
 
 def _wire_codex(engine: str, tag: str) -> WireResult | None:
     if engine == "ollama":
+        # Known limitation: `--oss --local-provider=ollama` are codex
+        # subcommand options, not top-level options. They work in
+        # interactive mode (no subcommand), which is the common case.
+        # `cx exec "<prompt>"` (one-shot) will hit a ChatGPT-account
+        # error because the flags land before the `exec` subcommand.
+        # Workaround for one-shot use: run
+        #   ollama launch codex --model <tag> -- exec --oss \
+        #     --local-provider=ollama --skip-git-repo-check "<prompt>"
+        # directly instead of via the alias.
         return WireResult(
             argv=[
                 "ollama",
@@ -1060,7 +1073,7 @@ Your real `~/.claude` and `~/.codex` are used as-is, so all your skills,
 statusline, agents, plugins, and MCP servers keep working.
 
 You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
-
+{codex_limitation}
 ## Troubleshooting
 
 - **`{alias_short}: command not found`?** Open a new terminal or run
@@ -1098,6 +1111,21 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
     )
     alias_short = alias_names[0]
     alias_long = alias_names[1] if len(alias_names) > 1 else alias_names[0]
+    codex_limitation = ""
+    if state.primary_harness == "codex" and state.primary_engine == "ollama":
+        tag = state.engine_model_tag
+        codex_limitation = (
+            f"\n"
+            f'> **Known limitation**: `{alias_short} exec "prompt"` does not work\n'
+            f"> for one-shot runs. The `--oss --local-provider=ollama` flags in the\n"
+            f"> alias are top-level options and land before the `exec` subcommand,\n"
+            f"> which Codex rejects with a ChatGPT-account error. Interactive\n"
+            f"> `{alias_short}` works fine. For one-shot use, run directly:\n"
+            f"> ```bash\n"
+            f"> ollama launch codex --model {tag} -- exec --oss "
+            f'--local-provider=ollama --skip-git-repo-check "<prompt>"\n'
+            f"> ```\n"
+        )
     content = GUIDE_TEMPLATE.format(
         harness=state.primary_harness,
         engine=state.primary_engine,
@@ -1108,6 +1136,7 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
         helper_script=state.helper_script_path or "(helper script)",
         state_dir=pb.STATE_DIR,
         guide_path=GUIDE_PATH,
+        codex_limitation=codex_limitation,
     )
     GUIDE_PATH.write_text(content)
     ok(f"Wrote [bold]{GUIDE_PATH}[/bold]")

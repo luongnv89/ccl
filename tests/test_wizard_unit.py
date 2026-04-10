@@ -202,7 +202,16 @@ class TestWireClaude:
     def test_ollama_returns_ollama_launch_argv(self, isolated_state):
         _, wiz, _ = isolated_state
         result = wiz._wire_claude("ollama", "qwen3-coder:30b")
-        assert result.argv == ["ollama", "launch", "claude", "--model", "qwen3-coder:30b"]
+        # Trailing "--" lets the helper script forward user args to claude
+        # instead of having `ollama launch` eat them.
+        assert result.argv == [
+            "ollama",
+            "launch",
+            "claude",
+            "--model",
+            "qwen3-coder:30b",
+            "--",
+        ]
         assert result.env == {}
         assert result.effective_tag == "qwen3-coder:30b"
 
@@ -265,13 +274,15 @@ class TestHelperScriptWriter:
     def test_ollama_script_uses_ollama_launch_no_exports(self, isolated_state):
         _, wiz, _ = isolated_state
         result = wiz.WireResult(
-            argv=["ollama", "launch", "claude", "--model", "qwen2.5-coder:7b"],
+            argv=["ollama", "launch", "claude", "--model", "qwen2.5-coder:7b", "--"],
             env={},
             effective_tag="qwen2.5-coder:7b",
         )
         path = wiz._write_helper_script("claude", result)
         body = path.read_text()
-        assert 'exec ollama launch claude --model qwen2.5-coder:7b "$@"' in body
+        # The "--" must appear before "$@" so user flags reach claude, not
+        # `ollama launch`.
+        assert 'exec ollama launch claude --model qwen2.5-coder:7b -- "$@"' in body
         assert "export " not in body
         assert os.access(path, os.X_OK)
 
