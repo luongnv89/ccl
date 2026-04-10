@@ -3,3 +3,5 @@
 __pycache__/
 guide.md
 .venv/
+.coverage
+.pytest_cache/
