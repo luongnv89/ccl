@@ -1,5 +1,5 @@
 """
-Unit tests for poc_bridge — pure functions + subprocess-mockable helpers.
+Unit tests for bridge — pure functions + subprocess-mockable helpers.
 
 These tests never touch real ollama / lms / claude / codex binaries. Anything
 that would shell out is either patched or routed through the `fake_bin`
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-import poc_bridge as pb
+import claude_codex_local.bridge as pb
 
 # ---------------------------------------------------------------------------
 # HF → Ollama / LM Studio tag mapping (pure regex lookups).

@@ -31,12 +31,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import poc_bridge as pb
 import questionary
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-
-import poc_bridge as pb
 
 console = Console()
 
@@ -1130,7 +1129,7 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
   `source {shell_rc}`.
 - **Engine not responding?** Re-run the wizard smoke test:
   ```bash
-  ./bin/poc-doctor
+  claude-codex-local doctor
   ```
 - **Want to switch models?** Re-run the wizard:
   ```bash

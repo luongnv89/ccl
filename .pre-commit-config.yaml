@@ -46,7 +46,7 @@ repos:
       # Hooks prefer the repo venv python if present, else fall back to python3.
       - id: pytest-unit
         name: pytest (unit, fast)
-        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q tests/test_poc_bridge_unit.py tests/test_wizard_unit.py tests/test_supplementary.py'
+        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q tests/test_bridge_unit.py tests/test_wizard_unit.py tests/test_supplementary.py'
         language: system
         pass_filenames: false
         stages: [pre-commit]

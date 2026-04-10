@@ -138,9 +138,9 @@ See [`guide.example.md`](guide.example.md) for the personalized daily-use guide 
 Diagnostic helpers:
 
 ```bash
-./bin/poc-doctor            # wizard state + presence check
-./bin/poc-machine-profile   # full hardware profile as JSON
-./bin/poc-recommend         # llmfit-only model recommendation
+claude-codex-local doctor    # wizard state + presence check
+ccl-bridge profile           # full hardware profile as JSON
+ccl-bridge recommend         # llmfit-only model recommendation
 ```
 
 ---
@@ -230,10 +230,7 @@ Claude Code sends a `thinking` payload that Qwen3 reasoning models interpret as 
 ```
 .
 ├── bin/
-│   ├── claude-codex-local      # Main wizard entrypoint
-│   ├── poc-doctor              # Diagnostic: wizard state
-│   ├── poc-machine-profile     # Diagnostic: hardware profile
-│   └── poc-recommend           # Diagnostic: model recommendation
+│   └── claude-codex-local      # Main wizard entrypoint
 ├── scripts/
 │   └── e2e_smoke.sh            # End-to-end smoke test
 ├── docs/

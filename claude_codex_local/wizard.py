@@ -1139,7 +1139,7 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
   `source {shell_rc}`.
 - **Engine not responding?** Re-run the wizard smoke test:
   ```bash
-  ./bin/poc-doctor
+  claude-codex-local doctor
   ```
 - **Want to switch models?** Re-run the wizard:
   ```bash

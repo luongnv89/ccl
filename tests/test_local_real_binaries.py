@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-import poc_bridge as pb
-import wizard as wiz
+import claude_codex_local.bridge as pb
+import claude_codex_local.wizard as wiz
 
 # ---------------------------------------------------------------------------
 # Tool version sniffing — cheap, fast, safe.
