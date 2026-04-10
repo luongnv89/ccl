@@ -17,7 +17,11 @@
 
 ## Daily use
 
-Open a new terminal (or `source ~/.zshrc`) and run:
+> **First time after setup?** Reload your shell so the new alias is on
+> your `PATH` — run `source ~/.zshrc` or open a new terminal. You only
+> need to do this once per shell session.
+
+Then run:
 
 ```bash
 cc

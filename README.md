@@ -65,8 +65,9 @@ The wizard will:
    of what that generated output looks like — real values are filled in
    from your wizard run)
 
-After setup, open a new terminal (or `source ~/.zshrc`) and run `cc`
-(or `cx`). That's it.
+After setup, **reload your shell so the new alias is picked up** —
+run `source ~/.zshrc` (or `source ~/.bashrc`, or just open a new
+terminal). Then run `cc` (or `cx`). That's it.
 
 ### Useful flags
 
