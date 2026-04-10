@@ -298,11 +298,11 @@ class TestRealHuggingFaceDownload:
         Verify the download function works end-to-end.  The model is already
         cached in MODEL_CACHE_DIR so huggingface-cli skips re-downloading.
 
-        Note: bridge.huggingface_cli_detect() uses `huggingface-cli --version`
-        which exits with code 2 on this version of the CLI (it doesn't support
-        --version).  We patch the detection to return present=True so the
-        download logic runs — the actual subprocess call to huggingface-cli
-        still happens and must succeed.
+        Note: bridge.huggingface_cli_detect() uses shutil.which() to check
+        whether huggingface-cli is on PATH.  We patch the detection to return
+        present=True so the download logic runs in environments where the
+        binary may not be on PATH — the actual subprocess call to
+        huggingface-cli still happens and must succeed.
         """
         import sys
 
