@@ -50,6 +50,9 @@ The wizard will:
 6. wire up an **isolated** harness config (your real `~/.claude` / `~/.codex` are untouched)
 7. verify the launch command works end-to-end
 8. write a personalized `guide.md` with your exact daily-use command
+   (see [`guide.example.md`](./guide.example.md) for a sanitized example
+   of what that generated output looks like — real values are filled in
+   from your wizard run)
 
 ### Useful flags
 
