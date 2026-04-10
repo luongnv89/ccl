@@ -13,7 +13,7 @@ This document covers how to release and distribute `claude-codex-local`.
 The `install.sh` remote installer fetches a specific tag via `CCL_REF` (defaults to `main`). After tagging, users can pin to a specific release:
 
 ```bash
-CCL_REF=v0.2.0 bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+CCL_REF=v0.3.0 bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 
 ## Installer (`install.sh`)
