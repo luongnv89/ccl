@@ -424,9 +424,11 @@ class TestLlamaCppDetect:
         monkeypatch.setattr(
             pb,
             "command_version",
-            lambda name, *a, **kw: {"present": True, "version": "b1234"}
-            if name == "llama-server"
-            else {"present": False},
+            lambda name, *a, **kw: (
+                {"present": True, "version": "b1234"}
+                if name == "llama-server"
+                else {"present": False}
+            ),
         )
         result = pb.llamacpp_detect()
         assert result["present"] is True
