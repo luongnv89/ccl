@@ -868,6 +868,7 @@
       <li><a href="#how-it-works">How It Works</a></li>
       <li><a href="#install">Install</a></li>
       <li><a href="#faq">FAQ</a></li>
+      <li><a href="#changelog">Changelog</a></li>
     </ul>
     <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="nav-gh">
       <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -885,7 +886,7 @@
       <div class="hero-left">
         <div class="hero-badge reveal">
           <span class="hero-badge-dot"></span>
-          v0.2.0 Alpha · Open Source
+          v0.3.0 · Open Source
         </div>
 
         <h1 class="hero-headline reveal">
@@ -1048,7 +1049,7 @@
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon">✅</div>
         <h3>Proven Paths</h3>
-        <p>Claude Code + Ollama + gemma4:26b and Codex + Ollama + qwen2.5-coder verified end-to-end. Real working combos, not hypothetical support.</p>
+        <p>Claude Code + Ollama + gemma4:26b and Codex + Ollama + qwen2.5-coder verified end-to-end. llama.cpp with GGUF models from Hugging Face also supported. Real working combos, not hypothetical support.</p>
       </div>
     </div>
   </div>
@@ -1141,7 +1142,7 @@
       <div class="proof-pill"><span class="check">✓</span> Codex CLI + Ollama + gemma4:26b</div>
       <div class="proof-pill"><span class="check">✓</span> Codex CLI + Ollama + qwen2.5-coder</div>
       <div class="proof-pill"><span class="warn">⚠</span> Claude Code + LM Studio + Qwen3</div>
-      <div class="proof-pill"><span class="open">◯</span> Any + llama.cpp</div>
+      <div class="proof-pill"><span class="check">✓</span> Any + llama.cpp + GGUF (from Hugging Face)</div>
     </div>
   </div>
 </section>
@@ -1174,7 +1175,7 @@
         </button>
         <div class="faq-answer">
           <div class="faq-answer-inner">
-            <strong>Ollama</strong> (primary, with native <code>ollama launch</code> support), <strong>LM Studio</strong>, and <strong>llama.cpp</strong> — all with auto-detection during setup. The wizard will find what you have installed.
+            <strong>Ollama</strong> (primary, with native <code>ollama launch</code> support), <strong>LM Studio</strong>, and <strong>llama.cpp</strong> — all with auto-detection during setup. The wizard will find what you have installed. For llama.cpp, GGUF models can be downloaded directly from <strong>Hugging Face</strong> via the built-in <code>huggingface-cli</code> integration.
           </div>
         </div>
       </div>
@@ -1232,6 +1233,103 @@
 
 <hr class="section-divider" />
 
+<!-- ── Changelog ─────────────────────────────────────────────── -->
+<section id="changelog">
+  <div class="container">
+    <div class="section-label reveal" style="text-align:center">What's New</div>
+    <h2 class="section-title reveal" style="text-align:center;margin-left:auto;margin-right:auto">Changelog</h2>
+    <p class="section-sub reveal" style="text-align:center;margin-left:auto;margin-right:auto">Release history following <a href="https://keepachangelog.com/en/1.0.0/" target="_blank" rel="noopener" style="color:var(--cyan)">Keep a Changelog</a> and <a href="https://semver.org/" target="_blank" rel="noopener" style="color:var(--cyan)">Semantic Versioning</a>.</p>
+
+    <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:32px">
+
+      <!-- v0.3.0 -->
+      <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.3.0</span>
+          <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-11</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> llama.cpp backend adapter with <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">llama-server</code> integration and GGUF model support from Hugging Face</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Docker-based e2e test suite covering pip, uv, source, and extras install scenarios</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">pip install .[dev]</code> optional extras group (pytest, ruff, mypy, bandit, detect-secrets, pre-commit)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> GitHub Pages landing page with brand refresh and two-column hero layout</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--red);margin-bottom:8px">Fixed</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✗</span> Empty array expansion in <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">run_e2e_docker.sh</code> under <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">set -u</code></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- v0.2.0 -->
+      <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--cyan)">v0.2.0</span>
+          <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-10</span>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> One-command remote installer (<code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">install.sh</code>) — no clone required</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ollama launch</code> integration as primary engine path</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Shell alias installer with idempotent fenced block in <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">~/.zshrc</code> / <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">~/.bashrc</code></li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Personalized <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">guide.md</code> generation after wizard completes</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--resume</code> flag to pick up after a failed wizard step</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--non-interactive</code> flag for CI-friendly setup</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">find-model</code> subcommand for standalone <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">llmfit</code> recommendations</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Installable Python package structure for PyPI distribution</li>
+          </ul>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--orange);margin-bottom:8px">Changed</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--orange)">~</span> Wizard now uses <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ollama launch</code> instead of isolated HOME and variant builder</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--orange)">~</span> LM Studio support moved to secondary/fallback path</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--red);margin-bottom:8px">Fixed</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✗</span> Shell alias block replaced idempotently on re-run (no more duplicates)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✗</span> Users reminded to <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">source ~/.zshrc</code> before first <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">cc</code>/<code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">cx</code> run</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- v0.1.0 -->
+      <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--text-muted)">v0.1.0</span>
+          <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-01</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);color:var(--text-dim)">Initial release</span>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Initial proof-of-concept: interactive wizard (8 steps)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Harness support: Claude Code, Codex CLI</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Engine support: Ollama, LM Studio, llama.cpp</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">llmfit</code> integration for hardware-aware model selection</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Pre-commit hooks: ruff, mypy, bandit, detect-secrets</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> pytest test suite with <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">@pytest.mark.local</code> marker for integration tests</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="reveal" style="text-align:center;padding-top:8px">
+        <a href="https://github.com/luongnv89/claude-codex-local/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener" style="color:var(--text-muted);font-size:13px;text-decoration:none;border-bottom:1px solid var(--border)">View full changelog on GitHub →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="section-divider" />
+
 <!-- ── Final CTA ─────────────────────────────────────────────── -->
 <section id="cta">
   <div class="container">
@@ -1273,7 +1371,7 @@
         <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
         <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round"/>
       </svg>
-      <strong>claude-codex-local</strong> · v0.2.0 Alpha
+      <strong>claude-codex-local</strong> · v0.3.0
     </div>
     <ul class="footer-links">
       <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
@@ -1299,7 +1397,7 @@
   document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
 
   // ── Active nav link ────────────────────────────────────────
-  const sections = ['hero','problem','features','how-it-works','install','faq','cta'];
+  const sections = ['hero','problem','features','how-it-works','install','faq','changelog','cta'];
   const navLinks = document.querySelectorAll('.nav-links a');
 
   const sectionObserver = new IntersectionObserver((entries) => {
