@@ -41,6 +41,24 @@ The wizard runs once and wires everything up. After that, `cc` just works. Your 
 
 ## Quick Start
 
+### Install from PyPI (recommended)
+
+```bash
+pip install claude-codex-local
+```
+
+Or with uv:
+
+```bash
+uv tool install claude-codex-local
+```
+
+Then run the setup wizard:
+
+```bash
+claude-codex-local
+```
+
 ### One-command install (no clone required)
 
 ```bash
