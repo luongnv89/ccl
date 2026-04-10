@@ -33,21 +33,21 @@ run() {
   fi
 }
 
-echo "=== E2E: poc_bridge ==="
-run "poc_bridge --help"                "$PY" -m poc_bridge --help
-run "poc_bridge profile --help"        "$PY" -m poc_bridge profile --help
-run "poc_bridge recommend --help"      "$PY" -m poc_bridge recommend --help
-run "poc_bridge doctor --help"         "$PY" -m poc_bridge doctor --help
-run "poc_bridge adapters --help"       "$PY" -m poc_bridge adapters --help
-run "poc_bridge adapters"              "$PY" -m poc_bridge adapters
+echo "=== E2E: ccl-bridge ==="
+run "ccl-bridge --help"                "$PY" -m claude_codex_local.bridge --help
+run "ccl-bridge profile --help"        "$PY" -m claude_codex_local.bridge profile --help
+run "ccl-bridge recommend --help"      "$PY" -m claude_codex_local.bridge recommend --help
+run "ccl-bridge doctor --help"         "$PY" -m claude_codex_local.bridge doctor --help
+run "ccl-bridge adapters --help"       "$PY" -m claude_codex_local.bridge adapters --help
+run "ccl-bridge adapters"              "$PY" -m claude_codex_local.bridge adapters
 
 echo "=== E2E: wizard ==="
-run "wizard --help"                    "$PY" -m wizard --help
-run "wizard setup --help"              "$PY" -m wizard setup --help
-run "wizard find-model --help"         "$PY" -m wizard find-model --help
-run "wizard doctor --help"             "$PY" -m wizard doctor --help
+run "wizard --help"                    "$PY" -m claude_codex_local.wizard --help
+run "wizard setup --help"              "$PY" -m claude_codex_local.wizard setup --help
+run "wizard find-model --help"         "$PY" -m claude_codex_local.wizard find-model --help
+run "wizard doctor --help"             "$PY" -m claude_codex_local.wizard doctor --help
 # wizard doctor exits 1 when no state exists — expected on a fresh HOME.
-if out="$("$PY" -m wizard doctor 2>&1)"; then :; fi
+if out="$("$PY" -m claude_codex_local.wizard doctor 2>&1)"; then :; fi
 if grep -q "No wizard state" <<<"$out"; then
   echo "  ok  wizard doctor (no-state path)"
   PASS=$((PASS+1))
@@ -57,11 +57,11 @@ else
 fi
 
 echo "=== E2E: error paths ==="
-if "$PY" -m poc_bridge bogus-command >/dev/null 2>&1; then
-  echo "  FAIL poc_bridge should reject unknown command"
+if "$PY" -m claude_codex_local.bridge bogus-command >/dev/null 2>&1; then
+  echo "  FAIL ccl-bridge should reject unknown command"
   FAIL=$((FAIL+1))
 else
-  echo "  ok  poc_bridge rejects unknown command"
+  echo "  ok  ccl-bridge rejects unknown command"
   PASS=$((PASS+1))
 fi
 
