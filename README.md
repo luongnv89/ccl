@@ -21,21 +21,6 @@ One alias. Claude Code or Codex on a local model. Skills, agents, MCP servers â€
 
 ---
 
-## How It Works
-
-```mermaid
-graph LR
-    A["cc / cx alias"] --> B["helper script<br>.claude-codex-local/bin/cc"]
-    B -->|Ollama| C["ollama launch claude<br>--model gemma4:26b"]
-    B -->|"LM Studio / llama.cpp"| D["inline env vars<br>+ exec claude"]
-    C --> E["~/.claude<br>your real config"]
-    D --> E
-```
-
-The wizard runs once and wires everything up. After that, `cc` just works. Your real `~/.claude` and `~/.codex` are never modified.
-
----
-
 ## Features
 
 | Feature | What you get |
