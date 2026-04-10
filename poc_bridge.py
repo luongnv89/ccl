@@ -776,6 +776,9 @@ def llamacpp_detect() -> dict[str, Any]:
     for candidate in ("llama-server", "llama-cpp-server", "server"):
         info = command_version(candidate, ["--version"])
         if info.get("present"):
+            # "server" is a generic name; verify it's actually a llama.cpp binary.
+            if candidate == "server" and "llama" not in info.get("version", "").lower():
+                continue
             return {"present": True, "binary": candidate, "version": info.get("version", "")}
     return {"present": False, "version": ""}
 

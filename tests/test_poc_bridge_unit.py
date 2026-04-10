@@ -451,6 +451,28 @@ class TestLlamaCppDetect:
         result = pb.llamacpp_detect()
         assert result["present"] is False
 
+    def test_server_candidate_rejected_when_not_llama(self, monkeypatch):
+        # A generic binary named "server" (e.g., Apache helper) must not be accepted.
+        def fake_version(name, *a, **kw):
+            if name == "server":
+                return {"present": True, "version": "Apache/2.4.57"}
+            return {"present": False}
+
+        monkeypatch.setattr(pb, "command_version", fake_version)
+        result = pb.llamacpp_detect()
+        assert result["present"] is False
+
+    def test_server_candidate_accepted_when_version_contains_llama(self, monkeypatch):
+        def fake_version(name, *a, **kw):
+            if name == "server":
+                return {"present": True, "version": "llama.cpp b3447"}
+            return {"present": False}
+
+        monkeypatch.setattr(pb, "command_version", fake_version)
+        result = pb.llamacpp_detect()
+        assert result["present"] is True
+        assert result["binary"] == "server"
+
 
 class TestLlamaCppInfo:
     def test_returns_not_present_when_binary_missing(self, monkeypatch):
