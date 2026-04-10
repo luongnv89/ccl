@@ -1,142 +1,142 @@
 # POC architecture note
 
-Date: 2026-04-09
+Last updated: 2026-04-10
 
 ## Narrow scope
 
 This POC is deliberately tiny:
 
-- runtime: **Ollama**
-- harnesses in scope: **Codex first**, **Claude config path second**
+- primary runtime: **Ollama** (via `ollama launch`)
+- secondary runtime: **LM Studio** (inline env fallback)
+- harnesses: **Claude Code** and **Codex CLI**
 - model-fit engine: **llmfit**
-- config rule: **official Claude/Codex configs stay untouched**
+- config rule: **the wizard never touches `~/.claude` or `~/.codex`**;
+  the user's real skills, statusline, agents, plugins, and MCP servers
+  keep working exactly as they were
 
 That is enough to prove the idea without pretending we solved every backend.
 
 ## The bridge shape
 
-### Shared pieces
+### Three layers
 
-Both `claude-local` and `codex-local` use the same four shared building blocks:
+1. **Machine profile + model recommendation** (`poc_bridge.py`)
+   - `profile`: dump a JSON snapshot of installed harnesses/engines/llmfit/disk
+   - `recommend`: pick a best-fit installed coding model, biased toward
+     models that actually load on this machine (not just paper-best)
+   - `doctor`: pretty-print the wizard state and re-run presence checks
 
-1. **Machine profile**
-   - source of truth: `llmfit system --json`
-   - extra local facts: installed Ollama models, tool versions, local-vs-cloud model inventory
+2. **Interactive wizard** (`wizard.py`)
+   - 9 steps from discovery to ready-to-use daily alias
+   - persists progress in `.claude-codex-local/wizard-state.json` so
+     `--resume` picks up after a failure
+   - writes a helper script and installs a shell alias block (see below)
 
-2. **Model recommendation**
-   - source of truth: `llmfit info <candidate>`
-   - POC rule: prefer an **installed** coding model that actually starts on this machine over a more theoretical recommendation
+3. **Helper scripts + shell aliases** (the user-facing surface)
+   - `.claude-codex-local/bin/cc` (or `cx`): a short bash wrapper that
+     either runs `ollama launch claude|codex --model <tag>` (Ollama path)
+     or sets inline env vars and execs the real harness (LM Studio /
+     llama.cpp path)
+   - `~/.zshrc` / `~/.bashrc`: a fenced block (`# >>> claude-codex-local >>>`
+     … `# <<< claude-codex-local <<<`) declaring the aliases `cc` +
+     `claude-local` or `cx` + `codex-local`, all pointing at the helper
+     script
 
-3. **Isolated local state**
-   - stored under repo-local `.claude-codex-local/`
-   - local HOME/XDG env is set only for the launched subprocesses
-   - Ollama integration config lands in `.claude-codex-local/home/.ollama/config/config.json`
+### Why `ollama launch`
 
-4. **Ollama integration config**
-   - written via `ollama launch <integration> --config --model <model>`
-   - this avoids mutating official `~/.codex`, `~/.claude`, or other user-level config
+`ollama launch claude --model <tag>` is an official Ollama subcommand
+that sets the right env vars internally and execs the user's real
+`claude` binary against the local Ollama daemon. Same for
+`ollama launch codex --model <tag> -- --oss --local-provider=ollama`.
 
-### Codex bridge model
+Using it means:
 
-Codex already exposes a real local path on this machine:
+- **no duplicated `~/.claude` directory** — the real one is used as-is,
+  so all skills, statusline, agents, plugins, and MCP servers carry over
+- **no baked-in model variant** — no `-cclocal` Ollama model, no
+  `Modelfile`, no `ollama create`
+- **no `ANTHROPIC_CUSTOM_MODEL_OPTION` to manage** — `ollama launch`
+  handles the client-side model-name allowlist issue for us
+- **no isolated `HOME` prefix** the user has to remember — `cc` just works
 
-- `codex --oss`
-- `codex --local-provider ollama`
+For LM Studio and llama.cpp we fall back to the inline-env approach
+because `ollama launch` only knows about Ollama. The helper script holds
+the long env block so the user's rc file stays short.
 
-So the POC bridge for Codex is thin by design:
+### Daily user surface
 
-1. recommend a model
-2. write isolated Ollama integration config for `codex`
-3. launch Codex with:
-   - `--oss`
-   - `--local-provider ollama`
-   - `-m <selected model>`
-
-That gives a real end-to-end local run without touching the official Codex config.
-
-### Claude bridge model
-
-Claude Code does **not** expose an equally obvious local-provider flag in the installed CLI help on this machine.
-
-What is real today:
-
-- `ollama launch claude --config --model <model>` writes isolated Ollama integration config for Claude
-- the config lives under the repo-local state dir, not the user's real home
-
-What remains intentionally unproven in this POC:
-
-- a fully validated Claude end-to-end smoke test in this repo
-
-That means the Claude path is **config-real but runtime-unproven** here. Honest beats fake.
-
-## Shared vs tool-specific
-
-### Shared
-
-- machine profile collection
-- local model inventory
-- llmfit lookups
-- isolated HOME/XDG strategy
-- Ollama config generation
-- model-selection rationale and caveats
-
-### Codex-specific
-
-- native `--oss --local-provider ollama` execution path
-- end-to-end smoke test using `codex exec`
-- known harmless 401 model-refresh noise from Codex in local-only mode
-
-### Claude-specific
-
-- configuration is delegated to `ollama launch claude`
-- runtime proof is deferred until we have a stable local launch recipe worth automating
-
-## What is real vs fake in the POC
-
-### Real
-
-- `ollama`, `claude`, `codex` presence verified locally
-- `llmfit` installed locally and used for profiling/model metadata
-- local coding model pulled into Ollama: `qwen2.5-coder:0.5b`
-- isolated config path under `.claude-codex-local/`
-- real Codex -> Ollama end-to-end response on this machine
-
-### Fake / manual / deferred
-
-- automatic multi-runtime abstraction beyond Ollama
-- perfect llmfit-only ranking; on this tiny host, live runtime proof matters more than pure score
-- polished Claude runtime bridge
-- quality-mode promise on 2 GB RAM hardware; that's fantasy land
-
-## Config isolation rule
-
-The POC never needs to edit official Claude/Codex config files.
-
-Instead it uses:
-
-- `CLAUDE_CODEX_LOCAL_STATE_DIR` or default `.claude-codex-local/`
-- subprocess-local `HOME`
-- subprocess-local `XDG_CONFIG_HOME`
-- subprocess-local `XDG_DATA_HOME`
-
-That keeps rollback trivial:
+After setup, the user opens a new terminal and runs:
 
 ```bash
+cc             # or claude-local — same thing
+cc -p "hi"     # extra args flow through "$@"
+```
+
+To switch back to cloud mode, run `claude` / `codex` directly (no
+prefix). Nothing in the user's global config needs to be touched.
+
+### Rollback
+
+```bash
+# 1. Delete the fenced block from ~/.zshrc (between the marker lines)
+# 2. Remove the state directory
 rm -rf .claude-codex-local
 ```
 
-## POC implementation decision
+## Codex bridge
 
-The first real proof is **Codex + Ollama + qwen2.5-coder:0.5b**.
+Codex natively supports `--oss --local-provider=ollama -m <model>`. The
+wizard's Codex wire path for Ollama just wraps this in
+`ollama launch codex --model <tag> -- --oss --local-provider=ollama`, so
+the `cx` alias is a one-liner.
 
-Why this path first:
+For LM Studio / llama.cpp, Codex reads `OPENAI_BASE_URL` and
+`OPENAI_API_KEY` from the environment — the helper script exports those
+and execs `codex -m <tag>`.
 
-- Codex already has a native local-provider flag
-- Ollama already has native `launch codex` / `launch claude` integration config support
-- this machine is weak, so the smallest coder model wins by survival, not glory
+## Claude Code bridge
 
-## Known limitations
+Claude Code has a known client-side model-name allowlist that rejects
+unrecognized model IDs before any request is sent. The official escape
+hatch is `ANTHROPIC_CUSTOM_MODEL_OPTION`, which whitelists one custom
+model ID.
 
-- llmfit marks the tiny coder model as a tight fit on this host; that warning is fair
-- the model is good enough for plumbing proof, not for claiming premium coding quality
-- Codex emits a harmless 401 model-refresh warning in local-only mode before still answering successfully
+For the Ollama path, `ollama launch claude --model <tag>` sets that
+variable internally and points `ANTHROPIC_BASE_URL` at the local
+daemon, so we do nothing extra.
+
+For the LM Studio / llama.cpp path, the wizard writes those env vars
+(`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_MODEL_OPTION`,
+`ANTHROPIC_CUSTOM_MODEL_OPTION_NAME`, `CLAUDE_CODE_ATTRIBUTION_HEADER=0`,
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`) into the helper script
+before it execs `claude --model <tag>`.
+
+## Qwen3 + Claude Code
+
+Claude Code sends a `thinking` payload in its chat requests that Qwen3
+reasoning models interpret as an unterminated `<think>` block, blowing
+the context budget. The wizard detects Qwen3 model names at pick time
+and prints a warning recommending Gemma 3 or Qwen 2.5 Coder instead.
+In interactive mode the user can continue anyway; in non-interactive
+mode the step fails.
+
+Earlier POC versions worked around this by running `ollama create` on a
+derived `-cclocal` model with `SYSTEM "/no_think"` baked in. That
+design was dropped in favor of warning + recommending a compatible
+model, because duplicating Ollama models silently was surprising and
+hard to roll back.
+
+## Superseded design (historical)
+
+The first version of this POC wrote an isolated `HOME=<repo>/.claude-codex-local/home`
+directory with duplicate `.claude/settings.json` / `.codex/config.toml`
+files, and generated a `-cclocal` Ollama model variant. That design is
+gone as of 2026-04-10. See the `refactor(wizard): use ollama launch +
+shell aliases` commit for the full diff.
+
+## What remains intentionally unproven
+
+- llama.cpp path has inline-env support but has not been live-tested
+  end-to-end in this repo
+- LM Studio Qwen3-coder path is known to return 400 on the `thinking`
+  payload; the wizard warns but does not currently auto-mitigate
