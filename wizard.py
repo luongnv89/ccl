@@ -955,6 +955,124 @@ def run_wizard(
     return 0
 
 
+def run_doctor() -> int:
+    """
+    Read-only triage command. Prints the current wizard state and re-checks
+    presence of the tools/models the wizard selected. Exit 0 when healthy,
+    1 when regressions are detected.
+    """
+    header("doctor — wizard state + presence re-check")
+
+    if not STATE_FILE.exists():
+        warn(f"No wizard state found at {STATE_FILE}. Run `bin/claude-codex-local setup` first.")
+        return 1
+
+    state = WizardState.load()
+
+    # --- Stored wizard state ---
+    state_table = Table(title="Stored wizard state", show_header=False, box=None)
+    state_table.add_column("key", style="bold")
+    state_table.add_column("value")
+    state_table.add_row("state file", str(STATE_FILE))
+    state_table.add_row("completed steps", ", ".join(state.completed_steps) or "(none)")
+    state_table.add_row("harness", state.primary_harness or "(unset)")
+    state_table.add_row("engine", state.primary_engine or "(unset)")
+    state_table.add_row("model (raw)", state.model_name or "(unset)")
+    state_table.add_row("engine tag", state.engine_model_tag or "(unset)")
+    state_table.add_row("model source", state.model_source or "(unset)")
+    state_table.add_row(
+        "launch command",
+        " ".join(shlex.quote(x) for x in state.launch_command) if state.launch_command else "(unset)",
+    )
+    last_verify = state.verify_result.get("ok")
+    state_table.add_row(
+        "last verify",
+        "[green]ok[/green]" if last_verify else ("[red]failed[/red]" if state.verify_result else "(never run)"),
+    )
+    console.print(state_table)
+    console.print()
+
+    # --- Live presence re-check ---
+    info("Re-running machine presence check...")
+    profile = pb.machine_profile()
+    presence = profile.get("presence", {})
+
+    issues: list[str] = []
+
+    check_table = Table(title="Presence re-check", show_header=True)
+    check_table.add_column("component")
+    check_table.add_column("expected")
+    check_table.add_column("status")
+
+    def add_row(name: str, expected: str, ok_flag: bool, detail: str = "") -> None:
+        mark = "[green]✓[/green]" if ok_flag else "[red]✗[/red]"
+        check_table.add_row(name, expected, f"{mark} {detail}".strip())
+        if not ok_flag:
+            issues.append(f"{name}: {detail or 'missing'}")
+
+    # Harness
+    harnesses = presence.get("harnesses", []) or []
+    if state.primary_harness:
+        add_row(
+            "harness",
+            state.primary_harness,
+            state.primary_harness in harnesses,
+            "found" if state.primary_harness in harnesses else f"not in PATH (have: {harnesses or 'none'})",
+        )
+
+    # Engine
+    engines = presence.get("engines", []) or []
+    if state.primary_engine:
+        add_row(
+            "engine",
+            state.primary_engine,
+            state.primary_engine in engines,
+            "found" if state.primary_engine in engines else f"not installed (have: {engines or 'none'})",
+        )
+
+    # Model presence on the engine
+    if state.engine_model_tag and state.primary_engine:
+        installed = _model_already_installed(state.primary_engine, state.engine_model_tag, profile)
+        add_row(
+            f"{state.primary_engine} model",
+            state.engine_model_tag,
+            installed,
+            "installed" if installed else "missing — re-run wizard to re-create/pull",
+        )
+
+    # Isolated settings file (Claude only)
+    if state.primary_harness == "claude":
+        settings_path = pb.STATE_HOME / ".claude" / "settings.json"
+        add_row(
+            "isolated settings",
+            str(settings_path),
+            settings_path.exists(),
+            "present" if settings_path.exists() else "missing — re-run step 2.6",
+        )
+
+    # guide.md
+    add_row(
+        "guide.md",
+        str(GUIDE_PATH),
+        GUIDE_PATH.exists(),
+        "present" if GUIDE_PATH.exists() else "missing — re-run step 2.8",
+    )
+
+    console.print(check_table)
+    console.print()
+
+    if issues:
+        fail(f"{len(issues)} issue(s) detected:")
+        for i in issues:
+            console.print(f"  [red]•[/red] {i}")
+        console.print()
+        info("Suggested fix: `bin/claude-codex-local setup --resume`")
+        return 1
+
+    ok("All checks passed.")
+    return 0
+
+
 def run_find_model_standalone() -> int:
     """Exposed as `claude-codex-local find-model` — no setup, just a recommendation."""
     header("find-model — llmfit coding-model recommendation")
@@ -986,6 +1104,7 @@ def main() -> int:
     setup.add_argument("--engine", choices=("ollama", "lmstudio", "llamacpp"), help="Force primary engine")
 
     sub.add_parser("find-model", help="Show an llmfit-driven coding model recommendation")
+    sub.add_parser("doctor", help="Triage: pretty-print wizard state + re-run presence check")
 
     args = parser.parse_args()
     cmd = args.cmd or "setup"
@@ -998,6 +1117,8 @@ def main() -> int:
         )
     if cmd == "find-model":
         return run_find_model_standalone()
+    if cmd == "doctor":
+        return run_doctor()
     parser.print_help()
     return 2
 
