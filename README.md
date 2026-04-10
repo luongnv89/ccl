@@ -9,7 +9,7 @@
 
 </div>
 
-# Claude Code + Codex, running entirely on your machine
+# Hit your limit? Need privacy? Just swap the model — everything else stays.
 
 One alias (`cc` or `cx`) swaps the backend to a local model. Your skills, agents, MCP servers, and config stay untouched.
 
