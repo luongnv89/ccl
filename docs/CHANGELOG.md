@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-04-10
+## [0.2.0] - 2026-04-11
 
 ### Added
 - One-command remote installer (`install.sh`) — no clone required
@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `find-model` subcommand for standalone `llmfit` recommendations
 - Diagnostic helpers: `poc-doctor`, `poc-machine-profile`, `poc-recommend`
 - `--` separator in Ollama Claude helper for correct arg forwarding
+- llama.cpp backend adapter (`llamacpp` engine support) with `llama-server` integration (#10)
+- Docker-based e2e test suite covering pip, uv, source, and extras install scenarios (#12)
+- `pip install .[dev]` optional extras group (pytest, ruff, mypy, bandit, detect-secrets, pre-commit)
+- GitHub Pages landing page with brand refresh and two-column hero layout
+- Installable Python package structure for PyPI distribution
 
 ### Changed
 - Wizard now uses `ollama launch` instead of isolated HOME and variant builder
@@ -27,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Shell alias block replaced idempotently on re-run (no more duplicates)
 - Users reminded to `source ~/.zshrc` before first `cc`/`cx` run
+- Empty array expansion in `run_e2e_docker.sh` under `set -u` (source/extras scenarios)
 
 ## [0.1.0] - 2026-04-01
 
