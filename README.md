@@ -3,19 +3,23 @@
 Local backend bridge for Claude Code and Codex.
 
 Core idea:
-- keep the existing Claude Code / Codex harness
+- keep the existing Claude Code / Codex harness, including all your real
+  `~/.claude` and `~/.codex` config — skills, statusline, agents, plugins,
+  MCP servers all keep working
 - swap the backend to a best-fit local model/runtime
-- keep workflow change as close to zero as possible
+- install a short shell alias (`cc` for Claude, `cx` for Codex) so your
+  daily command is one word
 
 ## POC status
 
 This repo now has a real POC for the narrowest sensible path:
 
-- runtimes: **LM Studio (MLX, preferred on Apple Silicon)** and **Ollama (fallback)**
-- real proved harness: **Codex CLI**
-- config-prepared harness: **Claude Code**
+- runtimes: **Ollama (primary, via `ollama launch`)** and **LM Studio (MLX, secondary)**
+- harnesses: **Claude Code** and **Codex CLI**
 - model-fit helper: **llmfit**
-- isolation rule: **repo-local state only; official configs untouched**
+- isolation rule: **the wizard never touches `~/.claude` or `~/.codex`**;
+  it installs a helper script under `.claude-codex-local/bin/` and a
+  single fenced alias block in `~/.zshrc` / `~/.bashrc`
 
 ## Quickstart
 
@@ -34,7 +38,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Run the 8-step interactive setup:
+Run the interactive setup:
 
 ```bash
 ./bin/claude-codex-local
@@ -47,12 +51,22 @@ The wizard will:
 3. ask which harness + engine you want to use
 4. ask which model you want (or help you pick via `llmfit`)
 5. smoke-test the engine with that model
-6. wire up an **isolated** harness config (your real `~/.claude` / `~/.codex` are untouched)
-7. verify the launch command works end-to-end
-8. write a personalized `guide.md` with your exact daily-use command
+6. wire up the harness: for Ollama it captures
+   `ollama launch claude|codex --model <tag>`; for LM Studio / llama.cpp
+   it records the inline env needed to point the harness at the local
+   server
+7. write a helper script to `.claude-codex-local/bin/{cc,cx}` and install
+   aliases (`cc` + `claude-local`, or `cx` + `codex-local`) into your
+   shell rc file between fenced markers (idempotent — re-running replaces
+   the block in place)
+8. verify the launch command end-to-end
+9. write a personalized `guide.md` with your exact daily-use command
    (see [`guide.example.md`](./guide.example.md) for a sanitized example
    of what that generated output looks like — real values are filled in
    from your wizard run)
+
+After setup, open a new terminal (or `source ~/.zshrc`) and run `cc`
+(or `cx`). That's it.
 
 ### Useful flags
 
@@ -63,15 +77,12 @@ The wizard will:
 ./bin/claude-codex-local find-model                               # standalone llmfit recommendation
 ```
 
-### Legacy POC helpers
-
-The earlier POC scripts still work for one-off diagnostics:
+### Diagnostic helpers
 
 ```bash
 ./bin/poc-machine-profile   # dump the full machine profile as JSON
-./bin/poc-doctor            # run the old doctor + Codex smoke test
-./bin/poc-recommend         # llmfit-only recommendation (older shape)
-./bin/codex-local           # legacy Codex wrapper (pre-wizard)
+./bin/poc-doctor            # print the wizard state + recommendation
+./bin/poc-recommend         # llmfit-only model recommendation
 ```
 
 ## Repo-local state

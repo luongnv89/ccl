@@ -2,6 +2,14 @@
 
 Date: 2026-04-09
 
+> **Historical note (2026-04-10):** This document captures the original
+> POC proof against the isolated-HOME + `bin/codex-local` wrapper design.
+> That design has since been superseded by `ollama launch` + shell
+> aliases. The commands below (`./bin/codex-local`) no longer exist —
+> use `cx` after running `bin/claude-codex-local`. See
+> `docs/poc-architecture.md` and `docs/poc-wizard.md` for the current
+> design.
+
 ## Environment used
 
 - host: Linux x86_64 VM
