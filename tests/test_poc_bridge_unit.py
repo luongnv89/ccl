@@ -5,20 +5,17 @@ These tests never touch real ollama / lms / claude / codex binaries. Anything
 that would shell out is either patched or routed through the `fake_bin`
 fixture defined in conftest.py.
 """
+
 from __future__ import annotations
 
 import json
-import subprocess
-from pathlib import Path
-
-import pytest
 
 import poc_bridge as pb
-
 
 # ---------------------------------------------------------------------------
 # HF → Ollama / LM Studio tag mapping (pure regex lookups).
 # ---------------------------------------------------------------------------
+
 
 class TestHfToOllamaTag:
     def test_maps_qwen3_coder_30b(self):
@@ -28,7 +25,10 @@ class TestHfToOllamaTag:
         assert pb.hf_name_to_ollama_tag("qwen2.5-coder-7B") == "qwen2.5-coder:7b"
 
     def test_maps_deepseek_coder_v2_lite(self):
-        assert pb.hf_name_to_ollama_tag("deepseek-ai/DeepSeek-Coder-V2-Lite") == "deepseek-coder-v2:16b"
+        assert (
+            pb.hf_name_to_ollama_tag("deepseek-ai/DeepSeek-Coder-V2-Lite")
+            == "deepseek-coder-v2:16b"
+        )
 
     def test_unknown_returns_none(self):
         assert pb.hf_name_to_ollama_tag("totally-unknown-model") is None
@@ -42,7 +42,9 @@ class TestHfToLmsHub:
         assert pb.hf_name_to_lms_hub("Qwen/Qwen3-Coder-30B") == "qwen/qwen3-coder-30b"
 
     def test_maps_codellama_13b(self):
-        assert pb.hf_name_to_lms_hub("meta-llama/CodeLlama-13b-Python") == "meta-llama/codellama-13b"
+        assert (
+            pb.hf_name_to_lms_hub("meta-llama/CodeLlama-13b-Python") == "meta-llama/codellama-13b"
+        )
 
     def test_unknown_returns_none(self):
         assert pb.hf_name_to_lms_hub("random/model") is None
@@ -51,6 +53,7 @@ class TestHfToLmsHub:
 # ---------------------------------------------------------------------------
 # parse_ollama_list — patches run() to feed synthetic `ollama list` output.
 # ---------------------------------------------------------------------------
+
 
 class _FakeCP:
     def __init__(self, stdout: str = "", stderr: str = "", returncode: int = 0):
@@ -76,20 +79,20 @@ class TestParseOllamaList:
         assert models[1]["name"] == "qwen2.5-coder:7b"
 
     def test_only_header_returns_empty(self, monkeypatch):
-        monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n"))
+        monkeypatch.setattr(
+            pb, "run", lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n")
+        )
         assert pb.parse_ollama_list() == []
 
     def test_subprocess_failure_returns_empty(self, monkeypatch):
         def boom(*a, **kw):
             raise FileNotFoundError("ollama")
+
         monkeypatch.setattr(pb, "run", boom)
         assert pb.parse_ollama_list() == []
 
     def test_marks_unsized_rows_nonlocal(self, monkeypatch):
-        sample = (
-            "NAME  ID  SIZE  MODIFIED\n"
-            "phantom:latest  xxx  -  never\n"
-        )
+        sample = "NAME  ID  SIZE  MODIFIED\nphantom:latest  xxx  -  never\n"
         monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
         assert models[0]["local"] is False
@@ -98,6 +101,7 @@ class TestParseOllamaList:
 # ---------------------------------------------------------------------------
 # disk_usage_for — walks to the nearest existing parent.
 # ---------------------------------------------------------------------------
+
 
 class TestDiskUsageFor:
     def test_returns_usage_for_tmp_path(self, tmp_path):
@@ -116,6 +120,7 @@ class TestDiskUsageFor:
 # ---------------------------------------------------------------------------
 # ensure_path + state_env — no subprocess, just env dict manipulation.
 # ---------------------------------------------------------------------------
+
 
 class TestEnsurePath:
     def test_keeps_path_when_extras_missing(self, monkeypatch, tmp_path):
@@ -163,6 +168,7 @@ class TestEnsureStateDirs:
 # No-think Ollama variant — pure string/regex logic.
 # ---------------------------------------------------------------------------
 
+
 class TestOllamaNothinkModelfile:
     def test_qwen3_body_contains_no_think_and_ctx(self):
         body = pb.ollama_nothink_modelfile("qwen3-coder:30b")
@@ -198,6 +204,7 @@ class TestOllamaVariantTag:
 # llmfit helpers — mock subprocess.
 # ---------------------------------------------------------------------------
 
+
 def _fake_cp_json(payload):
     return _FakeCP(stdout=json.dumps(payload))
 
@@ -208,12 +215,26 @@ class TestLlmfitCodingCandidates:
         assert pb.llmfit_coding_candidates() == []
 
     def test_filters_and_sorts_by_score(self, monkeypatch):
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"})
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
         payload = {
             "models": [
-                {"name": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "category": "Coding", "score": 95, "best_quant": "mlx-4bit", "fit_level": "Perfect", "estimated_tps": 40},
+                {
+                    "name": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+                    "category": "Coding",
+                    "score": 95,
+                    "best_quant": "mlx-4bit",
+                    "fit_level": "Perfect",
+                    "estimated_tps": 40,
+                },
                 {"name": "meta-llama/Llama-3-8B", "category": "General", "score": 80},
-                {"name": "Qwen/Qwen2.5-Coder-7B", "category": "code", "score": 70, "best_quant": "q4_k_m"},
+                {
+                    "name": "Qwen/Qwen2.5-Coder-7B",
+                    "category": "code",
+                    "score": 70,
+                    "best_quant": "q4_k_m",
+                },
             ]
         }
         monkeypatch.setattr(pb, "run", lambda *a, **kw: _fake_cp_json(payload))
@@ -225,11 +246,23 @@ class TestLlmfitCodingCandidates:
         assert cands[0]["lms_hub_name"] == "qwen/qwen3-coder-30b"
 
     def test_dedupes_by_canonical_key_keeps_higher_score(self, monkeypatch):
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"})
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
         payload = {
             "models": [
-                {"name": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "category": "coding", "score": 90, "best_quant": "mlx-4bit"},
-                {"name": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-8bit", "category": "coding", "score": 92, "best_quant": "mlx-8bit"},
+                {
+                    "name": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+                    "category": "coding",
+                    "score": 90,
+                    "best_quant": "mlx-4bit",
+                },
+                {
+                    "name": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-8bit",
+                    "category": "coding",
+                    "score": 92,
+                    "best_quant": "mlx-8bit",
+                },
             ]
         }
         monkeypatch.setattr(pb, "run", lambda *a, **kw: _fake_cp_json(payload))
@@ -241,11 +274,11 @@ class TestLlmfitCodingCandidates:
 class TestLlmfitEstimateSizeBytes:
     def test_uses_total_memory_gb(self):
         b = pb.llmfit_estimate_size_bytes({"total_memory_gb": 4})
-        assert b == 4 * (1024 ** 3)
+        assert b == 4 * (1024**3)
 
     def test_falls_back_to_params_times_bits(self):
         b = pb.llmfit_estimate_size_bytes({"params_b": 7, "best_quant": "mlx-4bit"})
-        assert b == int(7 * 4 / 8 * (1024 ** 3))
+        assert b == int(7 * 4 / 8 * (1024**3))
 
     def test_returns_none_when_insufficient_data(self):
         assert pb.llmfit_estimate_size_bytes({"params_b": 7}) is None
@@ -254,6 +287,7 @@ class TestLlmfitEstimateSizeBytes:
 # ---------------------------------------------------------------------------
 # select_best_model — the heart of the recommendation engine.
 # ---------------------------------------------------------------------------
+
 
 def _empty_profile():
     return {
@@ -275,11 +309,24 @@ class TestSelectBestModel:
         assert rec["runtime"] == "ollama"
 
     def test_picks_installed_ollama_model_matching_candidate(self, monkeypatch):
-        monkeypatch.setattr(pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"})
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [
-            {"name": "Qwen/Qwen3-Coder-30B", "score": 90, "ollama_tag": "qwen3-coder:30b",
-             "lms_mlx_path": None, "lms_hub_name": None, "fit_level": "Perfect", "estimated_tps": 30},
-        ])
+        monkeypatch.setattr(
+            pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
+        )
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 90,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_mlx_path": None,
+                    "lms_hub_name": None,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 30,
+                },
+            ],
+        )
         profile = _empty_profile()
         profile["ollama"]["models"] = [{"name": "qwen3-coder:30b", "local": True}]
         rec = pb.select_best_model(profile, mode="balanced")
@@ -289,10 +336,19 @@ class TestSelectBestModel:
 
     def test_ollama_fallback_to_largest_installed_when_no_candidate_match(self, monkeypatch):
         monkeypatch.setattr(pb, "smoke_test_ollama_model", lambda tag: {"ok": True})
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [
-            {"name": "Qwen/Qwen3-Coder-30B", "score": 90, "ollama_tag": "qwen3-coder:30b",
-             "lms_mlx_path": None, "lms_hub_name": None},
-        ])
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 90,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_mlx_path": None,
+                    "lms_hub_name": None,
+                },
+            ],
+        )
         profile = _empty_profile()
         profile["ollama"]["models"] = [
             {"name": "llama2:7b", "local": True},
@@ -302,23 +358,52 @@ class TestSelectBestModel:
         assert rec["selected_model"] == "custom:13b"  # picks larger B
 
     def test_recommends_download_when_candidates_but_none_installed(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [
-            {"name": "Qwen/Qwen3-Coder-30B", "score": 90, "ollama_tag": "qwen3-coder:30b",
-             "lms_mlx_path": None, "lms_hub_name": None, "fit_level": "Good",
-             "memory_required_gb": 20, "estimated_tps": 25},
-        ])
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 90,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_mlx_path": None,
+                    "lms_hub_name": None,
+                    "fit_level": "Good",
+                    "memory_required_gb": 20,
+                    "estimated_tps": 25,
+                },
+            ],
+        )
         rec = pb.select_best_model(_empty_profile(), mode="balanced")
         assert rec["status"] == "download-required"
         assert rec["selected_model"] == "qwen3-coder:30b"
         assert any("ollama pull" in step for step in rec["next_steps"])
 
     def test_mode_fast_sorts_by_tps(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [
-            {"name": "Qwen/Qwen3-Coder-30B", "score": 95, "ollama_tag": "qwen3-coder:30b",
-             "lms_mlx_path": None, "lms_hub_name": None, "estimated_tps": 10, "fit_level": "Good"},
-            {"name": "Qwen/Qwen2.5-Coder-7B", "score": 70, "ollama_tag": "qwen2.5-coder:7b",
-             "lms_mlx_path": None, "lms_hub_name": None, "estimated_tps": 90, "fit_level": "Perfect"},
-        ])
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 95,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_mlx_path": None,
+                    "lms_hub_name": None,
+                    "estimated_tps": 10,
+                    "fit_level": "Good",
+                },
+                {
+                    "name": "Qwen/Qwen2.5-Coder-7B",
+                    "score": 70,
+                    "ollama_tag": "qwen2.5-coder:7b",
+                    "lms_mlx_path": None,
+                    "lms_hub_name": None,
+                    "estimated_tps": 90,
+                    "fit_level": "Perfect",
+                },
+            ],
+        )
         rec = pb.select_best_model(_empty_profile(), mode="fast")
         assert rec["selected_model"] == "qwen2.5-coder:7b"
         assert rec["mode"] == "fast"
@@ -332,6 +417,7 @@ class TestSelectBestModel:
 # ---------------------------------------------------------------------------
 # Runtime adapters — verify Protocol implementations return normalised dicts.
 # ---------------------------------------------------------------------------
+
 
 class TestAdapters:
     def test_ollama_adapter_name_and_recommend_params(self):
@@ -351,7 +437,9 @@ class TestAdapters:
         assert result["ok"] is False
 
     def test_ollama_adapter_healthcheck_reports_model_count(self, monkeypatch):
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"})
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
+        )
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [{"name": "a"}, {"name": "b"}])
         adapter = pb.OllamaAdapter()
         result = adapter.healthcheck()

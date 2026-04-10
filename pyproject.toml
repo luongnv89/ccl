@@ -24,3 +24,33 @@ addopts = "-ra -q --strict-markers"
 markers = [
   "local: tests that exercise real ollama/lms/claude/codex/llmfit binaries; auto-skipped if the tool is missing",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", ".claude-codex-local", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true
+exclude = ["\\.venv", "\\.claude-codex-local", "tests/"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "bandit>=1.7",
+  "detect-secrets>=1.5",
+  "pre-commit>=3.8",
+]

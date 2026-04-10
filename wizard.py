@@ -16,16 +16,17 @@ Implements the 8-step flow from PRD v1.2 §4.1:
 The wizard is idempotent and resumable: state is checkpointed to
 `.claude-codex-local/wizard-state.json` after every completed step.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import questionary
 from rich.console import Console
@@ -46,6 +47,7 @@ GUIDE_PATH = ROOT / "guide.md"
 # WizardState — the single source of truth for wizard progress
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WizardState:
     # which steps have completed successfully
@@ -53,15 +55,17 @@ class WizardState:
     # full machine profile from last discover pass
     profile: dict[str, Any] = field(default_factory=dict)
     # user's primary + secondary selections
-    primary_harness: str = ""           # "claude" | "codex"
+    primary_harness: str = ""  # "claude" | "codex"
     secondary_harnesses: list[str] = field(default_factory=list)
-    primary_engine: str = ""            # "ollama" | "lmstudio" | "llamacpp"
+    primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp"
     secondary_engines: list[str] = field(default_factory=list)
     # model pick
-    model_name: str = ""                # raw user input or find-model selection
-    model_source: str = ""              # "direct" | "find-model"
-    engine_model_tag: str = ""          # engine-specific tag (e.g. qwen3-coder:30b)
-    model_candidate: dict[str, Any] = field(default_factory=dict)  # llmfit candidate metadata when available
+    model_name: str = ""  # raw user input or find-model selection
+    model_source: str = ""  # "direct" | "find-model"
+    engine_model_tag: str = ""  # engine-specific tag (e.g. qwen3-coder:30b)
+    model_candidate: dict[str, Any] = field(
+        default_factory=dict
+    )  # llmfit candidate metadata when available
     # launch command the wizard wired up
     launch_command: list[str] = field(default_factory=list)
     # smoke test + verify outputs
@@ -73,7 +77,7 @@ class WizardState:
         STATE_FILE.write_text(json.dumps(asdict(self), indent=2) + "\n")
 
     @classmethod
-    def load(cls) -> "WizardState":
+    def load(cls) -> WizardState:
         if not STATE_FILE.exists():
             return cls()
         try:
@@ -91,6 +95,7 @@ class WizardState:
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
+
 
 def header(title: str) -> None:
     console.print()
@@ -116,6 +121,7 @@ def info(msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Step 2.1 — Discover environment
 # ---------------------------------------------------------------------------
+
 
 def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.1 — Discover environment")
@@ -269,6 +275,7 @@ def _show_install_hint(key: str) -> None:
 # Step 2.3 — Pick preferences
 # ---------------------------------------------------------------------------
 
+
 def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.3 — Pick preferences")
     presence = state.profile["presence"]
@@ -317,7 +324,9 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
 
     ok(f"Primary: [bold]{state.primary_harness}[/bold] + [bold]{state.primary_engine}[/bold]")
     if state.secondary_harnesses or state.secondary_engines:
-        info(f"Fallbacks: harnesses={state.secondary_harnesses or '-'} engines={state.secondary_engines or '-'}")
+        info(
+            f"Fallbacks: harnesses={state.secondary_harnesses or '-'} engines={state.secondary_engines or '-'}"
+        )
     state.mark("2.3")
     return True
 
@@ -339,10 +348,9 @@ def _default_engine(engines: list[str], profile: dict[str, Any]) -> str:
         and lms_data.get("server_running", False)
         and bool(lms_data.get("models"))
     )
-    is_apple_silicon = (
-        profile.get("host", {}).get("system") == "Darwin"
-        and profile.get("host", {}).get("machine") in ("arm64", "aarch64")
-    )
+    is_apple_silicon = profile.get("host", {}).get("system") == "Darwin" and profile.get(
+        "host", {}
+    ).get("machine") in ("arm64", "aarch64")
     if is_apple_silicon and lms_ready:
         return "lmstudio"
     if ollama_ready:
@@ -357,6 +365,7 @@ def _default_engine(engines: list[str], profile: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Step 2.4 — Pick a model (user-first, optional find-model helper)
 # ---------------------------------------------------------------------------
+
 
 def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.4 — Pick a model")
@@ -437,16 +446,34 @@ def _find_model_auto(engine: str, profile: dict[str, Any] | None = None) -> dict
     # 1. Already-installed model for this engine — most useful default.
     if engine == "ollama":
         installed = [
-            m["name"] for m in profile.get("ollama", {}).get("models", [])
+            m["name"]
+            for m in profile.get("ollama", {}).get("models", [])
             if m.get("local") and pb.NOTHINK_VARIANT_SUFFIX not in m["name"].split(":", 1)[0]
         ]
         # Prefer recognisable coding models first.
-        for preferred in ("qwen3-coder", "qwen2.5-coder", "deepseek-coder", "codellama", "gemma4", "qwen3.5"):
+        for preferred in (
+            "qwen3-coder",
+            "qwen2.5-coder",
+            "deepseek-coder",
+            "codellama",
+            "gemma4",
+            "qwen3.5",
+        ):
             for name in installed:
                 if preferred in name.lower():
-                    return {"display": name, "tag": name, "score": None, "candidate": {"name": name}}
+                    return {
+                        "display": name,
+                        "tag": name,
+                        "score": None,
+                        "candidate": {"name": name},
+                    }
         if installed:
-            return {"display": installed[0], "tag": installed[0], "score": None, "candidate": {"name": installed[0]}}
+            return {
+                "display": installed[0],
+                "tag": installed[0],
+                "score": None,
+                "candidate": {"name": installed[0]},
+            }
     elif engine == "lmstudio":
         lms_models = profile.get("lmstudio", {}).get("models", [])
         for m in lms_models:
@@ -481,7 +508,7 @@ def _find_model_interactive(engine: str) -> dict[str, Any] | None:
             continue
         label = (
             f"{c['name']:60s}  score={c.get('score'):>3}  "
-            f"fit={c.get('fit_level','?'):<12s}  ~{c.get('estimated_tps','?')} tok/s"
+            f"fit={c.get('fit_level', '?'):<12s}  ~{c.get('estimated_tps', '?')} tok/s"
         )
         items.append({"display": c["name"], "tag": tag, "score": c.get("score"), "candidate": c})
         choices.append(questionary.Choice(label, value=len(items) - 1))
@@ -523,8 +550,8 @@ def _handle_model_presence(state: WizardState) -> bool:
 
     size_bytes = _estimate_model_size(state)
     free_bytes = state.profile.get("disk", {}).get("free_bytes", 0)
-    size_gib = size_bytes / (1024 ** 3) if size_bytes else None
-    free_gib = free_bytes / (1024 ** 3) if free_bytes else 0
+    size_gib = size_bytes / (1024**3) if size_bytes else None
+    free_gib = free_bytes / (1024**3) if free_bytes else 0
 
     if size_gib is not None:
         info(f"Estimated model size: {size_gib:.1f} GiB. Free disk: {free_gib:.1f} GiB.")
@@ -534,7 +561,9 @@ def _handle_model_presence(state: WizardState) -> bool:
     fits = size_gib is None or size_gib < free_gib * 0.9
 
     if not fits:
-        warn(f"Model does not comfortably fit in free disk space ({size_gib:.1f} GiB needed, {free_gib:.1f} GiB free).")
+        warn(
+            f"Model does not comfortably fit in free disk space ({size_gib:.1f} GiB needed, {free_gib:.1f} GiB free)."
+        )
         cont = questionary.confirm(
             "Free up space and continue with this model?",
             default=False,
@@ -554,15 +583,9 @@ def _handle_model_presence(state: WizardState) -> bool:
 
 def _model_already_installed(engine: str, tag: str, profile: dict[str, Any]) -> bool:
     if engine == "ollama":
-        for m in profile.get("ollama", {}).get("models", []):
-            if m.get("name") == tag:
-                return True
-        return False
+        return any(m.get("name") == tag for m in profile.get("ollama", {}).get("models", []))
     if engine == "lmstudio":
-        for m in profile.get("lmstudio", {}).get("models", []):
-            if m.get("path") == tag:
-                return True
-        return False
+        return any(m.get("path") == tag for m in profile.get("lmstudio", {}).get("models", []))
     return False  # llama.cpp: treat as not cached — user manages GGUFs manually
 
 
@@ -599,7 +622,9 @@ def _download_model(state: WizardState) -> bool:
                 return False
             subprocess.run([lms, "get", tag, "-y"], check=True)
         elif engine == "llamacpp":
-            warn("llama.cpp does not manage downloads. Fetch the GGUF manually and re-run with --resume.")
+            warn(
+                "llama.cpp does not manage downloads. Fetch the GGUF manually and re-run with --resume."
+            )
             return False
     except subprocess.CalledProcessError as exc:
         fail(f"Download failed: {exc}")
@@ -613,6 +638,7 @@ def _download_model(state: WizardState) -> bool:
 # ---------------------------------------------------------------------------
 # Step 2.5 — Smoke test engine + model
 # ---------------------------------------------------------------------------
+
 
 def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.5 — Smoke test engine + model")
@@ -638,7 +664,7 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
         fail(f"Smoke test failed: {result.get('error') or result.get('response')}")
         return False
 
-    ok(f"Smoke test passed: {str(result.get('response',''))[:80]}")
+    ok(f"Smoke test passed: {str(result.get('response', ''))[:80]}")
     state.mark("2.5")
     return True
 
@@ -646,6 +672,7 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
 # ---------------------------------------------------------------------------
 # Step 2.6 — Wire up harness with isolated settings
 # ---------------------------------------------------------------------------
+
 
 def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.6 — Wire up harness")
@@ -757,6 +784,7 @@ def _wire_codex(engine: str, tag: str) -> tuple[list[str], str] | None:
 # Step 2.7 — Verify launch command end-to-end
 # ---------------------------------------------------------------------------
 
+
 def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2.7 — Verify launch command end-to-end")
     harness = state.primary_harness
@@ -771,15 +799,26 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
         cmd = [
             "claude",
             "--bare",
-            "--settings", str(settings_path),
-            "--model", tag,
+            "--settings",
+            str(settings_path),
+            "--model",
+            tag,
             "--dangerously-skip-permissions",
-            "-p", "Reply with exactly READY",
+            "-p",
+            "Reply with exactly READY",
         ]
     elif harness == "codex":
         cmd = ["codex", "exec", "--skip-git-repo-check", "-m", tag]
         if state.primary_engine == "ollama":
-            cmd = ["codex", "exec", "--skip-git-repo-check", "--oss", "-m", tag, "Reply with exactly READY"]
+            cmd = [
+                "codex",
+                "exec",
+                "--skip-git-repo-check",
+                "--oss",
+                "-m",
+                tag,
+                "Reply with exactly READY",
+            ]
         else:
             cmd.append("Reply with exactly READY")
     else:
@@ -789,7 +828,11 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
     info(f"Running: {' '.join(shlex.quote(x) for x in cmd)}")
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, env=env, timeout=300,
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=300,
         )
     except subprocess.TimeoutExpired:
         fail("Verify command timed out after 5 minutes.")
@@ -933,25 +976,28 @@ def run_wizard(
             continue
         # Honor forced harness/engine by skipping the picker.
         if step_id == "2.3" and state.primary_harness and state.primary_engine:
-            ok(f"Using forced picks: harness=[bold]{state.primary_harness}[/bold] engine=[bold]{state.primary_engine}[/bold]")
+            ok(
+                f"Using forced picks: harness=[bold]{state.primary_harness}[/bold] engine=[bold]{state.primary_engine}[/bold]"
+            )
             state.mark("2.3")
             continue
         # Step 2.2 is conditional: only run if 2.1 failed presence check.
-        if step_id == "2.2":
-            if state.profile.get("presence", {}).get("has_minimum"):
-                continue
+        if step_id == "2.2" and state.profile.get("presence", {}).get("has_minimum"):
+            continue
         ok_step = fn(state, non_interactive)
         if not ok_step:
             fail(f"Step {step_id} ({title}) did not complete. Re-run with --resume to continue.")
             return 1
 
     console.print()
-    console.print(Panel.fit(
-        f"[bold green]Setup complete![/bold green]\n\n"
-        f"Launch your local coding session with:\n  [cyan]{' '.join(shlex.quote(x) for x in state.launch_command)}[/cyan]\n\n"
-        f"See [bold]{GUIDE_PATH}[/bold] for the full guide.",
-        border_style="green",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold green]Setup complete![/bold green]\n\n"
+            f"Launch your local coding session with:\n  [cyan]{' '.join(shlex.quote(x) for x in state.launch_command)}[/cyan]\n\n"
+            f"See [bold]{GUIDE_PATH}[/bold] for the full guide.",
+            border_style="green",
+        )
+    )
     return 0
 
 
@@ -982,12 +1028,16 @@ def run_doctor() -> int:
     state_table.add_row("model source", state.model_source or "(unset)")
     state_table.add_row(
         "launch command",
-        " ".join(shlex.quote(x) for x in state.launch_command) if state.launch_command else "(unset)",
+        " ".join(shlex.quote(x) for x in state.launch_command)
+        if state.launch_command
+        else "(unset)",
     )
     last_verify = state.verify_result.get("ok")
     state_table.add_row(
         "last verify",
-        "[green]ok[/green]" if last_verify else ("[red]failed[/red]" if state.verify_result else "(never run)"),
+        "[green]ok[/green]"
+        if last_verify
+        else ("[red]failed[/red]" if state.verify_result else "(never run)"),
     )
     console.print(state_table)
     console.print()
@@ -1017,7 +1067,9 @@ def run_doctor() -> int:
             "harness",
             state.primary_harness,
             state.primary_harness in harnesses,
-            "found" if state.primary_harness in harnesses else f"not in PATH (have: {harnesses or 'none'})",
+            "found"
+            if state.primary_harness in harnesses
+            else f"not in PATH (have: {harnesses or 'none'})",
         )
 
     # Engine
@@ -1027,7 +1079,9 @@ def run_doctor() -> int:
             "engine",
             state.primary_engine,
             state.primary_engine in engines,
-            "found" if state.primary_engine in engines else f"not installed (have: {engines or 'none'})",
+            "found"
+            if state.primary_engine in engines
+            else f"not installed (have: {engines or 'none'})",
         )
 
     # Model presence on the engine
@@ -1099,9 +1153,13 @@ def main() -> int:
 
     setup = sub.add_parser("setup", help="Run the interactive first-run wizard (default)")
     setup.add_argument("--resume", action="store_true", help="Resume from last checkpointed step")
-    setup.add_argument("--non-interactive", action="store_true", help="Auto-pick defaults (CI/script use)")
+    setup.add_argument(
+        "--non-interactive", action="store_true", help="Auto-pick defaults (CI/script use)"
+    )
     setup.add_argument("--harness", choices=("claude", "codex"), help="Force primary harness")
-    setup.add_argument("--engine", choices=("ollama", "lmstudio", "llamacpp"), help="Force primary engine")
+    setup.add_argument(
+        "--engine", choices=("ollama", "lmstudio", "llamacpp"), help="Force primary engine"
+    )
 
     sub.add_parser("find-model", help="Show an llmfit-driven coding model recommendation")
     sub.add_parser("doctor", help="Triage: pretty-print wizard state + re-run presence check")

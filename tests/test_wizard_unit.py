@@ -2,16 +2,15 @@
 Unit tests for wizard.py helpers — state persistence, engine/model picking
 logic, presence checks, and the Claude/Codex wiring helpers.
 """
+
 from __future__ import annotations
 
 import json
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # WizardState persistence — roundtrip + mark + resilience to a missing file.
 # ---------------------------------------------------------------------------
+
 
 class TestWizardState:
     def test_load_returns_empty_when_no_state_file(self, isolated_state):
@@ -55,6 +54,7 @@ class TestWizardState:
 # _default_engine — platform-aware preference rules.
 # ---------------------------------------------------------------------------
 
+
 class TestDefaultEngine:
     def _profile(self, **overrides):
         base = {
@@ -94,6 +94,7 @@ class TestDefaultEngine:
 # _map_to_engine — resolve a user-typed name to an engine-specific tag.
 # ---------------------------------------------------------------------------
 
+
 class TestMapToEngine:
     def test_ollama_passthrough_for_existing_tag(self, isolated_state):
         _, wiz, _ = isolated_state
@@ -120,6 +121,7 @@ class TestMapToEngine:
 # _candidate_tag — engine-specific field extraction.
 # ---------------------------------------------------------------------------
 
+
 class TestCandidateTag:
     def test_ollama_reads_ollama_tag(self, isolated_state):
         _, wiz, _ = isolated_state
@@ -137,12 +139,16 @@ class TestCandidateTag:
 
     def test_llamacpp_falls_back_to_raw_name(self, isolated_state):
         _, wiz, _ = isolated_state
-        assert wiz._candidate_tag({"name": "Qwen/Qwen3-Coder-30B"}, "llamacpp") == "Qwen/Qwen3-Coder-30B"
+        assert (
+            wiz._candidate_tag({"name": "Qwen/Qwen3-Coder-30B"}, "llamacpp")
+            == "Qwen/Qwen3-Coder-30B"
+        )
 
 
 # ---------------------------------------------------------------------------
 # _model_already_installed — check profile dicts.
 # ---------------------------------------------------------------------------
+
 
 class TestModelAlreadyInstalled:
     def test_ollama_match(self, isolated_state):
@@ -157,7 +163,10 @@ class TestModelAlreadyInstalled:
 
     def test_lmstudio_match_by_path(self, isolated_state):
         _, wiz, _ = isolated_state
-        profile = {"ollama": {"models": []}, "lmstudio": {"models": [{"path": "qwen/qwen3-coder-30b"}]}}
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"models": [{"path": "qwen/qwen3-coder-30b"}]},
+        }
         assert wiz._model_already_installed("lmstudio", "qwen/qwen3-coder-30b", profile) is True
 
     def test_llamacpp_always_false(self, isolated_state):
@@ -168,6 +177,7 @@ class TestModelAlreadyInstalled:
 # ---------------------------------------------------------------------------
 # _lmstudio_needs_nothink — tag-pattern check.
 # ---------------------------------------------------------------------------
+
 
 class TestLmstudioNeedsNothink:
     def test_qwen3_needs_nothink(self, isolated_state):
@@ -187,12 +197,16 @@ class TestLmstudioNeedsNothink:
 # _wire_claude — writes isolated settings.json, returns the launch command.
 # ---------------------------------------------------------------------------
 
+
 class TestWireClaude:
     def test_ollama_writes_settings_and_builds_cmd(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
         # Short-circuit the no-think variant builder (no real ollama).
-        monkeypatch.setattr(pb, "ollama_ensure_nothink_variant",
-                            lambda tag: (tag, {"patched": False, "reason": "unit test"}))
+        monkeypatch.setattr(
+            pb,
+            "ollama_ensure_nothink_variant",
+            lambda tag: (tag, {"patched": False, "reason": "unit test"}),
+        )
         cmd, tag = wiz._wire_claude("ollama", "qwen3-coder:30b")
         assert cmd == ["claude", "--model", "qwen3-coder:30b"]
         assert tag == "qwen3-coder:30b"
@@ -205,8 +219,11 @@ class TestWireClaude:
 
     def test_ollama_picks_patched_variant_tag(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "ollama_ensure_nothink_variant",
-                            lambda tag: ("qwen3-coder-cclocal:30b", {"patched": True, "reused": False}))
+        monkeypatch.setattr(
+            pb,
+            "ollama_ensure_nothink_variant",
+            lambda tag: ("qwen3-coder-cclocal:30b", {"patched": True, "reused": False}),
+        )
         cmd, tag = wiz._wire_claude("ollama", "qwen3-coder:30b")
         assert tag == "qwen3-coder-cclocal:30b"
         assert cmd[-1] == "qwen3-coder-cclocal:30b"
@@ -228,19 +245,25 @@ class TestWireClaude:
 # _wire_codex — dispatch by engine, with the config-writing side-effects mocked.
 # ---------------------------------------------------------------------------
 
+
 class TestWireCodex:
     def test_ollama_path(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
         called = {}
-        monkeypatch.setattr(pb, "configure_ollama_integration",
-                            lambda target, model: called.setdefault("args", (target, model)) or {"ok": True})
+        monkeypatch.setattr(
+            pb,
+            "configure_ollama_integration",
+            lambda target, model: called.setdefault("args", (target, model)) or {"ok": True},
+        )
         cmd, tag = wiz._wire_codex("ollama", "qwen3-coder:30b")
         assert called["args"] == ("codex", "qwen3-coder:30b")
         assert cmd == ["codex", "--oss", "-m", "qwen3-coder:30b"]
 
     def test_lmstudio_path(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "configure_lmstudio_integration", lambda target, model: {"ok": True})
+        monkeypatch.setattr(
+            pb, "configure_lmstudio_integration", lambda target, model: {"ok": True}
+        )
         cmd, tag = wiz._wire_codex("lmstudio", "qwen/qwen3-coder-30b")
         assert cmd == ["codex", "-m", "qwen/qwen3-coder-30b"]
 
@@ -258,18 +281,21 @@ class TestWireCodex:
 # _estimate_model_size — delegates to pb.llmfit_estimate_size_bytes.
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateModelSize:
     def test_uses_captured_candidate(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "llmfit_estimate_size_bytes",
-                            lambda x: 42 if isinstance(x, dict) else None)
+        monkeypatch.setattr(
+            pb, "llmfit_estimate_size_bytes", lambda x: 42 if isinstance(x, dict) else None
+        )
         state = wiz.WizardState(model_candidate={"total_memory_gb": 4}, model_name="irrelevant")
         assert wiz._estimate_model_size(state) == 42
 
     def test_falls_back_to_name_lookup(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "llmfit_estimate_size_bytes",
-                            lambda x: 99 if isinstance(x, str) else None)
+        monkeypatch.setattr(
+            pb, "llmfit_estimate_size_bytes", lambda x: 99 if isinstance(x, str) else None
+        )
         state = wiz.WizardState(model_name="qwen3-coder:30b")
         assert wiz._estimate_model_size(state) == 99
 
@@ -283,14 +309,17 @@ class TestEstimateModelSize:
 # _find_model_auto — installed-first preference, llmfit fallback.
 # ---------------------------------------------------------------------------
 
+
 class TestFindModelAuto:
     def test_prefers_installed_coding_model(self, isolated_state):
         _, wiz, _ = isolated_state
         profile = {
-            "ollama": {"models": [
-                {"name": "llama2:7b", "local": True},
-                {"name": "qwen2.5-coder:7b", "local": True},
-            ]},
+            "ollama": {
+                "models": [
+                    {"name": "llama2:7b", "local": True},
+                    {"name": "qwen2.5-coder:7b", "local": True},
+                ]
+            },
             "lmstudio": {"models": []},
         }
         result = wiz._find_model_auto("ollama", profile)
@@ -299,10 +328,12 @@ class TestFindModelAuto:
     def test_skips_cclocal_variants(self, isolated_state):
         pb, wiz, _ = isolated_state
         profile = {
-            "ollama": {"models": [
-                {"name": f"qwen3-coder{pb.NOTHINK_VARIANT_SUFFIX}:30b", "local": True},
-                {"name": "qwen3-coder:30b", "local": True},
-            ]},
+            "ollama": {
+                "models": [
+                    {"name": f"qwen3-coder{pb.NOTHINK_VARIANT_SUFFIX}:30b", "local": True},
+                    {"name": "qwen3-coder:30b", "local": True},
+                ]
+            },
             "lmstudio": {"models": []},
         }
         result = wiz._find_model_auto("ollama", profile)
@@ -312,20 +343,31 @@ class TestFindModelAuto:
         _, wiz, _ = isolated_state
         profile = {
             "ollama": {"models": []},
-            "lmstudio": {"models": [
-                {"path": "meta/llama-3-8b", "format": "mlx"},
-                {"path": "qwen/qwen3-coder-30b", "format": "mlx"},
-            ]},
+            "lmstudio": {
+                "models": [
+                    {"path": "meta/llama-3-8b", "format": "mlx"},
+                    {"path": "qwen/qwen3-coder-30b", "format": "mlx"},
+                ]
+            },
         }
         result = wiz._find_model_auto("lmstudio", profile)
         assert result["tag"] == "qwen/qwen3-coder-30b"
 
     def test_falls_back_to_llmfit_when_nothing_installed(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [
-            {"name": "Qwen/Qwen3-Coder-30B", "ollama_tag": "qwen3-coder:30b",
-             "lms_mlx_path": None, "lms_hub_name": None, "score": 90},
-        ])
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_mlx_path": None,
+                    "lms_hub_name": None,
+                    "score": 90,
+                },
+            ],
+        )
         profile = {"ollama": {"models": []}, "lmstudio": {"models": []}}
         result = wiz._find_model_auto("ollama", profile)
         assert result["tag"] == "qwen3-coder:30b"

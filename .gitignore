@@ -5,3 +5,6 @@ guide.md
 .venv/
 .coverage
 .pytest_cache/
+coverage.xml
+.mypy_cache/
+.ruff_cache/

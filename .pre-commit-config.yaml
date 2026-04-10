@@ -1,0 +1,66 @@
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        files: ^(poc_bridge|wizard)\.py$
+        additional_dependencies: []
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: [-q, -ll, --skip, "B310,B404,B603,B607"]
+        files: ^(poc_bridge|wizard)\.py$
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: ^(\.claude-codex-local/|tests/|.*\.lock$|\.secrets\.baseline$)
+
+  - repo: local
+    hooks:
+      # Hooks prefer the repo venv python if present, else fall back to python3.
+      - id: pytest-unit
+        name: pytest (unit, fast)
+        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q tests/test_poc_bridge_unit.py tests/test_wizard_unit.py tests/test_supplementary.py'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: pytest-full
+        name: pytest (full suite w/ coverage)
+        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q --cov=poc_bridge --cov=wizard --cov-report=term-missing'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: e2e-cli
+        name: CLI end-to-end smoke
+        entry: bash scripts/e2e_smoke.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

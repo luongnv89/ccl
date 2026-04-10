@@ -10,11 +10,10 @@ Key ideas:
     real subprocess plumbing without ever touching the real tools.
   * `local_tool` — marker-aware skip helper for the `@pytest.mark.local` tier.
 """
+
 from __future__ import annotations
 
 import importlib
-import json
-import os
 import shutil
 import stat
 import sys
@@ -30,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 # ---------------------------------------------------------------------------
 # State isolation — every test gets its own STATE_DIR under tmp_path.
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def isolated_state(tmp_path, monkeypatch):
@@ -51,8 +51,10 @@ def isolated_state(tmp_path, monkeypatch):
 
     # Reload poc_bridge first, then wizard (wizard imports pb).
     import poc_bridge as pb_mod
+
     pb_mod = importlib.reload(pb_mod)
     import wizard as wiz_mod
+
     wiz_mod = importlib.reload(wiz_mod)
 
     # Redirect the wizard's guide.md so it doesn't splatter the real repo.
@@ -65,6 +67,7 @@ def isolated_state(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Fake bin directory — stub executables for ollama/lms/claude/codex/llmfit.
 # ---------------------------------------------------------------------------
+
 
 def _write_stub(path: Path, body: str) -> None:
     path.write_text("#!/usr/bin/env bash\n" + body + "\n")
@@ -85,20 +88,26 @@ def fake_bin(tmp_path, monkeypatch):
 
     # Default stubs — most are trivial no-ops that succeed. Individual tests
     # override these with richer responses via put_stub().
-    _write_stub(bdir / "ollama", 'case "$1" in --version) echo "ollama version 0.1.99";; list) printf "NAME\\tID\\tSIZE\\tMODIFIED\\n";; *) exit 0;; esac')
-    _write_stub(bdir / "lms", 'case "$1" in --version) echo "lms 0.2.0";; ls) echo "LLM";; "server") [[ "$2" == "status" ]] && echo "running on port 1234";; ps) echo "IDENTIFIER";; *) exit 0;; esac')
+    _write_stub(
+        bdir / "ollama",
+        'case "$1" in --version) echo "ollama version 0.1.99";; list) printf "NAME\\tID\\tSIZE\\tMODIFIED\\n";; *) exit 0;; esac',
+    )
+    _write_stub(
+        bdir / "lms",
+        'case "$1" in --version) echo "lms 0.2.0";; ls) echo "LLM";; "server") [[ "$2" == "status" ]] && echo "running on port 1234";; ps) echo "IDENTIFIER";; *) exit 0;; esac',
+    )
     _write_stub(bdir / "claude", 'echo "claude 1.0.0"')
     _write_stub(bdir / "codex", 'echo "codex 0.1.0"')
     _write_stub(
         bdir / "llmfit",
-        '''case "$1" in
+        """case "$1" in
   --version) echo "llmfit 1.2.3" ;;
   system) echo '{"system": {"ram_gb": 32, "gpu": "apple-m2"}}' ;;
   fit) echo '{"models": []}' ;;
   info) echo '{"models": []}' ;;
   coding) echo '{"models": []}' ;;
   *) exit 0 ;;
-esac''',
+esac""",
     )
 
     # Keep /usr/bin + /bin so `bash` itself still resolves inside run_shell.
@@ -114,6 +123,7 @@ esac''',
 # ---------------------------------------------------------------------------
 # Local-tier helper — skip when the real tool isn't installed.
 # ---------------------------------------------------------------------------
+
 
 def pytest_collection_modifyitems(config, items):
     """Auto-skip @pytest.mark.local items whose `needs_tool` param is missing."""

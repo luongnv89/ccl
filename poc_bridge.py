@@ -10,7 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -69,33 +69,34 @@ MLX_QUANT_SUFFIX = {
 # Mapping from HuggingFace model name patterns → LM Studio Hub names.
 # `lms get <hub_name> -y` auto-selects the best quant for your hardware.
 HF_TO_LMS_HUB: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"Qwen3-Coder-Next", re.IGNORECASE),    "qwen/qwen3-coder-next"),
-    (re.compile(r"Qwen3-Coder-480B", re.IGNORECASE),    "qwen/qwen3-coder-480b"),
-    (re.compile(r"Qwen3-Coder-30B", re.IGNORECASE),     "qwen/qwen3-coder-30b"),
-    (re.compile(r"Qwen3-Coder-14B", re.IGNORECASE),     "qwen/qwen3-coder-14b"),
-    (re.compile(r"Qwen3-Coder-7B", re.IGNORECASE),      "qwen/qwen3-coder-7b"),
-    (re.compile(r"Qwen3-Coder-4B", re.IGNORECASE),      "qwen/qwen3-coder-4b"),
-    (re.compile(r"Qwen3-Coder-1\.5B", re.IGNORECASE),   "qwen/qwen3-coder-1.5b"),
-    (re.compile(r"Qwen2\.5-Coder-32B", re.IGNORECASE),  "qwen/qwen2.5-coder-32b"),
-    (re.compile(r"Qwen2\.5-Coder-14B", re.IGNORECASE),  "qwen/qwen2.5-coder-14b"),
-    (re.compile(r"Qwen2\.5-Coder-7B", re.IGNORECASE),   "qwen/qwen2.5-coder-7b"),
-    (re.compile(r"Qwen2\.5-Coder-3B", re.IGNORECASE),   "qwen/qwen2.5-coder-3b"),
-    (re.compile(r"Qwen2\.5-Coder-1\.5B", re.IGNORECASE),"qwen/qwen2.5-coder-1.5b"),
-    (re.compile(r"Qwen2\.5-Coder-0\.5B", re.IGNORECASE),"qwen/qwen2.5-coder-0.5b"),
+    (re.compile(r"Qwen3-Coder-Next", re.IGNORECASE), "qwen/qwen3-coder-next"),
+    (re.compile(r"Qwen3-Coder-480B", re.IGNORECASE), "qwen/qwen3-coder-480b"),
+    (re.compile(r"Qwen3-Coder-30B", re.IGNORECASE), "qwen/qwen3-coder-30b"),
+    (re.compile(r"Qwen3-Coder-14B", re.IGNORECASE), "qwen/qwen3-coder-14b"),
+    (re.compile(r"Qwen3-Coder-7B", re.IGNORECASE), "qwen/qwen3-coder-7b"),
+    (re.compile(r"Qwen3-Coder-4B", re.IGNORECASE), "qwen/qwen3-coder-4b"),
+    (re.compile(r"Qwen3-Coder-1\.5B", re.IGNORECASE), "qwen/qwen3-coder-1.5b"),
+    (re.compile(r"Qwen2\.5-Coder-32B", re.IGNORECASE), "qwen/qwen2.5-coder-32b"),
+    (re.compile(r"Qwen2\.5-Coder-14B", re.IGNORECASE), "qwen/qwen2.5-coder-14b"),
+    (re.compile(r"Qwen2\.5-Coder-7B", re.IGNORECASE), "qwen/qwen2.5-coder-7b"),
+    (re.compile(r"Qwen2\.5-Coder-3B", re.IGNORECASE), "qwen/qwen2.5-coder-3b"),
+    (re.compile(r"Qwen2\.5-Coder-1\.5B", re.IGNORECASE), "qwen/qwen2.5-coder-1.5b"),
+    (re.compile(r"Qwen2\.5-Coder-0\.5B", re.IGNORECASE), "qwen/qwen2.5-coder-0.5b"),
     (re.compile(r"DeepSeek-Coder-V2-Lite", re.IGNORECASE), "deepseek-ai/deepseek-coder-v2-lite"),
-    (re.compile(r"DeepSeek-Coder-V2", re.IGNORECASE),   "deepseek-ai/deepseek-coder-v2"),
-    (re.compile(r"CodeLlama-34b", re.IGNORECASE),        "meta-llama/codellama-34b"),
-    (re.compile(r"CodeLlama-13b", re.IGNORECASE),        "meta-llama/codellama-13b"),
-    (re.compile(r"CodeLlama-7b", re.IGNORECASE),         "meta-llama/codellama-7b"),
-    (re.compile(r"starcoder2-15b", re.IGNORECASE),       "bigcode/starcoder2-15b"),
-    (re.compile(r"starcoder2-7b", re.IGNORECASE),        "bigcode/starcoder2-7b"),
-    (re.compile(r"starcoder2-3b", re.IGNORECASE),        "bigcode/starcoder2-3b"),
+    (re.compile(r"DeepSeek-Coder-V2", re.IGNORECASE), "deepseek-ai/deepseek-coder-v2"),
+    (re.compile(r"CodeLlama-34b", re.IGNORECASE), "meta-llama/codellama-34b"),
+    (re.compile(r"CodeLlama-13b", re.IGNORECASE), "meta-llama/codellama-13b"),
+    (re.compile(r"CodeLlama-7b", re.IGNORECASE), "meta-llama/codellama-7b"),
+    (re.compile(r"starcoder2-15b", re.IGNORECASE), "bigcode/starcoder2-15b"),
+    (re.compile(r"starcoder2-7b", re.IGNORECASE), "bigcode/starcoder2-7b"),
+    (re.compile(r"starcoder2-3b", re.IGNORECASE), "bigcode/starcoder2-3b"),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Runtime adapter contract (Task 1.1)
 # ---------------------------------------------------------------------------
+
 
 class RuntimeAdapter(Protocol):
     """
@@ -178,12 +179,21 @@ class LMStudioAdapter:
         if not info.get("present"):
             return {"ok": False, "detail": "lms CLI not found"}
         if not info.get("server_running"):
-            return {"ok": False, "detail": f"LM Studio server not running on port {info['server_port']}. Run: lms server start"}
-        return {"ok": True, "detail": f"server up on port {info['server_port']}, {len(info['models'])} model(s) installed"}
+            return {
+                "ok": False,
+                "detail": f"LM Studio server not running on port {info['server_port']}. Run: lms server start",
+            }
+        return {
+            "ok": True,
+            "detail": f"server up on port {info['server_port']}, {len(info['models'])} model(s) installed",
+        }
 
     def list_models(self) -> list[dict[str, Any]]:
         info = lms_info()
-        return [{"name": m["path"], "format": m["format"], "local": True} for m in info.get("models", [])]
+        return [
+            {"name": m["path"], "format": m["format"], "local": True}
+            for m in info.get("models", [])
+        ]
 
     def run_test(self, model: str) -> dict[str, Any]:
         return smoke_test_lmstudio_model(model)
@@ -202,6 +212,7 @@ ALL_ADAPTERS: list[OllamaAdapter | LMStudioAdapter] = [
 # ---------------------------------------------------------------------------
 # Shell helpers
 # ---------------------------------------------------------------------------
+
 
 def ensure_path(env: dict[str, str] | None = None) -> dict[str, str]:
     merged = dict(os.environ if env is None else env)
@@ -225,8 +236,12 @@ def run(
     timeout: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        cmd, check=check, capture_output=True, text=True,
-        env=ensure_path(env), timeout=timeout,
+        cmd,
+        check=check,
+        capture_output=True,
+        text=True,
+        env=ensure_path(env),
+        timeout=timeout,
     )
 
 
@@ -259,13 +274,16 @@ def require(cmd: str) -> None:
         sys.exit(1)
 
 
-def run_shell(command: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_shell(
+    command: str, *, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return run(["bash", "-lc", command], env=env)
 
 
 # ---------------------------------------------------------------------------
 # Ollama helpers
 # ---------------------------------------------------------------------------
+
 
 def parse_ollama_list() -> list[dict[str, Any]]:
     try:
@@ -281,7 +299,9 @@ def parse_ollama_list() -> list[dict[str, Any]]:
         if len(parts) < 4:
             continue
         name, model_id, size, modified = parts[0], parts[1], parts[2], parts[3]
-        models.append({"name": name, "id": model_id, "size": size, "modified": modified, "local": size != "-"})
+        models.append(
+            {"name": name, "id": model_id, "size": size, "modified": modified, "local": size != "-"}
+        )
     return models
 
 
@@ -314,9 +334,17 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
 def configure_ollama_integration(target: str, model: str) -> dict[str, Any]:
     ensure_state_dirs()
     require("ollama")
-    shell_cmd = f"printf 'n\\n' | ollama launch {shlex.quote(target)} --config --model {shlex.quote(model)}"
+    shell_cmd = (
+        f"printf 'n\\n' | ollama launch {shlex.quote(target)} --config --model {shlex.quote(model)}"
+    )
     cp = run_shell(shell_cmd, env=state_env())
-    return {"target": target, "model": model, "state_dir": str(STATE_DIR), "home": str(STATE_HOME), "stdout": cp.stdout.strip()}
+    return {
+        "target": target,
+        "model": model,
+        "state_dir": str(STATE_DIR),
+        "home": str(STATE_HOME),
+        "stdout": cp.stdout.strip(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +363,7 @@ def configure_ollama_integration(target: str, model: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 NOTHINK_VARIANT_SUFFIX = "-cclocal"
+
 
 def _ollama_model_family(tag: str) -> str:
     t = tag.lower()
@@ -375,10 +404,7 @@ def ollama_nothink_modelfile(base_tag: str) -> str | None:
             f"PARAMETER top_k 64\n"
         )
     if family == "qwen2.5":
-        return (
-            f"FROM {base_tag}\n"
-            f"PARAMETER num_ctx 65536\n"
-        )
+        return f"FROM {base_tag}\nPARAMETER num_ctx 65536\n"
     return None
 
 
@@ -458,6 +484,7 @@ def ensure_config(target: str, model: str, runtime: str) -> dict[str, Any]:
 # LM Studio helpers
 # ---------------------------------------------------------------------------
 
+
 def lms_binary() -> str | None:
     """Return the path to the lms CLI if present, else None."""
     lms_path = ORIG_HOME / ".lmstudio" / "bin" / "lms"
@@ -480,7 +507,12 @@ def lms_info() -> dict[str, Any]:
     """
     lms = lms_binary()
     if not lms:
-        return {"present": False, "server_running": False, "server_port": LMS_SERVER_PORT, "models": []}
+        return {
+            "present": False,
+            "server_running": False,
+            "server_port": LMS_SERVER_PORT,
+            "models": [],
+        }
 
     # Check server status
     server_running = False
@@ -499,7 +531,12 @@ def lms_info() -> dict[str, Any]:
             # or:              "  liquid/lfm2.5-1.2b (1 variant)    1.2B ..."
             # We only care about the model path (first token-like field).
             stripped = line.strip()
-            if not stripped or stripped.startswith("LLM") or stripped.startswith("EMBEDDING") or stripped.startswith("You have"):
+            if (
+                not stripped
+                or stripped.startswith("LLM")
+                or stripped.startswith("EMBEDDING")
+                or stripped.startswith("You have")
+            ):
                 continue
             # Remove trailing "(N variant)" annotation
             path_part = re.split(r"\s+\(\d+ variant", stripped)[0].strip()
@@ -530,17 +567,20 @@ def lms_responses_api_ok(model: str) -> bool:
     non-streaming calls while returning an empty body for streaming — the streaming
     case is what Codex actually uses, so we test that.
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"http://localhost:{LMS_SERVER_PORT}/v1/responses"
-    payload = json.dumps({
-        "model": model,
-        "input": "Reply with exactly: OK",
-        "stream": True,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": model,
+            "input": "Reply with exactly: OK",
+            "stream": True,
+        }
+    ).encode()
     req = urllib.request.Request(
-        url, data=payload,
+        url,
+        data=payload,
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
     try:
@@ -624,16 +664,18 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
     Smoke-test a model loaded in the LM Studio server via its OpenAI-compatible API.
     Requires the server to be running and the model loaded.
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = f"http://localhost:{LMS_SERVER_PORT}/v1/chat/completions"
-    payload = json.dumps({
-        "model": model_path,
-        "messages": [{"role": "user", "content": "Reply with exactly READY"}],
-        "max_tokens": 16,
-        "temperature": 0,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": model_path,
+            "messages": [{"role": "user", "content": "Reply with exactly READY"}],
+            "max_tokens": 16,
+            "temperature": 0,
+        }
+    ).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -649,6 +691,7 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # llmfit helpers
 # ---------------------------------------------------------------------------
+
 
 def llmfit_system() -> dict[str, Any] | None:
     if not command_version("llmfit").get("present"):
@@ -703,16 +746,23 @@ def llmfit_estimate_size_bytes(candidate_or_name: dict[str, Any] | str) -> int |
         params_b = candidate.get("params_b")
         quant = (candidate.get("best_quant") or "").lower()
         bits_per_param = {
-            "mlx-4bit": 4, "q4_k_m": 4, "q4_0": 4, "q4_1": 4,
-            "mlx-5bit": 5, "q5_k_m": 5, "q5_0": 5,
-            "mlx-6bit": 6, "q6_k": 6,
-            "mlx-8bit": 8, "q8_0": 8,
+            "mlx-4bit": 4,
+            "q4_k_m": 4,
+            "q4_0": 4,
+            "q4_1": 4,
+            "mlx-5bit": 5,
+            "q5_k_m": 5,
+            "q5_0": 5,
+            "mlx-6bit": 6,
+            "q6_k": 6,
+            "mlx-8bit": 8,
+            "q8_0": 8,
         }.get(quant)
         if params_b and bits_per_param:
             gb = params_b * bits_per_param / 8.0
     if not gb:
         return None
-    return int(gb * (1024 ** 3))
+    return int(gb * (1024**3))
 
 
 def llmfit_coding_candidates() -> list[dict[str, Any]]:
@@ -749,7 +799,12 @@ def llmfit_coding_candidates() -> list[dict[str, Any]]:
 
         existing = groups.get(key)
         if existing is None:
-            groups[key] = {**m, "ollama_tag": ollama_tag, "lms_mlx_path": lms_mlx_path, "lms_hub_name": lms_hub_name}
+            groups[key] = {
+                **m,
+                "ollama_tag": ollama_tag,
+                "lms_mlx_path": lms_mlx_path,
+                "lms_hub_name": lms_hub_name,
+            }
         else:
             # Prefer: higher llmfit score, then lower MLX quant rank (more efficient)
             cur_rank = MLX_QUANT_RANK.get(m.get("best_quant", ""), 99)
@@ -757,7 +812,12 @@ def llmfit_coding_candidates() -> list[dict[str, Any]]:
             cur_score = m.get("score", 0)
             ex_score = existing.get("score", 0)
             if cur_score > ex_score or (cur_score == ex_score and cur_rank < ex_rank):
-                groups[key] = {**m, "ollama_tag": ollama_tag, "lms_mlx_path": lms_mlx_path, "lms_hub_name": lms_hub_name}
+                groups[key] = {
+                    **m,
+                    "ollama_tag": ollama_tag,
+                    "lms_mlx_path": lms_mlx_path,
+                    "lms_hub_name": lms_hub_name,
+                }
 
     # Sort by score descending, then return
     return sorted(groups.values(), key=lambda m: m.get("score", 0), reverse=True)
@@ -804,6 +864,7 @@ def _derive_lms_mlx_path(m: dict[str, Any]) -> str | None:
 # Machine profile
 # ---------------------------------------------------------------------------
 
+
 def disk_usage_for(path: Path) -> dict[str, Any]:
     """Return free/total bytes for the filesystem holding `path` (or its nearest existing parent)."""
     probe = path
@@ -816,8 +877,8 @@ def disk_usage_for(path: Path) -> dict[str, Any]:
             "total_bytes": usage.total,
             "used_bytes": usage.used,
             "free_bytes": usage.free,
-            "free_gib": round(usage.free / (1024 ** 3), 2),
-            "total_gib": round(usage.total / (1024 ** 3), 2),
+            "free_gib": round(usage.free / (1024**3), 2),
+            "total_gib": round(usage.total / (1024**3), 2),
         }
     except Exception as exc:
         return {"path": str(probe), "error": str(exc)}
@@ -843,7 +904,11 @@ def machine_profile() -> dict[str, Any]:
     llmfit_info = command_version("llmfit")
 
     # Presence summary used by the wizard's discover step.
-    harnesses_present = [name for name, info in (("claude", claude_info), ("codex", codex_info)) if info.get("present")]
+    harnesses_present = [
+        name
+        for name, info in (("claude", claude_info), ("codex", codex_info))
+        if info.get("present")
+    ]
     engines_present = []
     if ollama_info.get("present"):
         engines_present.append("ollama")
@@ -861,7 +926,10 @@ def machine_profile() -> dict[str, Any]:
         },
         "tools": {
             "ollama": ollama_info,
-            "lmstudio": {"present": lms["present"], "version": command_version("lms")["version"] if lms["present"] else ""},
+            "lmstudio": {
+                "present": lms["present"],
+                "version": command_version("lms")["version"] if lms["present"] else "",
+            },
             "llamacpp": llamacpp,
             "claude": claude_info,
             "codex": codex_info,
@@ -871,7 +939,9 @@ def machine_profile() -> dict[str, Any]:
             "harnesses": harnesses_present,
             "engines": engines_present,
             "llmfit": llmfit_info.get("present", False),
-            "has_minimum": bool(harnesses_present) and bool(engines_present) and llmfit_info.get("present", False),
+            "has_minimum": bool(harnesses_present)
+            and bool(engines_present)
+            and llmfit_info.get("present", False),
         },
         "ollama": {"models": parse_ollama_list()},
         "lmstudio": lms,
@@ -887,6 +957,7 @@ def machine_profile() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Model selection — runtime-aware, llmfit-driven
 # ---------------------------------------------------------------------------
+
 
 def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[str, Any]:
     """
@@ -906,7 +977,9 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
     """
     mode = mode if mode in ("balanced", "fast", "quality") else "balanced"
 
-    ollama_installed = {m["name"]: m for m in profile.get("ollama", {}).get("models", []) if m.get("local")}
+    ollama_installed = {
+        m["name"]: m for m in profile.get("ollama", {}).get("models", []) if m.get("local")
+    }
     lms_data: dict[str, Any] = profile.get("lmstudio", {})
     lms_present = lms_data.get("present", False)
     lms_installed = {m["path"]: m for m in lms_data.get("models", [])}
@@ -985,9 +1058,13 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                     if smoke.get("ok"):
                         rationale.append("LM Studio server smoke test passed.")
                     else:
-                        caveats.append(f"LM Studio smoke test failed: {smoke.get('error') or smoke.get('response','')}")
+                        caveats.append(
+                            f"LM Studio smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
+                        )
                 else:
-                    caveats.append(f"Could not load model in LM Studio: {load_result.get('error','')}")
+                    caveats.append(
+                        f"Could not load model in LM Studio: {load_result.get('error', '')}"
+                    )
                 break
 
     # --- Pass 2: installed Ollama match ---
@@ -1007,7 +1084,9 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                 if smoke.get("ok"):
                     rationale.append("Live ollama smoke test passed.")
                 else:
-                    caveats.append(f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response','')}")
+                    caveats.append(
+                        f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
+                    )
                 break
 
     # --- Pass 2b: any installed Ollama model as a best-effort fallback ---
@@ -1031,7 +1110,9 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
         if smoke.get("ok"):
             rationale.append("Live ollama smoke test passed.")
         else:
-            caveats.append(f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response','')}")
+            caveats.append(
+                f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
+            )
 
     # --- Pass 3: LM Studio present and usable but model not installed → recommend MLX download ---
     if not selected_tag and lms_usable and candidates:
@@ -1058,7 +1139,9 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
             dl_cmd = f"lms get {lms_hub} -y" if lms_hub else f"lms get {lms_path} -y"
             next_steps.append(dl_cmd)
             next_steps.append("lms server start")
-            caveats.append("Download the model above, then re-run this command to confirm readiness.")
+            caveats.append(
+                "Download the model above, then re-run this command to confirm readiness."
+            )
 
     # --- Pass 4: Ollama fallback download ---
     if not selected_tag and candidates:
@@ -1076,20 +1159,26 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
             )
             next_steps.append(f"ollama pull {tag}")
             next_steps.append("./bin/codex-local")
-            caveats.append("Run `ollama pull` above, then re-run this command to confirm readiness.")
+            caveats.append(
+                "Run `ollama pull` above, then re-run this command to confirm readiness."
+            )
 
     # --- Pass 5: no llmfit candidates at all ---
     if not selected_tag:
         status = "download-required"
         selected_tag = "qwen2.5-coder:7b"
         runtime = "ollama"
-        rationale.append("llmfit returned no candidates. Defaulting to qwen2.5-coder:7b as a safe fallback.")
+        rationale.append(
+            "llmfit returned no candidates. Defaulting to qwen2.5-coder:7b as a safe fallback."
+        )
         next_steps.append(f"ollama pull {selected_tag}")
 
     modes: dict[str, str | None] = {
         "balanced": selected_tag,
         "fast": selected_tag,
-        "quality": selected_tag if (selected_candidate and selected_candidate.get("fit_level") in ("Perfect", "Good")) else None,
+        "quality": selected_tag
+        if (selected_candidate and selected_candidate.get("fit_level") in ("Perfect", "Good"))
+        else None,
     }
 
     return {
@@ -1105,8 +1194,12 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
         "llmfit": {
             "score": selected_candidate.get("score") if selected_candidate else None,
             "fit_level": selected_candidate.get("fit_level") if selected_candidate else None,
-            "estimated_tps": selected_candidate.get("estimated_tps") if selected_candidate else None,
-            "memory_required_gb": selected_candidate.get("memory_required_gb") if selected_candidate else None,
+            "estimated_tps": selected_candidate.get("estimated_tps")
+            if selected_candidate
+            else None,
+            "memory_required_gb": selected_candidate.get("memory_required_gb")
+            if selected_candidate
+            else None,
             "hf_name": selected_candidate.get("name") if selected_candidate else None,
             "best_quant": selected_candidate.get("best_quant") if selected_candidate else None,
             "candidates_evaluated": len(candidates),
@@ -1119,20 +1212,39 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
 # Codex smoke test
 # ---------------------------------------------------------------------------
 
+
 def smoke_test_codex(model: str, runtime: str = "ollama") -> dict[str, Any]:
     env = state_env()
     provider = "lmstudio" if runtime == "lmstudio" else "ollama"
     try:
         cp = run(
-            ["codex", "exec", "--skip-git-repo-check", "--oss", "--local-provider", provider, "-m", model, "Reply with exactly READY"],
+            [
+                "codex",
+                "exec",
+                "--skip-git-repo-check",
+                "--oss",
+                "--local-provider",
+                provider,
+                "-m",
+                model,
+                "Reply with exactly READY",
+            ],
             env=env,
             timeout=240,
         )
         merged = (cp.stdout + "\n" + cp.stderr).strip()
         normalized = re.sub(r"[^a-z]", "", merged.lower())
         ok = "ready" in normalized
-        auth_noise = "failed to refresh available models" in merged.lower() or "401 unauthorized" in merged.lower()
-        return {"ok": ok, "output": cp.stdout.strip(), "stderr": cp.stderr.strip(), "auth_noise": auth_noise}
+        auth_noise = (
+            "failed to refresh available models" in merged.lower()
+            or "401 unauthorized" in merged.lower()
+        )
+        return {
+            "ok": ok,
+            "output": cp.stdout.strip(),
+            "stderr": cp.stderr.strip(),
+            "auth_noise": auth_noise,
+        }
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timeout after 240s"}
     except Exception as exc:
@@ -1142,6 +1254,7 @@ def smoke_test_codex(model: str, runtime: str = "ollama") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Doctor
 # ---------------------------------------------------------------------------
+
 
 def doctor(run_codex_smoke: bool, mode: str = "balanced") -> dict[str, Any]:
     profile = machine_profile()
@@ -1166,7 +1279,11 @@ def doctor(run_codex_smoke: bool, mode: str = "balanced") -> dict[str, Any]:
         "claude": ensure_config("claude", recommendation["selected_model"], rt),
     }
 
-    codex_smoke = smoke_test_codex(recommendation["selected_model"], recommendation["runtime"]) if run_codex_smoke else None
+    codex_smoke = (
+        smoke_test_codex(recommendation["selected_model"], recommendation["runtime"])
+        if run_codex_smoke
+        else None
+    )
     if codex_smoke and not codex_smoke.get("ok"):
         issues.append("Codex local smoke test failed.")
     elif codex_smoke and codex_smoke.get("auth_noise"):
@@ -1186,6 +1303,7 @@ def doctor(run_codex_smoke: bool, mode: str = "balanced") -> dict[str, Any]:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def print_payload(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2))
 
@@ -1201,7 +1319,9 @@ def main() -> None:
 
     rec_cmd = sub.add_parser("recommend")
     rec_cmd.add_argument(
-        "--mode", choices=MODE_CHOICES, default="balanced",
+        "--mode",
+        choices=MODE_CHOICES,
+        default="balanced",
         help="Preset: balanced (default), fast (smallest/fastest), quality (highest score)",
     )
 
@@ -1232,13 +1352,15 @@ def main() -> None:
     elif args.command == "adapters":
         result = []
         for adapter in ALL_ADAPTERS:
-            result.append({
-                "name": adapter.name,
-                "detect": adapter.detect(),
-                "healthcheck": adapter.healthcheck(),
-                "models": adapter.list_models(),
-                "recommend_params": {m: adapter.recommend_params(m) for m in MODE_CHOICES},
-            })
+            result.append(
+                {
+                    "name": adapter.name,
+                    "detect": adapter.detect(),
+                    "healthcheck": adapter.healthcheck(),
+                    "models": adapter.list_models(),
+                    "recommend_params": {m: adapter.recommend_params(m) for m in MODE_CHOICES},
+                }
+            )
         print_payload({"adapters": result})
 
 

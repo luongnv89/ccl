@@ -96,7 +96,7 @@
 Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 ```
 
-**Critical Path Tasks**: 1.1 → 1.4 → 2.2 → 3.1 → 4.2  
+**Critical Path Tasks**: 1.1 → 1.4 → 2.2 → 3.1 → 4.2
 **Estimated Length**: 5 major task groups
 
 > ⚠️ If the bridge abstraction is wrong early, the whole project drifts. That is the main bottleneck.

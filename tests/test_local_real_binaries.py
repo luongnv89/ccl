@@ -12,22 +12,18 @@ wrapping logic still speaks the current version of each tool.
 Mark a test with `@pytest.mark.local(needs=["ollama"])` to gate it on one
 or more binaries being present in PATH.
 """
-from __future__ import annotations
 
-import json
-import shutil
-import subprocess
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
 import poc_bridge as pb
 import wizard as wiz
 
-
 # ---------------------------------------------------------------------------
 # Tool version sniffing — cheap, fast, safe.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.local(needs=["ollama"])
 def test_real_ollama_version_is_detected():
@@ -77,6 +73,7 @@ def test_real_llmfit_coding_candidates_shape():
 # Full machine_profile() — expensive but safe; no mutations.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.local(needs=["ollama"])
 def test_real_machine_profile_has_minimum_shape():
     profile = pb.machine_profile()
@@ -91,6 +88,7 @@ def test_real_machine_profile_has_minimum_shape():
 # LM Studio-specific checks. Only meaningful when the user has lms installed.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.local(needs=["lms"])
 def test_real_lms_info_returns_expected_keys():
     info = pb.lms_info()
@@ -104,6 +102,7 @@ def test_real_lms_info_returns_expected_keys():
 # Wizard doctor — safe to run whenever there's a real wizard state on disk.
 # Skips gracefully when no state file exists.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.local(needs=["ollama"])
 def test_real_wizard_doctor_runs_against_real_state(capsys):
