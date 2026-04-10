@@ -1,0 +1,21 @@
+# Scenario: install with optional [dev] extras
+# Base: minimal Python image with no project dependencies pre-installed.
+FROM python:3.11-slim
+
+WORKDIR /src
+
+# Copy source tree (excluding heavy dirs via .dockerignore).
+COPY . .
+
+RUN pip install --no-cache-dir ".[dev]"
+
+# Verify core entry points work.
+RUN claude-codex-local --help > /dev/null 2>&1 && \
+    ccl-bridge --help > /dev/null 2>&1 && \
+    ccl-bridge adapters > /dev/null 2>&1
+
+# Verify dev extras are importable (pytest, ruff, mypy, bandit).
+RUN python -c "import pytest, mypy, bandit" && \
+    ruff --version > /dev/null 2>&1
+
+CMD ["echo", "install with extras scenario: PASS"]
