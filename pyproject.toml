@@ -46,6 +46,7 @@ testpaths = ["tests"]
 addopts = "-ra -q --strict-markers"
 markers = [
   "local: tests that exercise real ollama/lms/claude/codex/llmfit binaries; auto-skipped if the tool is missing",
+  "real_llamacpp: tests that require a real llama-server binary and a downloaded GGUF model; skipped in CI",
 ]
 
 [tool.ruff]
