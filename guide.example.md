@@ -19,13 +19,20 @@
 Run this single command to start your local coding session:
 
 ```bash
-claude --model <model-name>:<size>
+HOME=<REPO_ROOT>/.claude-codex-local/home claude --model <model-name>:<size>
 ```
 
-The wizard wrote isolated config under `<REPO_ROOT>/.claude-codex-local/home`
-so your official `~/.claude` and `~/.codex` directories are untouched. You
+The leading `HOME=<REPO_ROOT>/.claude-codex-local/home` is critical: it
+points Claude Code at the isolated `.claude/settings.json` the wizard
+wrote, which contains the `ANTHROPIC_BASE_URL` override and the
+`ANTHROPIC_CUSTOM_MODEL_OPTION` whitelist for your local model ID.
+Without it, Claude Code reads your real `~/.claude/settings.json`, hits
+the cloud API, and rejects the local model name with "There's an issue
+with the selected model".
+
+Your official `~/.claude` and `~/.codex` directories are untouched. You
 can switch back to cloud mode at any time by running `claude` or `codex`
-directly (without the `claude-codex-local` wrapper).
+directly (without the `HOME=` prefix).
 
 ## Troubleshooting
 

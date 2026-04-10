@@ -208,7 +208,12 @@ class TestWireClaude:
             lambda tag: (tag, {"patched": False, "reason": "unit test"}),
         )
         cmd, tag = wiz._wire_claude("ollama", "qwen3-coder:30b")
-        assert cmd == ["claude", "--model", "qwen3-coder:30b"]
+        assert cmd == [
+            f"HOME={pb.STATE_HOME}",
+            "claude",
+            "--model",
+            "qwen3-coder:30b",
+        ]
         assert tag == "qwen3-coder:30b"
 
         settings_file = pb.STATE_HOME / ".claude" / "settings.json"
@@ -216,6 +221,8 @@ class TestWireClaude:
         body = json.loads(settings_file.read_text())
         assert body["env"]["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
         assert body["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
+        assert body["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "qwen3-coder:30b"
+        assert "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME" in body["env"]
 
     def test_ollama_picks_patched_variant_tag(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state

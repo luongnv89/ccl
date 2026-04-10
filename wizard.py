@@ -754,12 +754,35 @@ def _wire_claude(engine: str, tag: str) -> tuple[list[str], str] | None:
             "ANTHROPIC_API_KEY": auth_token,
             "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            # Whitelist the local model ID so Claude Code skips its built-in
+            # allowlist check. Without this, `claude --model <local-tag>` prints
+            # "There's an issue with the selected model" before any request is
+            # sent to ANTHROPIC_BASE_URL. See:
+            # https://code.claude.com/docs/en/model-config#add-a-custom-model-option
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": effective_tag,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Local ({engine}) {effective_tag}",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                f"Local model served by {engine} at {base_url}"
+            ),
         },
     }
     settings_file.write_text(json.dumps(settings, indent=2) + "\n")
     info(f"Wrote {settings_file}")
 
-    return ["claude", "--model", effective_tag], effective_tag
+    # Daily-use launch command must preserve the isolated HOME so Claude Code
+    # actually reads the settings.json above. Without HOME isolation, Claude
+    # Code reads the user's real ~/.claude/settings.json, hits the cloud API,
+    # and rejects the local model name. The leading `HOME=<path>` is bash
+    # inline-env syntax — launch_command is only ever rendered for display
+    # (never exec'd directly), so embedding the env assignment here is safe
+    # and keeps the copy-paste command self-contained.
+    launch_cmd = [
+        f"HOME={pb.STATE_HOME}",
+        "claude",
+        "--model",
+        effective_tag,
+    ]
+    return launch_cmd, effective_tag
 
 
 def _lmstudio_needs_nothink(tag: str) -> bool:
@@ -883,10 +906,16 @@ Run this single command to start your local coding session:
 {launch_cmd}
 ```
 
-The wizard wrote isolated config under `{state_home}` so your official
-`~/.claude` and `~/.codex` directories are untouched. You can switch back
-to cloud mode at any time by running `claude` or `codex` directly (without
-the `claude-codex-local` wrapper).
+The leading `HOME={state_home}` is critical: it points Claude Code at the
+isolated `.claude/settings.json` the wizard wrote, which contains the
+`ANTHROPIC_BASE_URL` override and the `ANTHROPIC_CUSTOM_MODEL_OPTION`
+whitelist for your local model ID. Without it, Claude Code reads your real
+`~/.claude/settings.json`, hits the cloud API, and rejects the local model
+name with "There's an issue with the selected model".
+
+Your official `~/.claude` and `~/.codex` directories are untouched. You can
+switch back to cloud mode at any time by running `claude` or `codex`
+directly (without the `HOME=` prefix).
 
 ## Troubleshooting
 
