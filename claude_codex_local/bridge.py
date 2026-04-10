@@ -770,6 +770,52 @@ def disk_usage_for(path: Path) -> dict[str, Any]:
         return {"path": str(probe), "error": str(exc)}
 
 
+def huggingface_cli_detect() -> dict[str, Any]:
+    """Detect huggingface-cli (from huggingface_hub[cli] package) on PATH."""
+    return command_version("huggingface-cli")
+
+
+def huggingface_download_gguf(
+    repo_id: str,
+    filename: str | None = None,
+    local_dir: str | None = None,
+) -> dict[str, Any]:
+    """
+    Download a GGUF model file from Hugging Face Hub via huggingface-cli.
+
+    Args:
+        repo_id:   HF repo ID, e.g. "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        filename:  Specific file to download (e.g. "model-Q4_K_M.gguf").
+                   When None the entire repo is fetched (picks the first GGUF).
+        local_dir: Directory to store the file. Defaults to the HF cache.
+
+    Returns:
+        {"ok": bool, "path": str | None, "error": str | None}
+    """
+    if not huggingface_cli_detect().get("present"):
+        return {
+            "ok": False,
+            "path": None,
+            "error": "huggingface-cli not found — install with: pip install 'huggingface_hub[cli]'",
+        }
+
+    cmd = ["huggingface-cli", "download", repo_id]
+    if filename:
+        cmd.append(filename)
+    if local_dir:
+        cmd += ["--local-dir", local_dir]
+
+    try:
+        cp = run(cmd, timeout=600)
+        if cp.returncode != 0:
+            return {"ok": False, "path": None, "error": (cp.stderr or cp.stdout).strip()}
+        # huggingface-cli download prints the resolved path on stdout
+        path = cp.stdout.strip().splitlines()[-1] if cp.stdout.strip() else None
+        return {"ok": True, "path": path, "error": None}
+    except Exception as exc:
+        return {"ok": False, "path": None, "error": str(exc)}
+
+
 def llamacpp_detect() -> dict[str, Any]:
     """Detect a usable llama.cpp server binary on PATH."""
     for candidate in ("llama-server", "llama-cpp-server", "server"):
@@ -855,6 +901,7 @@ def machine_profile() -> dict[str, Any]:
     llmfit_sys = llmfit_system()
     lms = lms_info()
     llamacpp = llamacpp_detect()
+    hf_cli = huggingface_cli_detect()
 
     ollama_info = command_version("ollama")
     claude_info = command_version("claude")
@@ -889,6 +936,7 @@ def machine_profile() -> dict[str, Any]:
                 "version": command_version("lms")["version"] if lms["present"] else "",
             },
             "llamacpp": llamacpp,
+            "huggingface_cli": hf_cli,
             "claude": claude_info,
             "codex": codex_info,
             "llmfit": llmfit_info,

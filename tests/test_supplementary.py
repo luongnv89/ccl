@@ -5,6 +5,8 @@ Supplementary tests that push coverage into the remaining easy branches:
   * machine_profile aggregation when everything is stubbed
   * wizard.run_find_model_standalone
   * wizard.main CLI dispatcher
+  * huggingface_cli_detect / huggingface_download_gguf
+  * wizard._download_gguf_via_hf_cli / _download_model llamacpp branch
 """
 
 from __future__ import annotations
@@ -251,3 +253,138 @@ class TestSmokeTestCodex:
         result = pb.smoke_test_codex("qwen3-coder:30b", "ollama")
         assert result["ok"] is False
         assert "timeout" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# poc_bridge.huggingface_cli_detect
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingfaceCliDetect:
+    def test_present(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "command_version",
+            lambda name, args=None: {"present": True, "version": "0.21.0"}
+            if name == "huggingface-cli"
+            else {"present": False},
+        )
+        result = pb.huggingface_cli_detect()
+        assert result["present"] is True
+        assert "0.21.0" in result["version"]
+
+    def test_missing(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        result = pb.huggingface_cli_detect()
+        assert result["present"] is False
+
+
+# ---------------------------------------------------------------------------
+# poc_bridge.huggingface_download_gguf
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingfaceDownloadGguf:
+    def test_returns_error_when_cli_missing(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        result = pb.huggingface_download_gguf("org/repo")
+        assert result["ok"] is False
+        assert "huggingface-cli not found" in result["error"]
+        assert result["path"] is None
+
+    def test_success_returns_path(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb,
+            "run",
+            lambda *a, **kw: subprocess.CompletedProcess(
+                a[0], 0, "/home/user/.cache/huggingface/hub/model.gguf\n", ""
+            ),
+        )
+        result = pb.huggingface_download_gguf("org/repo", filename="model.gguf")
+        assert result["ok"] is True
+        assert result["path"] == "/home/user/.cache/huggingface/hub/model.gguf"
+        assert result["error"] is None
+
+    def test_download_failure(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb,
+            "run",
+            lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, "", "Repository not found"),
+        )
+        result = pb.huggingface_download_gguf("nonexistent/repo")
+        assert result["ok"] is False
+        assert "Repository not found" in result["error"]
+
+    def test_exception_is_caught(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("network error"))
+        )
+        result = pb.huggingface_download_gguf("org/repo")
+        assert result["ok"] is False
+        assert "network error" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# wizard._download_gguf_via_hf_cli
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadGgufViaHfCli:
+    def test_warns_and_fails_when_cli_missing(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        # _show_install_hint just prints, no need to stub it
+        result = wiz._download_gguf_via_hf_cli("org/repo")
+        assert result["ok"] is False
+
+    def test_success_returns_path(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb,
+            "huggingface_download_gguf",
+            lambda repo, filename=None, local_dir=None: {
+                "ok": True,
+                "path": "/tmp/model.gguf",
+                "error": None,
+            },
+        )
+        result = wiz._download_gguf_via_hf_cli("org/repo")
+        assert result["ok"] is True
+        assert result["path"] == "/tmp/model.gguf"
+
+    def test_splits_repo_and_filename(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        captured = {}
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb,
+            "huggingface_download_gguf",
+            lambda repo, filename=None, local_dir=None: captured.update(
+                {"repo": repo, "filename": filename}
+            )
+            or {"ok": True, "path": "/tmp/model.gguf", "error": None},
+        )
+        wiz._download_gguf_via_hf_cli("org/repo model-Q4_K_M.gguf")
+        assert captured["repo"] == "org/repo"
+        assert captured["filename"] == "model-Q4_K_M.gguf"
+
+    def test_download_failure_propagates(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb,
+            "huggingface_download_gguf",
+            lambda *a, **kw: {"ok": False, "path": None, "error": "404"},
+        )
+        result = wiz._download_gguf_via_hf_cli("org/repo")
+        assert result["ok"] is False

@@ -164,6 +164,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("ollama (engine)", tools["ollama"])
     row("lmstudio (engine)", tools["lmstudio"])
     row("llama.cpp (engine)", tools["llamacpp"])
+    row("huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
     row("llmfit", tools["llmfit"])
     console.print(table)
 
@@ -217,6 +218,11 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
         "name": "llama.cpp",
         "cmd": "brew install llama.cpp   # or build from https://github.com/ggml-org/llama.cpp",
         "url": "https://github.com/ggml-org/llama.cpp",
+    },
+    "huggingface-cli": {
+        "name": "Hugging Face CLI",
+        "cmd": "pip install 'huggingface_hub[cli]'",
+        "url": "https://huggingface.co/docs/huggingface_hub/guides/cli",
     },
     "llmfit": {
         "name": "llmfit",
@@ -622,6 +628,41 @@ def _estimate_model_size(state: WizardState) -> int | None:
     return None
 
 
+def _download_gguf_via_hf_cli(repo_id: str) -> dict:
+    """
+    Download a GGUF model from Hugging Face Hub using huggingface-cli.
+
+    repo_id may be:
+      - A bare repo like "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        (downloads entire repo; huggingface-cli picks the right files)
+      - A repo + filename like "org/repo filename.gguf"
+        (downloads the specific file)
+
+    Returns {"ok": bool, "path": str|None}.
+    """
+    if not pb.huggingface_cli_detect().get("present"):
+        warn(
+            "huggingface-cli is not installed. "
+            "Install it with: pip install 'huggingface_hub[cli]'\n"
+            "Then re-run the wizard with --resume to download the model."
+        )
+        _show_install_hint("huggingface-cli")
+        return {"ok": False, "path": None}
+
+    # Split "repo_id filename.gguf" if the caller passed both in one string.
+    parts = repo_id.split(None, 1)
+    hf_repo = parts[0]
+    filename = parts[1] if len(parts) > 1 else None
+
+    console.print(f"\n[cyan]Downloading {repo_id} from Hugging Face Hub...[/cyan]")
+    result = pb.huggingface_download_gguf(hf_repo, filename=filename)
+    if result["ok"]:
+        ok(f"Downloaded to: {result['path']}")
+    else:
+        fail(f"Hugging Face download failed: {result['error']}")
+    return result
+
+
 def _download_model(state: WizardState) -> bool:
     engine = state.primary_engine
     tag = state.engine_model_tag
@@ -636,10 +677,15 @@ def _download_model(state: WizardState) -> bool:
                 return False
             subprocess.run([lms, "get", tag, "-y"], check=True)
         elif engine == "llamacpp":
-            warn(
-                "llama.cpp does not manage downloads. Fetch the GGUF manually and re-run with --resume."
-            )
-            return False
+            hf_result = _download_gguf_via_hf_cli(tag)
+            if not hf_result["ok"]:
+                return False
+            # Store the resolved local path so later steps can use it in hints.
+            if hf_result.get("path"):
+                state.profile.setdefault("llamacpp_model_path", hf_result["path"])
+            ok(f"Downloaded {tag}")
+            state.profile = pb.machine_profile()
+            return True
     except subprocess.CalledProcessError as exc:
         fail(f"Download failed: {exc}")
         return False
