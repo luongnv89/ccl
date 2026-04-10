@@ -8,6 +8,7 @@
   <meta property="og:title" content="claude-codex-local" />
   <meta property="og:description" content="Your Claude Code & Codex, now running locally. Zero workflow change." />
   <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
     /* ── Reset & Variables ──────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -76,6 +77,9 @@
     }
 
     .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       font-family: var(--mono);
       font-size: 14px;
       font-weight: 600;
@@ -85,6 +89,7 @@
       flex-shrink: 0;
     }
 
+    .nav-logo svg { width: 28px; height: 28px; flex-shrink: 0; }
     .nav-logo span { color: var(--text-muted); }
 
     .nav-links {
@@ -760,11 +765,15 @@
     }
 
     .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       font-family: var(--mono);
       font-size: 13px;
       color: var(--text-muted);
     }
 
+    .footer-logo svg { width: 24px; height: 24px; flex-shrink: 0; }
     .footer-logo strong { color: var(--green); }
 
     .footer-links {
@@ -808,7 +817,22 @@
 <!-- ── Nav ──────────────────────────────────────────────────── -->
 <nav id="main-nav">
   <div class="nav-inner">
-    <a href="#hero" class="nav-logo">claude-<span>codex-</span>local</a>
+    <a href="#hero" class="nav-logo">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+        <rect width="64" height="64" rx="14" fill="#111111"/>
+        <line x1="32" y1="6"  x2="32" y2="18" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="6"  y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round"/>
+      </svg>
+      CCL<span> · claude-codex-local</span>
+    </a>
     <ul class="nav-links">
       <li><a href="#problem">Problem</a></li>
       <li><a href="#features">Features</a></li>
@@ -1177,7 +1201,22 @@
 <!-- ── Footer ────────────────────────────────────────────────── -->
 <footer>
   <div class="footer-inner">
-    <div class="footer-logo"><strong>claude-codex-local</strong> · v0.2.0 Alpha</div>
+    <div class="footer-logo">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+        <rect width="64" height="64" rx="14" fill="#111111"/>
+        <line x1="32" y1="6"  x2="32" y2="18" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="6"  y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round"/>
+      </svg>
+      <strong>claude-codex-local</strong> · v0.2.0 Alpha
+    </div>
     <ul class="footer-links">
       <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
       <li><a href="https://github.com/luongnv89/claude-codex-local/blob/main/README.md" target="_blank" rel="noopener">Docs</a></li>
