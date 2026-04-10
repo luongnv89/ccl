@@ -806,7 +806,7 @@ def huggingface_download_gguf(
         cmd += ["--local-dir", local_dir]
 
     try:
-        cp = run(cmd, timeout=600)
+        cp = run(cmd, timeout=600, check=False)
         if cp.returncode != 0:
             return {"ok": False, "path": None, "error": (cp.stderr or cp.stdout).strip()}
         # huggingface-cli download prints the resolved path on stdout
