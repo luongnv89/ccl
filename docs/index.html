@@ -1007,35 +1007,42 @@
   <div class="container" style="text-align:center">
     <div class="section-label reveal">Get Started</div>
     <h2 class="section-title reveal" style="margin-left:auto;margin-right:auto">One command to start</h2>
-    <p class="section-sub reveal" style="margin-left:auto;margin-right:auto;text-align:center">No clone required. The installer handles everything.</p>
+    <p class="section-sub reveal" style="margin-left:auto;margin-right:auto;text-align:center">Available on PyPI — install with pip or uv, or use the one-line shell installer.</p>
 
     <div class="install-card reveal">
       <div class="install-header">
-        <span class="install-label">curl · recommended</span>
-        <button class="copy-btn" data-copy='bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)'>
+        <span class="install-label">pip · recommended</span>
+        <button class="copy-btn" data-copy='pip install claude-codex-local'>
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
           Copy
         </button>
       </div>
       <div class="install-code">
-        <span class="ps">$ </span><span class="cmd">bash &lt;(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)</span>
+        <span class="ps">$ </span><span class="cmd">pip install claude-codex-local</span>
       </div>
     </div>
 
     <div class="install-card reveal" style="margin-top:12px">
       <div class="install-header">
-        <span class="install-label">wget · alternative</span>
-        <button class="copy-btn" data-copy='bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)'>
+        <span class="install-label">uv · alternative</span>
+        <button class="copy-btn" data-copy='uv tool install claude-codex-local'>
           <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
           Copy
         </button>
       </div>
       <div class="install-code">
-        <span class="ps">$ </span><span class="cmd">bash &lt;(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)</span>
+        <span class="ps">$ </span><span class="cmd">uv tool install claude-codex-local</span>
       </div>
     </div>
 
     <div class="install-alt reveal" style="margin-top:32px">
+      <div class="install-alt-label"><strong>Or use the shell installer (no clone required)</strong></div>
+      <div class="install-mini">
+        bash &lt;(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+      </div>
+    </div>
+
+    <div class="install-alt reveal" style="margin-top:16px">
       <div class="install-alt-label"><strong>Or install from source</strong></div>
       <div class="install-mini">
         git clone https://github.com/luongnv89/claude-codex-local.git<br>
