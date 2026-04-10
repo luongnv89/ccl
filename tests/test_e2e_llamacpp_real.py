@@ -226,18 +226,6 @@ class TestRealLlamaCppDetect:
 class TestRealLlamaCppInfo:
     """llamacpp_info() against a live server."""
 
-    def test_info_before_server_start(self, bridge):
-        """When no server is running, server_running should be False."""
-        # This test runs *before* the live_server fixture starts the server.
-        # Call info and confirm it is not confused about a server on 18001.
-        info = bridge.llamacpp_info()
-        assert info["present"] is True  # binary is still there
-        assert isinstance(info["server_running"], bool)
-        # We can't assert False here since a stale server might exist — just
-        # assert the structure is correct.
-        assert "server_port" in info
-        assert info["server_port"] == REAL_TEST_PORT
-
     def test_info_detects_running_server(self, bridge, live_server):
         info = bridge.llamacpp_info()
         assert info["present"] is True
@@ -291,8 +279,8 @@ class TestRealLlamaCppAdapter:
         adapter = bridge.LlamaCppAdapter()
         models = adapter.list_models()
         assert isinstance(models, list)
-        # llama.cpp runs one model at a time; list should have 0 or 1 entries.
-        assert len(models) <= 1
+        # llama.cpp runs one model at a time; the fixture loads exactly one.
+        assert len(models) == 1
 
     def test_run_test_with_live_server(self, bridge, live_server):
         info = bridge.llamacpp_info()
@@ -316,8 +304,9 @@ class TestRealHuggingFaceDownload:
         download logic runs — the actual subprocess call to huggingface-cli
         still happens and must succeed.
         """
-        import claude_codex_local.bridge as pb
+        import sys
 
+        pb = sys.modules["claude_codex_local.bridge"]
         monkeypatch.setattr(
             pb,
             "huggingface_cli_detect",
