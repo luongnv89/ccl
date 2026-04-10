@@ -147,57 +147,20 @@ class TestEnsurePath:
 
 
 class TestStateEnv:
-    def test_points_home_at_state_home(self, isolated_state):
+    def test_returns_path_env_without_home_override(self, isolated_state):
         pb_mod, _, state_dir = isolated_state
         env = pb_mod.state_env()
-        assert env["HOME"] == str(pb_mod.STATE_HOME)
-        assert env["XDG_CONFIG_HOME"].endswith("/.config")
-        assert env["XDG_DATA_HOME"].endswith("/.local/share")
+        assert "PATH" in env
+        # state_env() no longer rewrites HOME / XDG_*
+        assert env.get("HOME") != str(state_dir / "home")
 
 
 class TestEnsureStateDirs:
-    def test_creates_all_three_directories(self, isolated_state):
+    def test_creates_state_dir_and_bin(self, isolated_state):
         pb_mod, _, state_dir = isolated_state
         pb_mod.ensure_state_dirs()
         assert state_dir.exists()
-        assert (pb_mod.STATE_HOME / ".config").exists()
-        assert (pb_mod.STATE_HOME / ".local" / "share").exists()
-
-
-# ---------------------------------------------------------------------------
-# No-think Ollama variant — pure string/regex logic.
-# ---------------------------------------------------------------------------
-
-
-class TestOllamaNothinkModelfile:
-    def test_qwen3_body_contains_no_think_and_ctx(self):
-        body = pb.ollama_nothink_modelfile("qwen3-coder:30b")
-        assert "/no_think" in body
-        assert "num_ctx 65536" in body
-        assert body.startswith("FROM qwen3-coder:30b")
-
-    def test_gemma4_body_has_ctx_no_think_directive(self):
-        body = pb.ollama_nothink_modelfile("gemma4:latest")
-        assert body is not None
-        assert "/no_think" not in body
-        assert "num_ctx 65536" in body
-
-    def test_qwen25_body_is_minimal(self):
-        body = pb.ollama_nothink_modelfile("qwen2.5-coder:7b")
-        assert body is not None
-        assert "num_ctx 65536" in body
-        assert "/no_think" not in body
-
-    def test_unknown_family_returns_none(self):
-        assert pb.ollama_nothink_modelfile("llama2:7b") is None
-
-
-class TestOllamaVariantTag:
-    def test_preserves_version_suffix(self):
-        assert pb.ollama_variant_tag("qwen3-coder:30b") == "qwen3-coder-cclocal:30b"
-
-    def test_appends_when_no_version(self):
-        assert pb.ollama_variant_tag("qwen3-coder") == "qwen3-coder-cclocal"
+        assert (state_dir / "bin").exists()
 
 
 # ---------------------------------------------------------------------------
