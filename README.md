@@ -29,16 +29,42 @@ At least one harness (Claude Code or Codex), at least one engine (Ollama, LM
 Studio, or llama.cpp), and `llmfit` on `PATH`. The wizard will tell you what's
 missing and how to install it.
 
-### First run (interactive wizard)
+### One-command install (no clone required)
 
-Install the Python dependencies (one-time):
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+```
+
+Or with wget:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+```
+
+> Use the `bash <(...)` form, **not** `curl … | bash`. The wizard is
+> interactive and needs a real TTY on stdin — piping steals stdin.
+
+The installer downloads the repo tarball to `~/.claude-codex-local-src`,
+creates a virtualenv, installs `requirements.txt`, and launches the wizard
+automatically. Override defaults with env vars:
+
+```bash
+CCL_REF=v0.2.0 \
+CCL_INSTALL_DIR=~/tools/claude-codex-local \
+bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+```
+
+### First run from a clone (alternative)
+
+If you prefer to clone the repo yourself, install the Python dependencies
+once:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Run the interactive setup:
+Then run the interactive setup:
 
 ```bash
 ./bin/claude-codex-local
