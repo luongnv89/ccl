@@ -1,0 +1,17 @@
+# Scenario: install from source via pip install .
+# Base: minimal Python image with no project dependencies pre-installed.
+FROM python:3.11-slim
+
+WORKDIR /src
+
+# Copy source tree (excluding heavy dirs via .dockerignore).
+COPY . .
+
+RUN pip install --no-cache-dir .
+
+# Verify entry points are present and functional.
+RUN claude-codex-local --help > /dev/null 2>&1 && \
+    ccl-bridge --help > /dev/null 2>&1 && \
+    ccl-bridge adapters > /dev/null 2>&1
+
+CMD ["echo", "install from source scenario: PASS"]

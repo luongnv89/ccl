@@ -1,0 +1,20 @@
+# Scenario: install via uv from pre-built wheel
+# Base: minimal Python image with uv installed, no project dependencies pre-installed.
+FROM python:3.11-slim
+
+ARG WHEEL_FILE
+WORKDIR /install
+
+# Install uv
+RUN pip install --no-cache-dir uv
+
+COPY dist/${WHEEL_FILE} .
+
+RUN uv pip install --system --no-cache ${WHEEL_FILE}
+
+# Verify entry points are present and functional.
+RUN claude-codex-local --help > /dev/null 2>&1 && \
+    ccl-bridge --help > /dev/null 2>&1 && \
+    ccl-bridge adapters > /dev/null 2>&1
+
+CMD ["echo", "uv install scenario: PASS"]

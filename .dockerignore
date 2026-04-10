@@ -1,0 +1,11 @@
+.venv
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+__pycache__
+*.egg-info
+.test-model-cache
+.claude-codex-local
+claude_codex_local.egg-info
