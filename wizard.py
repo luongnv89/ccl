@@ -379,7 +379,7 @@ def _ensure_tool(key: str) -> bool:
         "codex": "codex",
         "ollama": "ollama",
         "lmstudio": "lms",
-        "llamacpp": "llama-cli",
+        "llamacpp": "llama-server",
     }.get(key, key)
 
     if pb.command_version(detect_cmd).get("present"):
@@ -855,6 +855,7 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
 def _download_model(state: WizardState) -> bool:
     engine = state.primary_engine
     tag = state.engine_model_tag
+    llamacpp_model_path: str | None = None
     console.print(f"\n[cyan]Downloading {tag} via {engine}...[/cyan]")
     try:
         if engine == "ollama":
@@ -869,18 +870,17 @@ def _download_model(state: WizardState) -> bool:
             hf_result = _download_gguf_via_hf_cli(tag)
             if not hf_result["ok"]:
                 return False
-            # Store the resolved local path so later steps can use it in hints.
-            if hf_result.get("path"):
-                state.profile.setdefault("llamacpp_model_path", hf_result["path"])
-            ok(f"Downloaded {tag}")
-            state.profile = pb.machine_profile()
-            return True
+            llamacpp_model_path = hf_result.get("path")
     except subprocess.CalledProcessError as exc:
         fail(f"Download failed: {exc}")
         return False
-    ok(f"Downloaded {tag}")
-    # Refresh profile so 2.5 sees the new model.
+    if engine != "llamacpp":
+        ok(f"Downloaded {tag}")
+    # Refresh profile so 2.5 sees the new model; preserve llamacpp_model_path
+    # since machine_profile() never returns that key.
     state.profile = pb.machine_profile()
+    if engine == "llamacpp" and llamacpp_model_path:
+        state.profile["llamacpp_model_path"] = llamacpp_model_path
     return True
 
 

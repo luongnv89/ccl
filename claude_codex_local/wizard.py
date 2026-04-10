@@ -339,7 +339,7 @@ def _ensure_tool(key: str) -> bool:
         "codex": "codex",
         "ollama": "ollama",
         "lmstudio": "lms",
-        "llamacpp": "llama-cli",
+        "llamacpp": "llama-server",
     }.get(key, key)
 
     if pb.command_version(detect_cmd).get("present"):
