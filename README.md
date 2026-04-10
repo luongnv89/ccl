@@ -9,11 +9,15 @@
 
 </div>
 
-# Hit your limit? Need privacy? Just swap the model — everything else stays.
+# Hit your limit? Need privacy? Just swap the model.
 
-One alias (`cc` or `cx`) swaps the backend to a local model. Your skills, agents, MCP servers, and config stay untouched.
+One alias. Claude Code or Codex on a local model. Skills, agents, MCP servers — all intact.
 
-[**Get Started →**](#quick-start)
+> **Quota hit mid-session?** `cc` keeps you going on a local model, no context lost.
+> **Code that can't leave your machine?** Everything runs offline after model download.
+> **Don't want to rewire your workflow?** Your `~/.claude`, skills, agents, and MCP servers carry over untouched.
+
+[**Get Started →**](#quick-start) · [**Landing page →**](https://luongnv89.github.io/claude-codex-local/)
 
 ---
 
