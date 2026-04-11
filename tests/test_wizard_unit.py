@@ -804,3 +804,38 @@ class TestStep2_5SmokeTest:
         state = self._setup_state(wiz)
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
         assert "2.5" not in state.completed_steps
+
+
+# ---------------------------------------------------------------------------
+# Welcome banner — print_welcome_banner and run_wizard startup display.
+# ---------------------------------------------------------------------------
+
+
+class TestWelcomeBanner:
+    def test_banner_contains_ccl(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert "CCL" in wiz._CCL_BANNER or "██" in wiz._CCL_BANNER
+
+    def test_tagline_text(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert "Hit your limit" in wiz._CCL_TAGLINE
+        assert "swap the model" in wiz._CCL_TAGLINE
+
+    def test_banner_not_shown_on_resume(self, isolated_state, monkeypatch):
+        """Banner must not appear when --resume is used."""
+        _, wiz, _ = isolated_state
+        printed = []
+        monkeypatch.setattr(wiz, "print_welcome_banner", lambda: printed.append(True))
+        # Stub every step to succeed immediately so run_wizard can complete.
+        monkeypatch.setattr(wiz, "STEPS", [])
+        wiz.run_wizard(resume=True, non_interactive=True)
+        assert printed == [], "print_welcome_banner must not be called when resuming"
+
+    def test_banner_not_shown_in_non_interactive(self, isolated_state, monkeypatch):
+        """Banner must not appear when --non-interactive is used."""
+        _, wiz, _ = isolated_state
+        printed = []
+        monkeypatch.setattr(wiz, "print_welcome_banner", lambda: printed.append(True))
+        monkeypatch.setattr(wiz, "STEPS", [])
+        wiz.run_wizard(resume=False, non_interactive=True)
+        assert printed == [], "print_welcome_banner must not be called in non-interactive mode"

@@ -110,6 +110,29 @@ class WizardState:
 
 
 # ---------------------------------------------------------------------------
+# Welcome banner
+# ---------------------------------------------------------------------------
+
+_CCL_BANNER = r"""
+  ██████╗ ██████╗██╗
+ ██╔════╝██╔════╝██║
+ ██║     ██║     ██║
+ ██║     ██║     ██║
+ ╚██████╗╚██████╗███████╗
+  ╚═════╝ ╚═════╝╚══════╝
+"""
+
+_CCL_TAGLINE = "Hit your limit? Need privacy? Just swap the model."
+
+
+def print_welcome_banner() -> None:
+    """Print the ASCII 3D CCL banner and project tagline to the console."""
+    console.print(_CCL_BANNER, style="bold cyan", highlight=False)
+    console.print(f"  [bold white]{_CCL_TAGLINE}[/bold white]")
+    console.print()
+
+
+# ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
 
@@ -1565,6 +1588,8 @@ def run_wizard(
     force_engine: str | None = None,
 ) -> int:
     state = WizardState.load() if resume else WizardState()
+    if not resume and not non_interactive and sys.stdout.isatty():
+        print_welcome_banner()
     if resume and state.completed_steps:
         info(f"Resuming. Already completed: {', '.join(state.completed_steps)}")
     if force_harness:
