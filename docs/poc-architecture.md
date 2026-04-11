@@ -37,10 +37,14 @@ That is enough to prove the idea without pretending we solved every backend.
      either runs `ollama launch claude|codex --model <tag>` (Ollama path)
      or sets inline env vars and execs the real harness (LM Studio /
      llama.cpp path)
-   - `~/.zshrc` / `~/.bashrc`: a fenced block (`# >>> claude-codex-local >>>`
-     … `# <<< claude-codex-local <<<`) declaring the aliases `cc` +
-     `claude-local` or `cx` + `codex-local`, all pointing at the helper
-     script
+   - `~/.zshrc` / `~/.bashrc`: one fenced block per harness
+     (`# >>> claude-codex-local:claude >>>` … `# <<< claude-codex-local:claude <<<`
+     for the Claude harness; `# >>> claude-codex-local:codex >>>` …
+     `# <<< claude-codex-local:codex <<<` for Codex) declaring the aliases
+     `cc` + `claude-local` or `cx` + `codex-local`, all pointing at the
+     corresponding helper script. The two blocks coexist so a user can
+     have `cc` and `cx` installed at once; each block is idempotently
+     replaced on re-run of its own harness.
 
 ### Why `ollama launch`
 

@@ -235,7 +235,8 @@ class TestWizardFullFlow:
         rc_path = Path.home() / ".zshrc"
         assert rc_path.exists()
         rc_body = rc_path.read_text()
-        assert "# >>> claude-codex-local >>>" in rc_body
+        assert "# >>> claude-codex-local:claude >>>" in rc_body
+        assert "# <<< claude-codex-local:claude <<<" in rc_body
         assert "alias cc=" in rc_body
 
         # Verifies step 2.8 wrote a guide.md.
