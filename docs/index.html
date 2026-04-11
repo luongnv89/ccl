@@ -886,7 +886,7 @@
       <div class="hero-left">
         <div class="hero-badge reveal">
           <span class="hero-badge-dot"></span>
-          v0.4.0 · Open Source
+          v0.5.0 · Open Source
         </div>
 
         <h1 class="hero-headline reveal">
@@ -1242,12 +1242,41 @@
 
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:32px">
 
+      <!-- v0.5.0 -->
+      <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.5.0</span>
+          <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-11</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--orange);margin-bottom:8px">Changed · Breaking</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--orange)">~</span> Single canonical CLI binary. The package now installs one entry point, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl</code>, replacing <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">claude-codex-local</code> and <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl-bridge</code>. Command tree unchanged — <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl setup</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl doctor</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl find-model</code> (#20)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--orange)">~</span> Internal rename: <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">claude_codex_local.bridge</code> → <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">claude_codex_local.core</code>. Anyone importing the module directly must switch to the new path</li>
+          </ul>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--red);margin-bottom:8px">Removed</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✗</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl-bridge</code> debug binary — its subcommands (<code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">profile</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">recommend</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">doctor</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">adapters</code>) remain reachable via <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">python -m claude_codex_local.core &lt;cmd&gt;</code></li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✗</span> Legacy <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">bin/claude-codex-local</code> bash wrapper and the top-level <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">wizard.py</code> duplicate — both predated the installable package</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Top-level <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl --version</code> and new global flags <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--no-color</code> (honors <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">NO_COLOR</code>), <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--verbose</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--quiet</code></li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">install.sh</code> now runs <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">pip install -e .</code> so the <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl</code> entry point lands in the virtualenv automatically</li>
+          </ul>
+        </div>
+      </div>
+
       <!-- v0.4.0 -->
       <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.4.0</span>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--cyan)">v0.4.0</span>
           <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-11</span>
-          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
         </div>
         <div>
           <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
