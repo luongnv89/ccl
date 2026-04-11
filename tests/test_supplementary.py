@@ -84,7 +84,7 @@ def _force_urlopen_fail(pb_module):
     def _fail(*a, **kw):
         raise urllib.error.URLError("connection refused")
 
-    # Monkeypatch must target the same urllib.request module the bridge imports.
+    # Monkeypatch must target the same urllib.request module claude_codex_local.core imports.
     return urllib.request, "urlopen", _fail
 
 

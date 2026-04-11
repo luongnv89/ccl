@@ -1480,7 +1480,7 @@ To wipe only this harness:
 2. `rm -f {helper_script}`
 3. `rm -f {guide_path}`
 
-To wipe the local bridge entirely (both harnesses, if installed):
+To wipe the local ccl setup entirely (both harnesses, if installed):
 
 1. Delete every `# >>> claude-codex-local:<harness> >>>` block from
    `{shell_rc}`.
