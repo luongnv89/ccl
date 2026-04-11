@@ -1061,9 +1061,7 @@ def machine_profile() -> dict[str, Any]:
             "harnesses": harnesses_present,
             "engines": engines_present,
             "llmfit": llmfit_info.get("present", False),
-            "has_minimum": bool(harnesses_present)
-            and bool(engines_present)
-            and llmfit_info.get("present", False),
+            "has_minimum": bool(harnesses_present) and bool(engines_present),
         },
         "ollama": {"models": parse_ollama_list()},
         "lmstudio": lms,
