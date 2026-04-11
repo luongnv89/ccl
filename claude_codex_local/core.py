@@ -1419,7 +1419,14 @@ MODE_CHOICES = ["balanced", "fast", "quality"]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="POC helper for claude-codex-local")
+    parser = argparse.ArgumentParser(
+        prog="python -m claude_codex_local.core",
+        description=(
+            "claude-codex-local debug CLI — machine profile, model recommendation, "
+            "doctor, and adapter introspection. These commands dump JSON for "
+            "scripting and debugging; the user-facing binary is `ccl`."
+        ),
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("profile")

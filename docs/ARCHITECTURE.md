@@ -32,13 +32,18 @@ This document describes the system design of `claude-codex-local`.
 
 ## Three Layers
 
-### 1. Machine profile + model recommendation (`poc_bridge.py`)
+### 1. Machine profile + model recommendation (`claude_codex_local/core.py`)
 
 - `profile` — dumps a JSON snapshot of installed harnesses, engines, `llmfit`, and free disk
 - `recommend` — picks the best-fit installed coding model for the hardware
 - `doctor` — pretty-prints the current wizard state and re-runs presence checks
+- `adapters` — lists the registered `RuntimeAdapter` implementations (ollama, lmstudio, llamacpp)
 
-### 2. Interactive setup wizard (`wizard.py`)
+These are reachable for debugging via `python -m claude_codex_local.core <cmd>`. There is no user-facing binary for them — they return JSON for scripting and introspection.
+
+### 2. Interactive setup wizard + CLI (`claude_codex_local/wizard.py`)
+
+The wizard is exposed as the `ccl` binary (installed by `[project.scripts]` in `pyproject.toml`).
 
 A 9-step wizard that runs once (or with `--resume` after a failure):
 

@@ -9,9 +9,9 @@ COPY dist/${WHEEL_FILE} .
 
 RUN pip install --no-cache-dir ${WHEEL_FILE}
 
-# Verify entry points are present and functional.
-RUN claude-codex-local --help > /dev/null 2>&1 && \
-    ccl-bridge --help > /dev/null 2>&1 && \
-    ccl-bridge adapters > /dev/null 2>&1
+# Verify entry point is present and functional.
+RUN ccl --help > /dev/null 2>&1 && \
+    ccl --version > /dev/null 2>&1 && \
+    python -m claude_codex_local.core adapters > /dev/null 2>&1
 
 CMD ["echo", "pip install scenario: PASS"]

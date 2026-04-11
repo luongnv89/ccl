@@ -20,7 +20,7 @@ That is enough to prove the idea without pretending we solved every backend.
 
 ### Three layers
 
-1. **Machine profile + model recommendation** (`poc_bridge.py`)
+1. **Machine profile + model recommendation** (`claude_codex_local/core.py`, formerly `poc_bridge.py` / `bridge.py`)
    - `profile`: dump a JSON snapshot of installed harnesses/engines/llmfit/disk
    - `recommend`: pick a best-fit installed coding model, biased toward
      models that actually load on this machine (not just paper-best)

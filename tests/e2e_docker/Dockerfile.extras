@@ -9,10 +9,10 @@ COPY . .
 
 RUN pip install --no-cache-dir ".[dev]"
 
-# Verify core entry points work.
-RUN claude-codex-local --help > /dev/null 2>&1 && \
-    ccl-bridge --help > /dev/null 2>&1 && \
-    ccl-bridge adapters > /dev/null 2>&1
+# Verify core entry point works.
+RUN ccl --help > /dev/null 2>&1 && \
+    ccl --version > /dev/null 2>&1 && \
+    python -m claude_codex_local.core adapters > /dev/null 2>&1
 
 # Verify dev extras are importable (pytest, ruff, mypy, bandit).
 RUN python -c "import pytest, mypy, bandit" && \

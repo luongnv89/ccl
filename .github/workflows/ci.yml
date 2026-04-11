@@ -22,8 +22,7 @@ jobs:
       - name: Install dev deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff mypy bandit detect-secrets pre-commit pytest pytest-cov
+          pip install -e ".[dev]"
       - name: Run pre-commit (all files, commit stage)
         run: pre-commit run --all-files --show-diff-on-failure
 
@@ -43,11 +42,11 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
           pip install pytest pytest-cov
       - name: Run pytest with coverage
         run: |
-          python -m pytest -q --cov=poc_bridge --cov=wizard --cov-report=xml --cov-report=term-missing
+          python -m pytest -q --cov=claude_codex_local --cov-report=xml --cov-report=term-missing
       - name: Upload coverage
         if: matrix.python-version == '3.11'
         uses: actions/upload-artifact@v4
@@ -68,7 +67,7 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
       - name: Run CLI smoke script
         env:
           PYTHON: python

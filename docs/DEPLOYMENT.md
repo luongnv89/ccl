@@ -13,7 +13,7 @@ This document covers how to release and distribute `claude-codex-local`.
 The `install.sh` remote installer fetches a specific tag via `CCL_REF` (defaults to `main`). After tagging, users can pin to a specific release:
 
 ```bash
-CCL_REF=v0.4.0 bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+CCL_REF=v0.5.0 bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 
 ## Installer (`install.sh`)
@@ -22,8 +22,8 @@ The installer is designed to work without cloning the repo:
 
 1. Downloads a tarball of `CCL_REF` from GitHub
 2. Extracts to `CCL_INSTALL_DIR` (default: `~/.claude-codex-local-src`)
-3. Creates a virtualenv and installs `requirements.txt`
-4. Launches `./bin/claude-codex-local` automatically
+3. Creates a virtualenv and runs `pip install -e .` inside it — this puts the `ccl` binary at `<venv>/bin/ccl`
+4. Launches `.venv/bin/ccl` automatically
 
 Environment variables:
 

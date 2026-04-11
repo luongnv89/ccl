@@ -2,10 +2,10 @@
 End-to-end tests for claude-codex-local — stubbed, CI-safe.
 
 These tests verify the full wiring of the MVP:
-  * bridge CLI subcommands invoked via main()
+  * core debug CLI subcommands invoked via main()
   * wizard.run_wizard() executing all 8 steps in non-interactive mode
   * wizard.run_doctor() re-checking presence after a successful setup
-  * bin/ shims spawned as real subprocesses with a fake PATH
+  * ccl entry point spawned as a real subprocess with a fake PATH
 
 Everything that would normally shell out to ollama/lms/claude/codex/llmfit
 is either patched at the module level or hit through the `fake_bin` fixture.
@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
-# Helpers — install a synthetic profile + candidate list into bridge.
+# Helpers — install a synthetic profile + candidate list into core.
 # ---------------------------------------------------------------------------
 
 
@@ -98,15 +98,18 @@ def _stub_candidates():
 
 
 # ---------------------------------------------------------------------------
-# bridge CLI subcommands — invoke main() with argv injection.
+# Core debug CLI subcommands — invoke main() with argv injection.
+#
+# These are reachable via `python -m claude_codex_local.core <cmd>` for
+# debugging; they are NOT a user-facing binary.
 # ---------------------------------------------------------------------------
 
 
-class TestBridgeCli:
+class TestCoreDebugCli:
     def test_profile_prints_json(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
-        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "profile"])
+        monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "profile"])
         pb.main()
         out = capsys.readouterr().out
         data = json.loads(out)
@@ -120,7 +123,9 @@ class TestBridgeCli:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "recommend", "--mode", "balanced"])
+        monkeypatch.setattr(
+            sys, "argv", ["claude_codex_local.core", "recommend", "--mode", "balanced"]
+        )
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert data["selected_model"] == "qwen3-coder:30b"
@@ -134,7 +139,7 @@ class TestBridgeCli:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "doctor"])
+        monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert "profile" in data and "recommendation" in data
@@ -148,7 +153,7 @@ class TestBridgeCli:
         bad["presence"]["engines"] = []
         monkeypatch.setattr(pb, "machine_profile", lambda: bad)
         monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
-        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "doctor"])
+        monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         assert any("Missing tool: ollama" in i for i in data["issues"])
@@ -177,7 +182,7 @@ class TestBridgeCli:
                 "model": None,
             },
         )
-        monkeypatch.setattr(sys, "argv", ["ccl-bridge", "adapters"])
+        monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "adapters"])
         pb.main()
         data = json.loads(capsys.readouterr().out)
         names = {a["name"] for a in data["adapters"]}
@@ -290,13 +295,14 @@ class TestWizardFullFlow:
 
 
 # ---------------------------------------------------------------------------
-# bin/ shims spawned as real subprocesses with a fake PATH.
+# ccl + core debug CLI spawned as real subprocesses with a fake PATH.
 # ---------------------------------------------------------------------------
 
 
-class TestBinShims:
-    def _spawn_shim(self, shim_name, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None):
-        """Invoke a bin/ shim with isolated STATE_DIR + a fake PATH."""
+class TestCliSubprocesses:
+    def _spawn_ccl(self, extra_args=None, tmp_path=None, fake_bin=None, extra_env=None):
+        """Invoke the `ccl` entry point (via `python -m claude_codex_local.wizard`)
+        with an isolated STATE_DIR and a fake PATH."""
         bdir, _ = fake_bin
         env = os.environ.copy()
         env["PATH"] = f"{bdir}:/usr/bin:/bin"
@@ -306,27 +312,7 @@ class TestBinShims:
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
-            [str(REPO_ROOT / "bin" / shim_name), *(extra_args or [])],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=60,
-        )
-
-    def _spawn_bridge(
-        self, subcommand, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None
-    ):
-        """Invoke claude_codex_local.bridge as a module with isolated STATE_DIR + a fake PATH."""
-        bdir, _ = fake_bin
-        env = os.environ.copy()
-        env["PATH"] = f"{bdir}:/usr/bin:/bin"
-        env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
-        env["HOME"] = str(tmp_path / "home")
-        (tmp_path / "home").mkdir(exist_ok=True)
-        if extra_env:
-            env.update(extra_env)
-        return subprocess.run(
-            [sys.executable, "-m", "claude_codex_local.bridge", subcommand, *(extra_args or [])],
+            [sys.executable, "-m", "claude_codex_local.wizard", *(extra_args or [])],
             capture_output=True,
             text=True,
             env=env,
@@ -334,24 +320,44 @@ class TestBinShims:
             cwd=str(REPO_ROOT),
         )
 
-    def test_ccl_bridge_profile_emits_json(self, fake_bin, tmp_path):
-        result = self._spawn_bridge("profile", tmp_path=tmp_path, fake_bin=fake_bin)
+    def _spawn_core(
+        self, subcommand, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None
+    ):
+        """Invoke claude_codex_local.core as a module with isolated STATE_DIR + a fake PATH."""
+        bdir, _ = fake_bin
+        env = os.environ.copy()
+        env["PATH"] = f"{bdir}:/usr/bin:/bin"
+        env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
+        env["HOME"] = str(tmp_path / "home")
+        (tmp_path / "home").mkdir(exist_ok=True)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            [sys.executable, "-m", "claude_codex_local.core", subcommand, *(extra_args or [])],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+            cwd=str(REPO_ROOT),
+        )
+
+    def test_core_profile_emits_json(self, fake_bin, tmp_path):
+        result = self._spawn_core("profile", tmp_path=tmp_path, fake_bin=fake_bin)
         assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert "tools" in data
         assert "presence" in data
 
-    def test_ccl_bridge_recommend_returns_fallback_when_no_candidates(self, fake_bin, tmp_path):
+    def test_core_recommend_returns_fallback_when_no_candidates(self, fake_bin, tmp_path):
         # Default llmfit stub returns {"models": []}, so we should hit pass 5 fallback.
-        result = self._spawn_bridge("recommend", tmp_path=tmp_path, fake_bin=fake_bin)
+        result = self._spawn_core("recommend", tmp_path=tmp_path, fake_bin=fake_bin)
         assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert data["status"] == "download-required"
         assert data["selected_model"] == "qwen2.5-coder:7b"
 
-    def test_claude_codex_local_doctor_subcommand_no_state(self, fake_bin, tmp_path):
-        result = self._spawn_shim(
-            "claude-codex-local",
+    def test_ccl_doctor_no_state(self, fake_bin, tmp_path):
+        result = self._spawn_ccl(
             extra_args=["doctor"],
             tmp_path=tmp_path,
             fake_bin=fake_bin,
