@@ -859,10 +859,17 @@ def disk_usage_for(path: Path) -> dict[str, Any]:
 
 
 def huggingface_cli_detect() -> dict[str, Any]:
-    """Detect huggingface-cli (from huggingface_hub[cli] package) on PATH."""
-    if shutil.which("huggingface-cli"):
-        return {"present": True, "version": ""}
-    return {"present": False, "version": ""}
+    """Detect the HuggingFace Hub CLI on PATH.
+
+    Tries both ``hf`` (the modern entry-point introduced in huggingface_hub
+    ≥0.20) and the legacy ``huggingface-cli`` name so that either installation
+    is recognised.  Returns a ``binary`` key with the name that was found,
+    mirroring the convention used by ``llamacpp_detect``.
+    """
+    for candidate in ("hf", "huggingface-cli"):
+        if shutil.which(candidate):
+            return {"present": True, "binary": candidate, "version": ""}
+    return {"present": False, "binary": "", "version": ""}
 
 
 def huggingface_download_gguf(
@@ -871,7 +878,7 @@ def huggingface_download_gguf(
     local_dir: str | None = None,
 ) -> dict[str, Any]:
     """
-    Download a GGUF model file from Hugging Face Hub via huggingface-cli.
+    Download a GGUF model file from Hugging Face Hub via the HuggingFace CLI.
 
     Args:
         repo_id:   HF repo ID, e.g. "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
@@ -882,14 +889,15 @@ def huggingface_download_gguf(
     Returns:
         {"ok": bool, "path": str | None, "error": str | None}
     """
-    if not huggingface_cli_detect().get("present"):
+    det = huggingface_cli_detect()
+    if not det.get("present"):
         return {
             "ok": False,
             "path": None,
-            "error": "huggingface-cli not found — install with: pip install 'huggingface_hub[cli]'",
+            "error": "HuggingFace CLI (hf / huggingface-cli) not found — install with: pip install 'huggingface_hub[cli]'",
         }
 
-    cmd = ["huggingface-cli", "download", repo_id]
+    cmd = [det["binary"], "download", repo_id]
     if filename:
         cmd.append(filename)
     if local_dir:

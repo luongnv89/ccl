@@ -124,14 +124,16 @@ def model_path() -> Path:
     if expected.exists():
         return expected
 
-    hf_cli = shutil.which("huggingface-cli")
+    hf_cli = shutil.which("hf") or shutil.which("huggingface-cli")
     if hf_cli is None:
-        pytest.skip("huggingface-cli not found — install with: pip install 'huggingface_hub[cli]'")
+        pytest.skip(
+            "HuggingFace CLI (hf / huggingface-cli) not found — install with: pip install 'huggingface_hub[cli]'"
+        )
 
     MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [
-            "huggingface-cli",
+            hf_cli,
             "download",
             MODEL_REPO,
             MODEL_FILE,
@@ -310,7 +312,7 @@ class TestRealHuggingFaceDownload:
         monkeypatch.setattr(
             pb,
             "huggingface_cli_detect",
-            lambda: {"present": True, "version": "patched"},
+            lambda: {"present": True, "binary": "huggingface-cli", "version": "patched"},
         )
         result = pb.huggingface_download_gguf(
             repo_id=MODEL_REPO,

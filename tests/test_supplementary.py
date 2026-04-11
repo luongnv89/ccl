@@ -371,11 +371,29 @@ class TestSmokeTestCodex:
 
 
 class TestHuggingfaceCliDetect:
-    def test_present(self, isolated_state, monkeypatch):
+    def test_present_legacy_name(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb.shutil, "which", lambda name: "/usr/local/bin/huggingface-cli")
+
+        def which_legacy_only(name: str) -> str | None:
+            return "/usr/local/bin/huggingface-cli" if name == "huggingface-cli" else None
+
+        monkeypatch.setattr(pb.shutil, "which", which_legacy_only)
         result = pb.huggingface_cli_detect()
         assert result["present"] is True
+        assert result["binary"] == "huggingface-cli"
+        assert result["version"] == ""
+
+    def test_present_modern_hf_name(self, isolated_state, monkeypatch):
+        # huggingface_hub >=0.20 installs the CLI as `hf`, not `huggingface-cli`.
+        pb, _, _ = isolated_state
+
+        def which_hf_only(name: str) -> str | None:
+            return "/usr/local/bin/hf" if name == "hf" else None
+
+        monkeypatch.setattr(pb.shutil, "which", which_hf_only)
+        result = pb.huggingface_cli_detect()
+        assert result["present"] is True
+        assert result["binary"] == "hf"
         assert result["version"] == ""
 
     def test_missing(self, isolated_state, monkeypatch):
@@ -383,6 +401,7 @@ class TestHuggingfaceCliDetect:
         monkeypatch.setattr(pb.shutil, "which", lambda name: None)
         result = pb.huggingface_cli_detect()
         assert result["present"] is False
+        assert result["binary"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -396,12 +415,14 @@ class TestHuggingfaceDownloadGguf:
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
         result = pb.huggingface_download_gguf("org/repo")
         assert result["ok"] is False
-        assert "huggingface-cli not found" in result["error"]
+        assert "not found" in result["error"]
         assert result["path"] is None
 
     def test_success_returns_path(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
         monkeypatch.setattr(
             pb,
             "run",
@@ -414,9 +435,31 @@ class TestHuggingfaceDownloadGguf:
         assert result["path"] == "/home/user/.cache/huggingface/hub/model.gguf"
         assert result["error"] is None
 
+    def test_uses_detected_binary_name(self, isolated_state, monkeypatch):
+        # The download command must use the binary name returned by detect,
+        # not the hardcoded string "huggingface-cli".
+        pb, _, _ = isolated_state
+        captured: list[list[str]] = []
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "run",
+            lambda cmd, **kw: (
+                captured.append(cmd) or subprocess.CompletedProcess(cmd, 0, "/tmp/model.gguf\n", "")
+            ),
+        )
+        pb.huggingface_download_gguf("org/repo")
+        assert captured[0][0] == "hf"
+
     def test_download_failure(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "huggingface-cli", "version": ""},
+        )
         monkeypatch.setattr(
             pb,
             "run",
@@ -428,7 +471,9 @@ class TestHuggingfaceDownloadGguf:
 
     def test_exception_is_caught(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("network error"))
         )
@@ -457,7 +502,9 @@ class TestDownloadGgufViaHfCli:
 
     def test_success_returns_path(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
@@ -474,7 +521,9 @@ class TestDownloadGgufViaHfCli:
     def test_splits_repo_and_filename(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
         captured = {}
-        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
@@ -489,7 +538,9 @@ class TestDownloadGgufViaHfCli:
 
     def test_download_failure_propagates(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True})
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
