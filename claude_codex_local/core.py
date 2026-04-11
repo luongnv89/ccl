@@ -894,7 +894,7 @@ def huggingface_download_gguf(
         return {
             "ok": False,
             "path": None,
-            "error": "huggingface-cli not found — install with: pip install 'huggingface_hub[cli]'",
+            "error": "HuggingFace CLI (hf / huggingface-cli) not found — install with: pip install 'huggingface_hub[cli]'",
         }
 
     cmd = [det["binary"], "download", repo_id]

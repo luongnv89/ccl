@@ -414,7 +414,7 @@ class TestHuggingfaceDownloadGguf:
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
         result = pb.huggingface_download_gguf("org/repo")
         assert result["ok"] is False
-        assert "huggingface-cli not found" in result["error"]
+        assert "not found" in result["error"]
         assert result["path"] is None
 
     def test_success_returns_path(self, isolated_state, monkeypatch):
