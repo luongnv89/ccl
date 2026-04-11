@@ -224,7 +224,7 @@ class TestMachineProfileAggregation:
         assert "ollama" in profile["presence"]["engines"]
         assert "lmstudio" in profile["presence"]["engines"]
         assert set(profile["presence"]["harnesses"]) == {"claude", "codex"}
-        assert profile["llmfit_system"] == {"ram_gb": 64}
+        assert profile["llmfit_system"] == {"system": {"ram_gb": 64}}
 
 
 # ---------------------------------------------------------------------------
