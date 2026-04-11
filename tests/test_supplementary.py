@@ -53,20 +53,120 @@ class TestLlamacppDetect:
 
 
 # ---------------------------------------------------------------------------
-# smoke_test_ollama_model — timeout + exception + success + mismatch branches.
+# smoke_test_ollama_model — HTTP path (with eval_count/eval_duration timing)
+# and CLI fallback path covering timeout + exception + mismatch branches.
 # ---------------------------------------------------------------------------
 
 
+class _FakeHttpResp:
+    """Minimal fake urllib response for monkeypatching urllib.request.urlopen."""
+
+    def __init__(self, body: dict):
+        import json as _json
+
+        self._data = _json.dumps(body).encode()
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+
+def _force_urlopen_fail(pb_module):
+    """Make all urllib.request.urlopen calls fail with URLError (forces CLI fallback)."""
+    import urllib.error
+    import urllib.request
+
+    def _fail(*a, **kw):
+        raise urllib.error.URLError("connection refused")
+
+    # Monkeypatch must target the same urllib.request module the bridge imports.
+    return urllib.request, "urlopen", _fail
+
+
+class TestSmokeTestOllamaHTTP:
+    """Exercises the primary HTTP path with real timing fields from Ollama."""
+
+    def test_success_with_timing_fields(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.request
+
+        # eval_count=20 tokens in 1 second → 20 tok/s
+        body = {
+            "response": "READY",
+            "eval_count": 20,
+            "eval_duration": 1_000_000_000,  # 1s in nanoseconds
+        }
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeHttpResp(body))
+        result = pb.smoke_test_ollama_model("qwen3-coder:30b")
+        assert result["ok"] is True
+        assert result["response"] == "READY"
+        assert result["completion_tokens"] == 20
+        assert result["duration_seconds"] == 1.0
+        assert result["tokens_per_second"] == 20.0
+
+    def test_response_mismatch_on_http(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeHttpResp(
+                {"response": "nope", "eval_count": 2, "eval_duration": 1_000_000_000}
+            ),
+        )
+        result = pb.smoke_test_ollama_model("qwen3-coder:30b")
+        assert result["ok"] is False
+        assert result["response"] == "nope"
+        assert result["tokens_per_second"] == 2.0
+
+    def test_missing_timing_fields_returns_none(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.request
+
+        # Body without eval_count/eval_duration — tokens_per_second should be None.
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeHttpResp({"response": "READY"}),
+        )
+        result = pb.smoke_test_ollama_model("qwen3-coder:30b")
+        assert result["ok"] is True
+        assert result["tokens_per_second"] is None
+        assert result["completion_tokens"] is None
+
+
 class TestSmokeTestOllama:
+    """Legacy CLI-fallback path — reached when the HTTP daemon is unreachable."""
+
+    def _fail_urlopen(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        def _raise(*a, **kw):
+            raise urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _raise)
+
     def test_success(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        self._fail_urlopen(monkeypatch)
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "READY\n", "")
         )
-        assert pb.smoke_test_ollama_model("qwen3-coder:30b")["ok"] is True
+        result = pb.smoke_test_ollama_model("qwen3-coder:30b")
+        assert result["ok"] is True
+        # CLI fallback has no timing info.
+        assert result["tokens_per_second"] is None
 
     def test_response_mismatch(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        self._fail_urlopen(monkeypatch)
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, "nope\n", "")
         )
@@ -76,6 +176,7 @@ class TestSmokeTestOllama:
 
     def test_timeout(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        self._fail_urlopen(monkeypatch)
 
         def boom(*a, **kw):
             raise subprocess.TimeoutExpired(cmd=a[0], timeout=180)
@@ -87,6 +188,7 @@ class TestSmokeTestOllama:
 
     def test_generic_exception(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        self._fail_urlopen(monkeypatch)
         monkeypatch.setattr(pb, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
         result = pb.smoke_test_ollama_model("qwen3-coder:30b")
         assert result["ok"] is False

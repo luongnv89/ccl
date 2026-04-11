@@ -460,3 +460,186 @@ class TestFindModelAuto:
         monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
         profile = {"ollama": {"models": []}, "lmstudio": {"models": []}}
         assert wiz._find_model_auto("ollama", profile) is None
+
+
+# ---------------------------------------------------------------------------
+# Smoke test speed reporting — throughput verdicts + slow-model prompt.
+# ---------------------------------------------------------------------------
+
+
+class TestSpeedVerdict:
+    def test_slow_below_10(self, isolated_state):
+        _, wiz, _ = isolated_state
+        label, printer = wiz._speed_verdict(5.5)
+        assert "slow" in label
+        assert printer is wiz.warn
+
+    def test_acceptable_between_10_and_30(self, isolated_state):
+        _, wiz, _ = isolated_state
+        label, printer = wiz._speed_verdict(20.0)
+        assert "acceptable" in label
+        assert printer is wiz.info
+
+    def test_fast_at_or_above_30(self, isolated_state):
+        _, wiz, _ = isolated_state
+        label, printer = wiz._speed_verdict(42.0)
+        assert "fast" in label
+        assert printer is wiz.ok
+
+    def test_format_helper(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._format_tokens_per_second(15.3) == "~15.3 tok/s"
+        assert wiz._format_tokens_per_second(42.0) == "~42.0 tok/s"
+
+
+class TestReportSmokeTestSpeed:
+    def test_missing_tps_does_not_block(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = {"ok": True, "response": "READY"}
+        # No tokens_per_second field — function must return True without crashing.
+        assert wiz._report_smoke_test_speed(result, non_interactive=True) is True
+
+    def test_fast_throughput_continues_without_prompt(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = {
+            "ok": True,
+            "response": "READY",
+            "tokens_per_second": 45.0,
+            "completion_tokens": 20,
+            "duration_seconds": 0.4,
+        }
+        assert wiz._report_smoke_test_speed(result, non_interactive=False) is True
+
+    def test_acceptable_throughput_continues(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = {
+            "ok": True,
+            "response": "READY",
+            "tokens_per_second": 15.0,
+            "completion_tokens": 30,
+            "duration_seconds": 2.0,
+        }
+        assert wiz._report_smoke_test_speed(result, non_interactive=False) is True
+
+    def test_slow_throughput_non_interactive_continues(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = {
+            "ok": True,
+            "response": "READY",
+            "tokens_per_second": 5.0,
+            "completion_tokens": 10,
+            "duration_seconds": 2.0,
+        }
+        assert wiz._report_smoke_test_speed(result, non_interactive=True) is True
+
+    def test_slow_throughput_interactive_keep_returns_true(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+
+        class _FakeAsk:
+            def ask(self):
+                return True
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _FakeAsk())
+        result = {
+            "ok": True,
+            "response": "READY",
+            "tokens_per_second": 4.0,
+            "completion_tokens": 8,
+            "duration_seconds": 2.0,
+        }
+        assert wiz._report_smoke_test_speed(result, non_interactive=False) is True
+
+    def test_slow_throughput_interactive_decline_returns_false(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+
+        class _FakeAsk:
+            def ask(self):
+                return False
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _FakeAsk())
+        result = {
+            "ok": True,
+            "response": "READY",
+            "tokens_per_second": 4.0,
+            "completion_tokens": 8,
+            "duration_seconds": 2.0,
+        }
+        assert wiz._report_smoke_test_speed(result, non_interactive=False) is False
+
+
+class TestStep2_5SmokeTest:
+    """Integration of step_2_5_smoke_test with the speed reporting helper."""
+
+    def _setup_state(self, wiz, engine="ollama"):
+        state = wiz.WizardState(
+            primary_engine=engine,
+            engine_model_tag="qwen3-coder:30b",
+        )
+        return state
+
+    def test_fast_model_passes(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_ollama_model",
+            lambda tag: {
+                "ok": True,
+                "response": "READY",
+                "tokens_per_second": 42.0,
+                "completion_tokens": 20,
+                "duration_seconds": 0.5,
+            },
+        )
+        state = self._setup_state(wiz)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert "2.5" in state.completed_steps
+        assert state.smoke_test_result["tokens_per_second"] == 42.0
+
+    def test_slow_model_non_interactive_still_passes(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_ollama_model",
+            lambda tag: {
+                "ok": True,
+                "response": "READY",
+                "tokens_per_second": 3.0,
+                "completion_tokens": 6,
+                "duration_seconds": 2.0,
+            },
+        )
+        state = self._setup_state(wiz)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert "2.5" in state.completed_steps
+
+    def test_slow_model_interactive_decline_aborts(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_ollama_model",
+            lambda tag: {
+                "ok": True,
+                "response": "READY",
+                "tokens_per_second": 3.0,
+                "completion_tokens": 6,
+                "duration_seconds": 2.0,
+            },
+        )
+
+        class _FakeAsk:
+            def ask(self):
+                return False
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _FakeAsk())
+        state = self._setup_state(wiz)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=False) is False
+        assert "2.5" not in state.completed_steps
+
+    def test_failed_smoke_test_reports_failure(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "smoke_test_ollama_model", lambda tag: {"ok": False, "error": "boom"}
+        )
+        state = self._setup_state(wiz)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
+        assert "2.5" not in state.completed_steps
