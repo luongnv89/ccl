@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-11
+
+### Added
+- ASCII 3D welcome banner with project tagline displayed at wizard startup (#23, #25)
+
+### Fixed
+- HuggingFace CLI detection now checks both `hf` (modern) and `huggingface-cli` (legacy) binary names, uses the resolved binary in download commands, and injects the Python scripts directory into PATH immediately after pip install so the new binary is discoverable without reloading the shell (#21, #22)
+- `llmfit` check made optional — environment discovery (Step 2.1) no longer gates on llmfit being installed; llmfit is now checked only on-demand when the user requests model selection help (#24, #26)
+
 ## [0.5.0] - 2026-04-11
 
 ### Changed

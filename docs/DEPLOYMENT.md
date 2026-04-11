@@ -13,7 +13,7 @@ This document covers how to release and distribute `claude-codex-local`.
 The `install.sh` remote installer fetches a specific tag via `CCL_REF` (defaults to `main`). After tagging, users can pin to a specific release:
 
 ```bash
-CCL_REF=v0.5.0 bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+CCL_REF=v0.6.0 bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 
 ## Installer (`install.sh`)
@@ -43,9 +43,9 @@ GitHub Actions CI runs on every push and PR (`.github/workflows/ci.yml`):
 
 Tests marked `@pytest.mark.local` are skipped in CI since they require real binaries.
 
-## PyPI (future)
+## PyPI
 
-The project is not currently published to PyPI. If publishing in the future:
+The package is published to PyPI as `claude-codex-local`. To publish a new release:
 
 ```bash
 pip install build twine
