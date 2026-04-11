@@ -166,7 +166,6 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("lmstudio (engine)", tools["lmstudio"])
     row("llama.cpp (engine)", tools["llamacpp"])
     row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
-    row("llmfit", tools["llmfit"])
     console.print(table)
 
     free_gib = disk.get("free_gib", "?")
@@ -176,7 +175,6 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     if presence["has_minimum"]:
         ok(f"Found harnesses: {', '.join(presence['harnesses'])}")
         ok(f"Found engines: {', '.join(presence['engines'])}")
-        ok("llmfit is available")
         state.mark("2.1")
         return True
 
@@ -185,8 +183,6 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
         warn("No harness found (need claude or codex)")
     if not presence["engines"]:
         warn("No engine found (need ollama, lmstudio, or llama.cpp)")
-    if not presence["llmfit"]:
-        warn("llmfit is not installed")
     return False
 
 
@@ -242,8 +238,6 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
         missing.append("HARNESS (claude or codex)")
     if not presence.get("engines"):
         missing.append("ENGINE (ollama, lmstudio, or llamacpp)")
-    if not presence.get("llmfit"):
-        missing.append("llmfit")
 
     if not missing:
         info("Nothing missing.")
@@ -260,8 +254,6 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
         _show_install_hint("ollama")
         _show_install_hint("lmstudio")
         _show_install_hint("llamacpp")
-    if not presence.get("llmfit"):
-        _show_install_hint("llmfit")
 
     if non_interactive:
         fail("Cannot install missing components in --non-interactive mode.")
