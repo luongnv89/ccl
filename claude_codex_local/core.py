@@ -1070,7 +1070,7 @@ def machine_profile() -> dict[str, Any]:
         "state_dir": str(STATE_DIR),
     }
     if llmfit_sys:
-        profile["llmfit_system"] = llmfit_sys.get("system", llmfit_sys)
+        profile["llmfit_system"] = llmfit_sys
     return profile
 
 

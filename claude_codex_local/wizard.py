@@ -212,7 +212,10 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
         spec_table.add_row("RAM", f"{total_ram} GB (Available: {available_ram} GB)")
         if has_gpu:
             spec_table.add_row("GPU", f"{gpu_name} ({gpu_vram} GB VRAM)")
-        spec_table.add_row("Platform", f"{llmfit_sys.get('system', 'Unknown')} / {llmfit_sys.get('machine', 'Unknown')}")
+        spec_table.add_row(
+            "Platform",
+            f"{llmfit_sys.get('system', 'Unknown')} / {llmfit_sys.get('machine', 'Unknown')}",
+        )
     else:
         spec_table.add_row("CPU", "Not available (llmfit not installed)")
         spec_table.add_row("RAM", "Not available (llmfit not installed)")
