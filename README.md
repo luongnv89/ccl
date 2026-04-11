@@ -51,7 +51,7 @@ uv tool install claude-codex-local
 Then run the setup wizard:
 
 ```bash
-claude-codex-local
+ccl
 ```
 
 ### One-command install (no clone required)
@@ -71,7 +71,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/
 Override defaults with env vars:
 
 ```bash
-CCL_REF=v0.4.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
+CCL_REF=v0.5.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
   bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 
@@ -84,11 +84,11 @@ cd claude-codex-local
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ```bash
-./bin/claude-codex-local
+ccl
 ```
 
 ### After setup
@@ -129,18 +129,21 @@ See [`guide.example.md`](guide.example.md) for the personalized daily-use guide 
 ## Usage
 
 ```bash
-./bin/claude-codex-local setup --harness claude --engine ollama   # skip prefs picker
-./bin/claude-codex-local setup --non-interactive                  # CI-friendly
-./bin/claude-codex-local setup --resume                           # resume after failure
-./bin/claude-codex-local find-model                               # standalone model recommendation
+ccl                                             # run the interactive first-run wizard
+ccl setup --harness claude --engine ollama      # skip the prefs picker
+ccl setup --non-interactive                     # CI-friendly install
+ccl setup --resume                              # resume after a failure
+ccl find-model                                  # standalone model recommendation
+ccl doctor                                      # wizard state + presence check
+ccl --version                                   # print version and exit
 ```
 
-Diagnostic helpers:
+Advanced / debug (no user binary — run as a Python module):
 
 ```bash
-claude-codex-local doctor    # wizard state + presence check
-ccl-bridge profile           # full hardware profile as JSON
-ccl-bridge recommend         # llmfit-only model recommendation
+python -m claude_codex_local.core profile      # full hardware profile as JSON
+python -m claude_codex_local.core recommend    # llmfit-only model recommendation
+python -m claude_codex_local.core adapters     # list all engine adapters
 ```
 
 ---
@@ -183,9 +186,9 @@ That's it. Your `~/.claude` and `~/.codex` are unchanged.
 
 ### Three layers
 
-1. **Machine profile + model recommendation** (`poc_bridge.py`) — dumps a JSON snapshot of installed harnesses/engines/llmfit/disk, runs `llmfit` for ranked model recommendations, and provides a `doctor` command for pretty-printing wizard state.
+1. **Machine profile + model recommendation** (`claude_codex_local/core.py`) — dumps a JSON snapshot of installed harnesses/engines/llmfit/disk, runs `llmfit` for ranked model recommendations, and provides a `doctor` command for pretty-printing wizard state.
 
-2. **Interactive wizard** (`wizard.py`) — 9 steps from discovery to ready-to-use daily alias. Persists progress in `.claude-codex-local/wizard-state.json` so `--resume` picks up after a failure.
+2. **Interactive wizard** (`claude_codex_local/wizard.py`) — 9 steps from discovery to ready-to-use daily alias. Persists progress in `.claude-codex-local/wizard-state.json` so `--resume` picks up after a failure.
 
 3. **Helper scripts + shell aliases** — `.claude-codex-local/bin/cc` (or `cx`) is a short bash wrapper. For Ollama it runs `ollama launch claude|codex --model <tag>`. For LM Studio / llama.cpp it sets inline env vars and execs the real harness. A fenced block in `~/.zshrc` / `~/.bashrc` declares the aliases.
 
@@ -229,8 +232,10 @@ Claude Code sends a `thinking` payload that Qwen3 reasoning models interpret as 
 
 ```
 .
-├── bin/
-│   └── claude-codex-local      # Main wizard entrypoint
+├── claude_codex_local/
+│   ├── __init__.py             # Package metadata + __version__
+│   ├── wizard.py               # Interactive setup wizard + `ccl` CLI
+│   └── core.py                 # Machine profile, engine adapters, llmfit bindings
 ├── scripts/
 │   └── e2e_smoke.sh            # End-to-end smoke test
 ├── docs/
@@ -239,8 +244,6 @@ Claude Code sends a `thinking` payload that Qwen3 reasoning models interpret as 
 │   ├── poc-bootstrap.md        # Bootstrap / install flow
 │   └── poc-proof.md            # Design rationale
 ├── tests/                      # pytest test suite
-├── wizard.py                   # Interactive setup wizard (core logic)
-├── poc_bridge.py               # Backend bridge / harness wiring
 ├── install.sh                  # One-command remote installer
 └── pyproject.toml              # Project metadata and tool config
 ```

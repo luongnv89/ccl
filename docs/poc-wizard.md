@@ -4,7 +4,7 @@ Date: 2026-04-10
 
 ## What this POC proves
 
-A single interactive command (`bin/claude-codex-local`) takes a user from
+A single interactive command (`ccl`) takes a user from
 "just installed" to "working single-command local coding session" in 9 steps,
 without ever touching their official `~/.claude` or `~/.codex` config. The
 daily driver is a one-word shell alias (`cc` or `cx`).
@@ -38,7 +38,7 @@ what they wanted had to fight the recommender. The new shape:
 
 - **Default** — user types the model name they want. Fast path, zero magic.
 - **Opt-in** — user picks "help me pick" in the wizard, or runs the
-  standalone `claude-codex-local find-model` subcommand any time.
+  standalone `ccl find-model` subcommand any time.
 
 Both paths converge on the same downstream disk/download/smoke-test/wire-up
 pipeline.
@@ -114,15 +114,15 @@ execs `codex -m <tag> "$@"`.
 
 ```bash
 # Full clean run
-rm -rf .claude-codex-local guide.md
-bin/claude-codex-local setup --harness claude --engine ollama
+rm -rf ~/.claude-codex-local guide.md
+ccl setup --harness claude --engine ollama
 
 # Non-interactive (CI-friendly)
-bin/claude-codex-local setup --non-interactive --harness claude --engine ollama
+ccl setup --non-interactive --harness claude --engine ollama
 
 # Resume after a failed step
-bin/claude-codex-local setup --resume
+ccl setup --resume
 
 # Standalone model recommendation (no setup)
-bin/claude-codex-local find-model
+ccl find-model
 ```

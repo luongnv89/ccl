@@ -37,19 +37,19 @@ Why this model:
 ### 1. Verify the box
 
 ```bash
-claude-codex-local doctor
+ccl doctor
 ```
 
 ### 2. Inspect the machine profile
 
 ```bash
-ccl-bridge profile
+python -m claude_codex_local.core profile
 ```
 
 ### 3. Inspect the recommendation
 
 ```bash
-ccl-bridge recommend
+python -m claude_codex_local.core recommend
 ```
 
 ### 4. Run the local Codex path

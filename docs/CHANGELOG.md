@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-11
+
+### Changed
+- **BREAKING:** Single canonical CLI binary. The package now installs one entry point, `ccl`, replacing the previous `claude-codex-local` and `ccl-bridge` commands. The command tree is unchanged (`ccl setup`, `ccl doctor`, `ccl find-model`) — only the binary name differs. Update any scripts, docs, or aliases that invoked the old names.
+- **BREAKING:** Removed `ccl-bridge` entirely. Its debug subcommands (`profile`, `recommend`, `doctor`, `adapters`) were internal JSON dumpers, not user-facing tools. They are still reachable for debugging via `python -m claude_codex_local.core <cmd>`.
+- **Internal rename:** `claude_codex_local/bridge.py` is now `claude_codex_local/core.py`. Anyone importing `claude_codex_local.bridge` directly must switch to `claude_codex_local.core`. The `core` module is the neutral home for the machine profile, engine adapters, and llmfit bindings — the old `bridge` name predated the package layout.
+- **Removed legacy shims:** `bin/claude-codex-local` (bash wrapper) and the top-level `wizard.py` duplicate are deleted. Both predated the installable package and are no longer needed.
+- `install.sh` now performs `pip install -e .` instead of installing raw `requirements.txt`, so the `ccl` entry point lands in the virtualenv automatically.
+- `ccl --version` is now available at the top level. New global flags: `--no-color` (also honors the `NO_COLOR` env var), `--verbose`, `--quiet`.
+
+### Migration
+
+If you had the old binary on your shell:
+
+```bash
+# before
+claude-codex-local setup --resume
+ccl-bridge profile
+
+# after
+ccl setup --resume
+python -m claude_codex_local.core profile
+```
+
+Reinstall the package to pick up the new entry point:
+
+```bash
+pip install --upgrade claude-codex-local      # PyPI
+# or, from a clone:
+pip install -e .
+```
+
+Your existing `~/.claude-codex-local/` state directory and the `cc` / `cx` shell aliases installed by a previous wizard run are unaffected.
+
 ## [0.4.0] - 2026-04-11
 
 ### Added

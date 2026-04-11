@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 # ---------------------------------------------------------------------------
-# poc_bridge.llamacpp_detect — all-missing and one-present branches.
+# core.llamacpp_detect — all-missing and one-present branches.
 # ---------------------------------------------------------------------------
 
 
@@ -84,7 +84,7 @@ def _force_urlopen_fail(pb_module):
     def _fail(*a, **kw):
         raise urllib.error.URLError("connection refused")
 
-    # Monkeypatch must target the same urllib.request module the bridge imports.
+    # Monkeypatch must target the same urllib.request module claude_codex_local.core imports.
     return urllib.request, "urlopen", _fail
 
 
@@ -330,7 +330,7 @@ class TestFindModelStandalone:
 
 
 # ---------------------------------------------------------------------------
-# poc_bridge.smoke_test_codex — the one big side-effect-heavy path still uncovered.
+# core.smoke_test_codex — the one big side-effect-heavy path still uncovered.
 # ---------------------------------------------------------------------------
 
 
@@ -366,7 +366,7 @@ class TestSmokeTestCodex:
 
 
 # ---------------------------------------------------------------------------
-# poc_bridge.huggingface_cli_detect
+# core.huggingface_cli_detect
 # ---------------------------------------------------------------------------
 
 
@@ -386,7 +386,7 @@ class TestHuggingfaceCliDetect:
 
 
 # ---------------------------------------------------------------------------
-# poc_bridge.huggingface_download_gguf
+# core.huggingface_download_gguf
 # ---------------------------------------------------------------------------
 
 

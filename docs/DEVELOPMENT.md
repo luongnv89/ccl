@@ -17,27 +17,34 @@ cd claude-codex-local
 
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 
 pre-commit install                 # set up git hooks
 ```
 
+The editable install puts the `ccl` entry point on your `PATH` inside the virtualenv.
+
 ## Running the Wizard
 
 ```bash
-./bin/claude-codex-local                          # interactive
-./bin/claude-codex-local setup --non-interactive  # CI-friendly
-./bin/claude-codex-local setup --resume           # resume after failure
-./bin/claude-codex-local find-model               # standalone llmfit query
+ccl                                # interactive
+ccl setup --non-interactive        # CI-friendly
+ccl setup --resume                 # resume after failure
+ccl find-model                     # standalone llmfit query
+ccl --version                      # print version
+ccl --help                         # top-level help
 ```
 
 ## Diagnostics
 
 ```bash
-ccl-bridge profile           # JSON hardware + software profile
-claude-codex-local doctor    # wizard state + presence checks
-ccl-bridge recommend         # llmfit model recommendation only
+ccl doctor                                       # wizard state + presence checks
+python -m claude_codex_local.core profile        # JSON hardware + software profile
+python -m claude_codex_local.core recommend      # llmfit model recommendation only
+python -m claude_codex_local.core adapters       # list all engine adapters
 ```
+
+The `core` debug subcommands were previously exposed as a separate `ccl-bridge` binary. They're now only reachable via `python -m` since they are internal JSON dumpers, not a user-facing tool.
 
 ## Testing
 
@@ -85,11 +92,10 @@ pre-commit run --all-files
 
 | File | Purpose |
 |------|---------|
-| `claude_codex_local/wizard.py` | Interactive setup wizard (core logic) |
-| `claude_codex_local/bridge.py` | Machine profile, model recommendation, doctor |
-| `bin/claude-codex-local` | Main wizard entrypoint |
-| `scripts/e2e_smoke.sh` | End-to-end smoke test |
-| `.claude-codex-local/` | Runtime state (gitignored) |
+| `claude_codex_local/wizard.py` | Interactive setup wizard + `ccl` CLI |
+| `claude_codex_local/core.py` | Machine profile, engine adapters, llmfit bindings, doctor |
+| `scripts/e2e_smoke.sh` | End-to-end smoke test for `ccl` + `core` debug CLI |
+| `~/.claude-codex-local/` | Runtime state (override with `CLAUDE_CODEX_LOCAL_STATE_DIR`) |
 
 ## Wizard State
 
@@ -101,22 +107,16 @@ rm -rf .claude-codex-local/
 
 ## Debugging
 
-Run with verbose output:
-
-```bash
-PYTHONPATH=. python wizard.py --debug
-```
-
 Inspect the machine profile JSON:
 
 ```bash
-ccl-bridge profile | python3 -m json.tool
+python -m claude_codex_local.core profile | python3 -m json.tool
 ```
 
 ## Adding a New Engine
 
-1. Add detection logic in `poc_bridge.py` (`_detect_engines()`)
-2. Add wiring logic in `wizard.py` (`_wire_engine()`)
-3. Add a new helper script template in `wizard.py` (`_render_helper_script()`)
+1. Add detection logic in `claude_codex_local/core.py` (engine `*_detect()` / `*_info()` helpers and the `RuntimeAdapter` list)
+2. Add wiring logic in `claude_codex_local/wizard.py` (`_wire_engine()`)
+3. Add a new helper script template in `claude_codex_local/wizard.py` (`_render_helper_script()`)
 4. Add tests in `tests/`
 5. Update `docs/ARCHITECTURE.md`

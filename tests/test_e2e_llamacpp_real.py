@@ -192,15 +192,15 @@ def live_server(model_path: Path):
 
 
 @pytest.fixture(scope="module")
-def bridge(model_path):
+def core(model_path):
     """
-    Import (or reload) bridge with LLAMACPP_SERVER_PORT pointing at our
-    test port.  Returns the bridge module with the patched port constant.
+    Import (or reload) core with LLAMACPP_SERVER_PORT pointing at our
+    test port.  Returns the core module with the patched port constant.
     """
     import importlib
 
     os.environ["LLAMACPP_SERVER_PORT"] = str(REAL_TEST_PORT)
-    import claude_codex_local.bridge as pb
+    import claude_codex_local.core as pb
 
     pb = importlib.reload(pb)
     yield pb
@@ -216,8 +216,8 @@ def bridge(model_path):
 class TestRealLlamaCppDetect:
     """llamacpp_detect() against the real PATH — no stubs."""
 
-    def test_detect_finds_binary(self, bridge):
-        result = bridge.llamacpp_detect()
+    def test_detect_finds_binary(self, core):
+        result = core.llamacpp_detect()
         assert result["present"] is True, f"llamacpp_detect returned: {result}"
         assert result["binary"] in ("llama-server", "llama-cpp-server", "server")
         assert result.get("version", "") != "" or True  # version may be empty on some builds
@@ -226,8 +226,8 @@ class TestRealLlamaCppDetect:
 class TestRealLlamaCppInfo:
     """llamacpp_info() against a live server."""
 
-    def test_info_detects_running_server(self, bridge, live_server):
-        info = bridge.llamacpp_info()
+    def test_info_detects_running_server(self, core, live_server):
+        info = core.llamacpp_info()
         assert info["present"] is True
         assert info["server_running"] is True
         assert info["server_port"] == REAL_TEST_PORT
@@ -238,12 +238,12 @@ class TestRealLlamaCppInfo:
 class TestRealSmokeTest:
     """smoke_test_llamacpp_model() — real inference."""
 
-    def test_smoke_test_returns_ok(self, bridge, live_server):
+    def test_smoke_test_returns_ok(self, core, live_server):
         # Use whatever model ID the server reports (or a placeholder).
-        info = bridge.llamacpp_info()
+        info = core.llamacpp_info()
         model_id = info.get("model") or "smollm2"
 
-        result = bridge.smoke_test_llamacpp_model(model_id)
+        result = core.smoke_test_llamacpp_model(model_id)
         assert (
             result.get("ok") is True
         ), f"smoke_test failed: {result.get('error') or result.get('response')}"
@@ -254,38 +254,38 @@ class TestRealSmokeTest:
 class TestRealLlamaCppAdapter:
     """LlamaCppAdapter protocol methods against the real machine."""
 
-    def test_name(self, bridge):
-        adapter = bridge.LlamaCppAdapter()
+    def test_name(self, core):
+        adapter = core.LlamaCppAdapter()
         assert adapter.name == "llamacpp"
 
-    def test_recommend_params(self, bridge):
-        adapter = bridge.LlamaCppAdapter()
+    def test_recommend_params(self, core):
+        adapter = core.LlamaCppAdapter()
         result = adapter.recommend_params("balanced")
         assert isinstance(result, dict)
         # llamacpp returns a fixed dict — just assert it's a mapping, not an error.
         assert result is not None
 
-    def test_detect(self, bridge):
-        adapter = bridge.LlamaCppAdapter()
+    def test_detect(self, core):
+        adapter = core.LlamaCppAdapter()
         result = adapter.detect()
         assert result["present"] is True
 
-    def test_healthcheck_with_live_server(self, bridge, live_server):
-        adapter = bridge.LlamaCppAdapter()
+    def test_healthcheck_with_live_server(self, core, live_server):
+        adapter = core.LlamaCppAdapter()
         result = adapter.healthcheck()
         assert result.get("ok") is True, f"healthcheck failed: {result.get('detail')}"
 
-    def test_list_models_with_live_server(self, bridge, live_server):
-        adapter = bridge.LlamaCppAdapter()
+    def test_list_models_with_live_server(self, core, live_server):
+        adapter = core.LlamaCppAdapter()
         models = adapter.list_models()
         assert isinstance(models, list)
         # llama.cpp runs one model at a time; the fixture loads exactly one.
         assert len(models) == 1
 
-    def test_run_test_with_live_server(self, bridge, live_server):
-        info = bridge.llamacpp_info()
+    def test_run_test_with_live_server(self, core, live_server):
+        info = core.llamacpp_info()
         model_id = info.get("model") or "smollm2"
-        adapter = bridge.LlamaCppAdapter()
+        adapter = core.LlamaCppAdapter()
         result = adapter.run_test(model_id)
         assert result.get("ok") is True, f"adapter.run_test failed: {result}"
 
@@ -298,7 +298,7 @@ class TestRealHuggingFaceDownload:
         Verify the download function works end-to-end.  The model is already
         cached in MODEL_CACHE_DIR so huggingface-cli skips re-downloading.
 
-        Note: bridge.huggingface_cli_detect() uses shutil.which() to check
+        Note: core.huggingface_cli_detect() uses shutil.which() to check
         whether huggingface-cli is on PATH.  We patch the detection to return
         present=True so the download logic runs in environments where the
         binary may not be on PATH — the actual subprocess call to
@@ -306,7 +306,7 @@ class TestRealHuggingFaceDownload:
         """
         import sys
 
-        pb = sys.modules["claude_codex_local.bridge"]
+        pb = sys.modules["claude_codex_local.core"]
         monkeypatch.setattr(
             pb,
             "huggingface_cli_detect",
