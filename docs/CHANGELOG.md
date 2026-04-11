@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-11
+
+### Added
+- Smoke test now measures and reports model throughput in tokens/second for Ollama, LM Studio, and llama.cpp engines, with slow/acceptable/fast guidance and an interactive prompt to re-pick slow models (#18)
+- Per-harness shell alias fences in `~/.zshrc` / `~/.bashrc` so `cc` (Claude Code) and `cx` (Codex) aliases coexist after setting up both harnesses, plus one-shot migration of legacy unified blocks (#19)
+- Changelog section on the GitHub Pages landing page and content refresh for v0.3.0 features (#15)
+
 ## [0.3.0] - 2026-04-11
 
 ### Added
