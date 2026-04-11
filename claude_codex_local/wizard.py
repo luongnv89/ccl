@@ -171,6 +171,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     tools = profile["tools"]
     presence = profile["presence"]
     disk = profile.get("disk", {})
+    llmfit_sys = profile.get("llmfit_system", {})
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Component")
@@ -190,6 +191,37 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("llama.cpp (engine)", tools["llamacpp"])
     row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
     console.print(table)
+
+    # Machine specs table
+    console.print()
+    console.print("[bold]Machine Specifications[/bold]")
+    spec_table = Table(show_header=True, header_style="bold blue")
+    spec_table.add_column("Specification", style="cyan")
+    spec_table.add_column("Value", style="green")
+
+    if llmfit_sys:
+        cpu_name = llmfit_sys.get("cpu_name", "Unknown")
+        cpu_cores = llmfit_sys.get("cpu_cores", "Unknown")
+        total_ram = llmfit_sys.get("total_ram_gb", "?")
+        available_ram = llmfit_sys.get("available_ram_gb", "?")
+        has_gpu = llmfit_sys.get("has_gpu", False)
+        gpu_name = llmfit_sys.get("gpu_name", "N/A") if has_gpu else "N/A"
+        gpu_vram = llmfit_sys.get("gpu_vram_gb", 0) if has_gpu else 0
+
+        spec_table.add_row("CPU", f"{cpu_name} ({cpu_cores} cores)")
+        spec_table.add_row("RAM", f"{total_ram} GB (Available: {available_ram} GB)")
+        if has_gpu:
+            spec_table.add_row("GPU", f"{gpu_name} ({gpu_vram} GB VRAM)")
+        spec_table.add_row(
+            "Platform",
+            f"{llmfit_sys.get('system', 'Unknown')} / {llmfit_sys.get('machine', 'Unknown')}",
+        )
+    else:
+        spec_table.add_row("CPU", "Not available (llmfit not installed)")
+        spec_table.add_row("RAM", "Not available (llmfit not installed)")
+        spec_table.add_row("GPU", "Not available (llmfit not installed)")
+
+    console.print(spec_table)
 
     free_gib = disk.get("free_gib", "?")
     total_gib = disk.get("total_gib", "?")
