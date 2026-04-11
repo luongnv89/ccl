@@ -526,41 +526,66 @@ class TestLlamaCppInfo:
         assert result["model"] is None
 
 
+class _FakeChatResp:
+    """Minimal fake OpenAI-compatible chat response for urllib mocking."""
+
+    def __init__(self, content: str, usage: dict | None = None):
+        body = {"choices": [{"message": {"content": content}}]}
+        if usage is not None:
+            body["usage"] = usage
+        self._data = json.dumps(body).encode()
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+
 class TestSmokeTestLlamaCppModel:
     def test_returns_ok_true_when_ready_in_response(self, monkeypatch):
-        class _FakeResp:
-            def read(self):
-                return json.dumps({"choices": [{"message": {"content": "READY"}}]}).encode()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                pass
-
         import urllib.request
 
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeResp())
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp("READY", usage={"completion_tokens": 4}),
+        )
         result = pb.smoke_test_llamacpp_model("my-model.gguf")
         assert result["ok"] is True
         assert result["response"] == "READY"
+        assert result["completion_tokens"] == 4
+        # duration_seconds should be positive and tokens_per_second computed.
+        assert result["duration_seconds"] > 0
+        assert isinstance(result["tokens_per_second"], float)
+        assert result["tokens_per_second"] > 0
 
     def test_returns_ok_false_when_response_not_ready(self, monkeypatch):
-        class _FakeResp:
-            def read(self):
-                return json.dumps({"choices": [{"message": {"content": "Hello!"}}]}).encode()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                pass
-
         import urllib.request
 
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeResp())
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp("Hello!", usage={"completion_tokens": 2}),
+        )
         result = pb.smoke_test_llamacpp_model("my-model.gguf")
         assert result["ok"] is False
+
+    def test_missing_usage_leaves_tokens_per_second_none(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp("READY"),  # no usage block
+        )
+        result = pb.smoke_test_llamacpp_model("my-model.gguf")
+        assert result["ok"] is True
+        assert result["tokens_per_second"] is None
+        assert result["completion_tokens"] is None
 
     def test_returns_ok_false_on_connection_error(self, monkeypatch):
         import urllib.error
@@ -572,6 +597,61 @@ class TestSmokeTestLlamaCppModel:
             lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
         )
         result = pb.smoke_test_llamacpp_model("my-model.gguf")
+        assert result["ok"] is False
+        assert "error" in result
+
+
+class TestSmokeTestLmStudioModel:
+    def test_returns_ok_true_with_usage_and_timing(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp("READY", usage={"completion_tokens": 5}),
+        )
+        result = pb.smoke_test_lmstudio_model("qwen3-coder:30b")
+        assert result["ok"] is True
+        assert result["response"] == "READY"
+        assert result["completion_tokens"] == 5
+        assert result["duration_seconds"] > 0
+        assert isinstance(result["tokens_per_second"], float)
+        assert result["tokens_per_second"] > 0
+
+    def test_returns_ok_false_when_response_not_ready(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp("nope", usage={"completion_tokens": 1}),
+        )
+        result = pb.smoke_test_lmstudio_model("qwen3-coder:30b")
+        assert result["ok"] is False
+
+    def test_missing_usage_leaves_tokens_per_second_none(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp("READY"),
+        )
+        result = pb.smoke_test_lmstudio_model("qwen3-coder:30b")
+        assert result["ok"] is True
+        assert result["tokens_per_second"] is None
+        assert result["completion_tokens"] is None
+
+    def test_returns_ok_false_on_connection_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        result = pb.smoke_test_lmstudio_model("qwen3-coder:30b")
         assert result["ok"] is False
         assert "error" in result
 

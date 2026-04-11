@@ -926,7 +926,73 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
         return False
 
     ok(f"Smoke test passed: {str(result.get('response', ''))[:80]}")
+
+    # Report throughput (tokens/second) and let the user react if it's slow.
+    if not _report_smoke_test_speed(result, non_interactive=non_interactive):
+        return False
+
     state.mark("2.5")
+    return True
+
+
+def _format_tokens_per_second(tps: float) -> str:
+    """Human-readable tokens/second string (e.g. '~15.3 tok/s')."""
+    return f"~{tps:.1f} tok/s"
+
+
+def _speed_verdict(tps: float) -> tuple[str, Callable[[str], None]]:
+    """
+    Classify a tokens/second value and return a label + printer function.
+
+    Thresholds:
+      - < 10 tok/s  → slow
+      - 10–30 tok/s → acceptable
+      - > 30 tok/s  → fast
+    """
+    if tps < 10:
+        return ("slow — may feel sluggish for interactive use", warn)
+    if tps < 30:
+        return ("acceptable for most interactive coding tasks", info)
+    return ("fast — should feel snappy", ok)
+
+
+def _report_smoke_test_speed(result: dict[str, Any], non_interactive: bool = False) -> bool:
+    """
+    Display the measured throughput and offer to re-pick the model when it's slow.
+
+    Returns True if the wizard should keep this model and continue, or False
+    if the user wants to go back and pick a different model (interactive only).
+    """
+    tps = result.get("tokens_per_second")
+    completion_tokens = result.get("completion_tokens")
+    duration_seconds = result.get("duration_seconds")
+
+    if not isinstance(tps, int | float) or tps <= 0:
+        # No measurement available (e.g. Ollama CLI fallback) — do not block.
+        if duration_seconds is not None:
+            info(f"Inference duration: ~{float(duration_seconds):.2f}s (throughput unavailable)")
+        return True
+
+    verdict, printer = _speed_verdict(float(tps))
+    detail_bits = [_format_tokens_per_second(float(tps))]
+    if isinstance(completion_tokens, int) and completion_tokens > 0:
+        detail_bits.append(f"{completion_tokens} tokens")
+    if isinstance(duration_seconds, int | float) and duration_seconds > 0:
+        detail_bits.append(f"in {float(duration_seconds):.2f}s")
+    printer(f"Model speed: {' | '.join(detail_bits)} — {verdict}")
+    info("Speed guide: <10 tok/s slow · 10–30 acceptable · 30+ fast")
+
+    if float(tps) < 10:
+        if non_interactive:
+            warn("Speed is below 10 tok/s but continuing (non-interactive mode).")
+            return True
+        keep_going = questionary.confirm(
+            "Model throughput is below 10 tok/s. Keep this model and continue anyway?",
+            default=True,
+        ).ask()
+        if keep_going is False:
+            info("Go back and pick a different model, then re-run the wizard.")
+            return False
     return True
 
 
