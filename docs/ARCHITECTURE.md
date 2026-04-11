@@ -52,7 +52,7 @@ A 9-step wizard that runs once (or with `--resume` after a failure):
 | 1 | Discover installed harnesses and engines |
 | 2 | Report missing tools and installation hints |
 | 3 | Ask which harness + engine to use |
-| 4 | Ask which model (or auto-pick via `llmfit`) |
+| 4 | Ask which model (or auto-pick via `llmfit`, installed on-demand if needed) |
 | 5 | Smoke-test the engine with the chosen model |
 | 6 | Wire up the harness |
 | 7 | Install helper script + shell aliases (`cc` / `cx`) |
