@@ -356,10 +356,80 @@ def hf_name_to_lms_hub(hf_name: str) -> str | None:
 
 
 def smoke_test_ollama_model(model: str) -> dict[str, Any]:
+    """
+    Smoke-test an Ollama model via its HTTP API (/api/generate).
+
+    Uses the HTTP endpoint — instead of `ollama run` — so we can harvest
+    the `eval_count` and `eval_duration` (nanoseconds) fields Ollama
+    returns and compute tokens-per-second throughput. Falls back to the
+    CLI if the HTTP call fails (e.g. the daemon is not exposing the API).
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    if not ollama_host.startswith(("http://", "https://")):
+        ollama_host = "http://" + ollama_host
+    url = f"{ollama_host}/api/generate"
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": "Reply with exactly READY",
+            "stream": False,
+        }
+    ).encode()
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    start = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            body = json.loads(resp.read())
+        wall_seconds = time.time() - start
+        text = str(body.get("response", "")).strip()
+
+        eval_count = body.get("eval_count")
+        eval_duration_ns = body.get("eval_duration")
+        tokens_per_second: float | None = None
+        duration_seconds: float | None = None
+        completion_tokens: int | None = None
+        if (
+            isinstance(eval_count, int)
+            and isinstance(eval_duration_ns, int)
+            and eval_duration_ns > 0
+        ):
+            duration_seconds = eval_duration_ns / 1e9
+            completion_tokens = eval_count
+            tokens_per_second = eval_count / duration_seconds
+        elif wall_seconds > 0 and text:
+            # Fallback: approximate from wall-clock time and response length.
+            duration_seconds = wall_seconds
+
+        return {
+            "ok": "READY" in text.upper(),
+            "response": text,
+            "tokens_per_second": tokens_per_second,
+            "completion_tokens": completion_tokens,
+            "duration_seconds": duration_seconds,
+        }
+    except urllib.error.URLError:
+        # Fall back to the CLI path — the HTTP daemon may not be running.
+        return _smoke_test_ollama_cli(model)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _smoke_test_ollama_cli(model: str) -> dict[str, Any]:
+    """Legacy CLI-based smoke test for Ollama; no timing info available."""
     try:
         cp = run(["ollama", "run", model, "Reply with exactly READY"], timeout=180)
         text = cp.stdout.strip()
-        return {"ok": "READY" in text.upper(), "response": text}
+        return {
+            "ok": "READY" in text.upper(),
+            "response": text,
+            "tokens_per_second": None,
+            "completion_tokens": None,
+            "duration_seconds": None,
+        }
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timeout after 180s"}
     except Exception as exc:
@@ -549,7 +619,11 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
     """
     Smoke-test a model loaded in the LM Studio server via its OpenAI-compatible API.
     Requires the server to be running and the model loaded.
+
+    Reports tokens-per-second using `usage.completion_tokens` from the response and
+    wall-clock time around the HTTP call.
     """
+    import time
     import urllib.error
     import urllib.request
 
@@ -563,11 +637,25 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
         }
     ).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    start = time.time()
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             body = json.loads(resp.read())
-            text = body["choices"][0]["message"]["content"].strip()
-            return {"ok": "READY" in text.upper(), "response": text}
+        duration_seconds = max(time.time() - start, 1e-6)
+        text = body["choices"][0]["message"]["content"].strip()
+        usage = body.get("usage") or {}
+        raw_completion = usage.get("completion_tokens")
+        completion_tokens = int(raw_completion) if isinstance(raw_completion, int) else None
+        tokens_per_second: float | None = None
+        if completion_tokens is not None and completion_tokens > 0:
+            tokens_per_second = completion_tokens / duration_seconds
+        return {
+            "ok": "READY" in text.upper(),
+            "response": text,
+            "tokens_per_second": tokens_per_second,
+            "completion_tokens": completion_tokens,
+            "duration_seconds": duration_seconds,
+        }
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
@@ -874,7 +962,11 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
     """
     Smoke-test a model loaded in the llama.cpp server via its OpenAI-compatible API.
     Requires the server to be running with the model loaded.
+
+    Reports tokens-per-second using `usage.completion_tokens` from the response and
+    wall-clock time around the HTTP call.
     """
+    import time
     import urllib.error
     import urllib.request
 
@@ -888,11 +980,25 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
         }
     ).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    start = time.time()
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             body = json.loads(resp.read())
-            text = body["choices"][0]["message"]["content"].strip()
-            return {"ok": "READY" in text.upper(), "response": text}
+        duration_seconds = max(time.time() - start, 1e-6)
+        text = body["choices"][0]["message"]["content"].strip()
+        usage = body.get("usage") or {}
+        raw_completion = usage.get("completion_tokens")
+        completion_tokens = int(raw_completion) if isinstance(raw_completion, int) else None
+        tokens_per_second: float | None = None
+        if completion_tokens is not None and completion_tokens > 0:
+            tokens_per_second = completion_tokens / duration_seconds
+        return {
+            "ok": "READY" in text.upper(),
+            "response": text,
+            "tokens_per_second": tokens_per_second,
+            "completion_tokens": completion_tokens,
+            "duration_seconds": duration_seconds,
+        }
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
