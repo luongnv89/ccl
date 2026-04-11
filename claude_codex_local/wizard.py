@@ -1786,8 +1786,8 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  ccl                              Run the interactive first-run wizard\n"
-            "  ccl setup --resume               Resume an interrupted wizard\n"
-            "  ccl setup --non-interactive      Scripted install with defaults\n"
+            "  ccl --resume                     Resume an interrupted wizard\n"
+            "  ccl --non-interactive            Scripted install with defaults\n"
             "  ccl doctor                       Triage the current install\n"
             "  ccl find-model                   Show a recommended coding model\n"
         ),
@@ -1798,6 +1798,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable ANSI colors (also honors the NO_COLOR env var)",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from the last checkpointed step",
+    )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Auto-pick defaults (for CI and scripted installs)",
+    )
 
     sub = parser.add_subparsers(dest="cmd", metavar="COMMAND")
 
@@ -1805,9 +1815,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "setup",
         help="Run the interactive first-run wizard (this is the default)",
         description="Run the interactive first-run wizard to pick a harness, engine, and model.",
-    )
-    setup.add_argument(
-        "--resume", action="store_true", help="Resume from the last checkpointed step"
     )
     setup.add_argument(
         "--non-interactive",

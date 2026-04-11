@@ -839,3 +839,94 @@ class TestWelcomeBanner:
         monkeypatch.setattr(wiz, "STEPS", [])
         wiz.run_wizard(resume=False, non_interactive=True)
         assert printed == [], "print_welcome_banner must not be called in non-interactive mode"
+
+
+# ---------------------------------------------------------------------------
+# CLI argument parsing — --resume flag at top level.
+# ---------------------------------------------------------------------------
+
+
+class TestCLIArgumentParsing:
+    """Tests for top-level CLI argument parsing, particularly the --resume flag."""
+
+    def test_resume_flag_recognized_at_top_level(self, isolated_state, monkeypatch):
+        """ccl --resume should be recognized without the setup subcommand."""
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["--resume"])
+        # cmd is None when no subcommand given; defaults to setup in main()
+        assert args.resume is True
+
+    def test_non_interactive_flag_recognized_at_top_level(self, isolated_state, monkeypatch):
+        """ccl --non-interactive should be recognized without the setup subcommand."""
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["--non-interactive"])
+        # cmd is None when no subcommand given; defaults to setup in main()
+        assert args.non_interactive is True
+
+    def test_flags_combined_without_subcommand(self, isolated_state, monkeypatch):
+        """Multiple top-level flags can be combined without a subcommand."""
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["--resume", "--non-interactive"])
+        assert args.resume is True
+        assert args.non_interactive is True
+
+    def test_resume_flag_recognized_with_setup_subcommand(self, isolated_state, monkeypatch):
+        """ccl setup with top-level flags should work."""
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["setup", "--non-interactive"])
+        assert args.cmd == "setup"
+        assert args.non_interactive is True
+
+    def test_resume_flag_allowed_without_any_subcommand(self, isolated_state, monkeypatch):
+        """
+        The --resume flag must be usable without any explicit subcommand.
+        This tests the fix for issue #28.
+        """
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        # This used to fail with: error: unrecognized arguments: --resume
+        args = parser.parse_args(["--resume"])
+        assert args.resume is True
+        # cmd defaults to 'setup' in main() via: cmd = args.cmd or "setup"
+
+    def test_help_shows_resume_at_top_level(self, isolated_state, monkeypatch):
+        """The help output should show --resume as a top-level option."""
+        from claude_codex_local.wizard import _build_parser
+        import io
+        import sys
+
+        parser = _build_parser()
+        f = io.StringIO()
+        try:
+            parser.print_help(f)
+            help_text = f.getvalue()
+        finally:
+            f.close()
+
+        assert "--resume" in help_text
+        assert "Resume from the last checkpointed step" in help_text
+
+    def test_help_shows_non_interactive_at_top_level(self, isolated_state, monkeypatch):
+        """The help output should show --non-interactive as a top-level option."""
+        from claude_codex_local.wizard import _build_parser
+        import io
+
+        parser = _build_parser()
+        f = io.StringIO()
+        try:
+            parser.print_help(f)
+            help_text = f.getvalue()
+        finally:
+            f.close()
+
+        assert "--non-interactive" in help_text
+        assert "Auto-pick defaults" in help_text
