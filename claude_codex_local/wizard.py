@@ -1144,10 +1144,62 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
 # ---------------------------------------------------------------------------
 
 
-_ALIAS_BLOCK_RE = re.compile(
+# Legacy fence (pre-#16) used a single shared block for whichever harness
+# was set up last. Kept for one-shot migration to the per-harness format.
+_LEGACY_ALIAS_BLOCK_RE = re.compile(
     r"^# >>> claude-codex-local >>>.*?^# <<< claude-codex-local <<<\n?",
     re.DOTALL | re.MULTILINE,
 )
+
+
+def _harness_alias_block_re(harness: str) -> re.Pattern[str]:
+    """
+    Per-harness fenced block regex. Each harness owns its own block so
+    installing cx does not overwrite a previously installed cc block
+    (and vice versa). See issue #16.
+    """
+    tag = re.escape(harness)
+    return re.compile(
+        rf"^# >>> claude-codex-local:{tag} >>>.*?^# <<< claude-codex-local:{tag} <<<\n?",
+        re.DOTALL | re.MULTILINE,
+    )
+
+
+def _infer_harness_from_legacy_block(block_text: str) -> str:
+    """
+    Guess which harness owns a legacy (pre-#16) alias block by inspecting its
+    contents. Returns "claude" or "codex". Defaults to "claude" when the block
+    is ambiguous — the caller is about to rewrite the block anyway, so the
+    worst case is that an ambiguous legacy block is replaced with a fresh
+    claude block for the current install (no data loss).
+    """
+    if "alias cx=" in block_text or "alias codex-local=" in block_text:
+        return "codex"
+    return "claude"
+
+
+def _migrate_legacy_alias_block(existing: str) -> str:
+    """
+    If the rc file still contains a pre-#16 unified alias block, rewrap it in
+    the per-harness fence so a subsequent per-harness replace/append leaves it
+    alone when it belongs to a different harness. Idempotent.
+    """
+    match = _LEGACY_ALIAS_BLOCK_RE.search(existing)
+    if not match:
+        return existing
+    legacy = match.group(0)
+    harness = _infer_harness_from_legacy_block(legacy)
+    # Rewrap: swap the top/bottom fence lines, preserve everything in between.
+    migrated = legacy.replace(
+        "# >>> claude-codex-local >>>",
+        f"# >>> claude-codex-local:{harness} >>>",
+        1,
+    ).replace(
+        "# <<< claude-codex-local <<<",
+        f"# <<< claude-codex-local:{harness} <<<",
+        1,
+    )
+    return existing[: match.start()] + migrated + existing[match.end() :]
 
 
 def _write_helper_script(harness: str, result: WireResult) -> Path:
@@ -1179,13 +1231,13 @@ def _alias_block(script_path: Path, harness: str) -> tuple[str, list[str]]:
     quoted_path = shlex.quote(str(script_path))
     names = ["cc", "claude-local"] if harness == "claude" else ["cx", "codex-local"]
     body_lines = [
-        "# >>> claude-codex-local >>>",
+        f"# >>> claude-codex-local:{harness} >>>",
         "# Managed by claude-codex-local wizard. Re-run the wizard to update,",
         "# or delete this block to remove the aliases.",
     ]
     for n in names:
         body_lines.append(f"alias {n}={quoted_path}")
-    body_lines.append("# <<< claude-codex-local <<<")
+    body_lines.append(f"# <<< claude-codex-local:{harness} <<<")
     return "\n".join(body_lines) + "\n", names
 
 
@@ -1227,8 +1279,13 @@ def _install_shell_aliases(
             return None, names
 
     existing = rc_path.read_text() if rc_path.exists() else ""
-    if _ALIAS_BLOCK_RE.search(existing):
-        new_text = _ALIAS_BLOCK_RE.sub(block, existing, count=1)
+    # One-shot migration: rewrap any legacy unified block in its per-harness
+    # fence so the replace/append logic below only touches the current
+    # harness's block (fixes #16).
+    existing = _migrate_legacy_alias_block(existing)
+    harness_re = _harness_alias_block_re(harness)
+    if harness_re.search(existing):
+        new_text = harness_re.sub(block, existing, count=1)
     else:
         sep = "" if existing.endswith("\n") or not existing else "\n"
         prefix = "\n" if existing else ""
@@ -1411,11 +1468,21 @@ Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
 
 ## Rollback
 
-To wipe the local bridge:
+Each harness (claude / codex) has its own fenced block, so you can remove
+just this one without touching any other harness you may have set up.
 
-1. Delete the fenced block from `{shell_rc}` (between the
-   `# >>> claude-codex-local >>>` and `# <<< claude-codex-local <<<`
-   markers).
+To wipe only this harness:
+
+1. Delete the fenced block for `{harness}` from `{shell_rc}` (between the
+   `# >>> claude-codex-local:{harness} >>>` and
+   `# <<< claude-codex-local:{harness} <<<` markers).
+2. `rm -f {helper_script}`
+3. `rm -f {guide_path}`
+
+To wipe the local bridge entirely (both harnesses, if installed):
+
+1. Delete every `# >>> claude-codex-local:<harness> >>>` block from
+   `{shell_rc}`.
 2. `rm -rf {state_dir}`
 3. `rm -f {guide_path}`
 """

@@ -309,8 +309,8 @@ class TestHelperScriptWriter:
 
 
 class TestShellAliasInstaller:
-    def _make_script(self, tmp_path):
-        path = tmp_path / "cc"
+    def _make_script(self, tmp_path, name="cc"):
+        path = tmp_path / name
         path.write_text("#!/bin/sh\necho hi\n")
         path.chmod(0o755)
         return path
@@ -325,7 +325,8 @@ class TestShellAliasInstaller:
         rc_path, names = wiz._install_shell_aliases(script, "claude", non_interactive=True)
         assert rc_path == rc
         body = rc.read_text()
-        assert "# >>> claude-codex-local >>>" in body
+        assert "# >>> claude-codex-local:claude >>>" in body
+        assert "# <<< claude-codex-local:claude <<<" in body
         assert "alias cc=" in body
         assert "alias claude-local=" in body
         assert "cc" in names
@@ -336,13 +337,15 @@ class TestShellAliasInstaller:
 
         rc = Path.home() / ".zshrc"
         rc.write_text(
-            "# >>> claude-codex-local >>>\nalias cc='/old/path'\n# <<< claude-codex-local <<<\n"
+            "# >>> claude-codex-local:claude >>>\n"
+            "alias cc='/old/path'\n"
+            "# <<< claude-codex-local:claude <<<\n"
         )
         script = self._make_script(tmp_path)
         wiz._install_shell_aliases(script, "claude", non_interactive=True)
         body = rc.read_text()
-        # Should be exactly one block
-        assert body.count("# >>> claude-codex-local >>>") == 1
+        # Should be exactly one block for claude.
+        assert body.count("# >>> claude-codex-local:claude >>>") == 1
         assert "/old/path" not in body
         assert str(script) in body
 
@@ -353,9 +356,9 @@ class TestShellAliasInstaller:
         rc = Path.home() / ".zshrc"
         rc.write_text(
             "export FOO=bar\n"
-            "# >>> claude-codex-local >>>\n"
+            "# >>> claude-codex-local:claude >>>\n"
             "alias cc='/old/path'\n"
-            "# <<< claude-codex-local <<<\n"
+            "# <<< claude-codex-local:claude <<<\n"
             "export BAZ=qux\n"
         )
         script = self._make_script(tmp_path)
@@ -363,7 +366,7 @@ class TestShellAliasInstaller:
         body = rc.read_text()
         assert "export FOO=bar" in body
         assert "export BAZ=qux" in body
-        assert body.count("# >>> claude-codex-local >>>") == 1
+        assert body.count("# >>> claude-codex-local:claude >>>") == 1
 
     def test_unknown_shell_returns_none(self, isolated_state, tmp_path, monkeypatch):
         _, wiz, _ = isolated_state
@@ -372,6 +375,164 @@ class TestShellAliasInstaller:
         rc_path, names = wiz._install_shell_aliases(script, "claude", non_interactive=True)
         assert rc_path is None
         assert "cc" in names
+
+    # ---- Issue #16: cc and cx aliases must coexist ------------------------
+
+    def test_claude_then_codex_coexist(self, isolated_state, tmp_path):
+        """Installing claude, then codex, leaves both harness blocks intact."""
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text("")
+
+        cc_script = self._make_script(tmp_path, "cc")
+        cx_script = self._make_script(tmp_path, "cx")
+
+        wiz._install_shell_aliases(cc_script, "claude", non_interactive=True)
+        wiz._install_shell_aliases(cx_script, "codex", non_interactive=True)
+
+        body = rc.read_text()
+        # Both fenced blocks must be present.
+        assert "# >>> claude-codex-local:claude >>>" in body
+        assert "# <<< claude-codex-local:claude <<<" in body
+        assert "# >>> claude-codex-local:codex >>>" in body
+        assert "# <<< claude-codex-local:codex <<<" in body
+        # Both alias sets must be present.
+        assert "alias cc=" in body
+        assert "alias claude-local=" in body
+        assert "alias cx=" in body
+        assert "alias codex-local=" in body
+        # Both helper scripts referenced.
+        assert str(cc_script) in body
+        assert str(cx_script) in body
+
+    def test_codex_then_claude_coexist(self, isolated_state, tmp_path):
+        """Installing codex first, then claude, leaves both harness blocks intact."""
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text("")
+
+        cx_script = self._make_script(tmp_path, "cx")
+        cc_script = self._make_script(tmp_path, "cc")
+
+        wiz._install_shell_aliases(cx_script, "codex", non_interactive=True)
+        wiz._install_shell_aliases(cc_script, "claude", non_interactive=True)
+
+        body = rc.read_text()
+        assert "# >>> claude-codex-local:claude >>>" in body
+        assert "# >>> claude-codex-local:codex >>>" in body
+        assert "alias cc=" in body
+        assert "alias cx=" in body
+        assert str(cc_script) in body
+        assert str(cx_script) in body
+
+    def test_reinstall_same_harness_updates_only_its_block(self, isolated_state, tmp_path):
+        """Re-running for the same harness updates only its own block."""
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text("")
+
+        cc_script_v1 = self._make_script(tmp_path, "cc-v1")
+        cx_script = self._make_script(tmp_path, "cx")
+        cc_script_v2 = self._make_script(tmp_path, "cc-v2")
+
+        wiz._install_shell_aliases(cc_script_v1, "claude", non_interactive=True)
+        wiz._install_shell_aliases(cx_script, "codex", non_interactive=True)
+        wiz._install_shell_aliases(cc_script_v2, "claude", non_interactive=True)
+
+        body = rc.read_text()
+        # Exactly one claude block and one codex block.
+        assert body.count("# >>> claude-codex-local:claude >>>") == 1
+        assert body.count("# >>> claude-codex-local:codex >>>") == 1
+        # The claude block now references v2, not v1.
+        assert str(cc_script_v2) in body
+        assert str(cc_script_v1) not in body
+        # The codex block is untouched.
+        assert str(cx_script) in body
+
+    def test_migration_from_legacy_claude_block(self, isolated_state, tmp_path):
+        """A legacy unified block containing alias cc= is migrated to the claude fence."""
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text(
+            "export FOO=bar\n"
+            "# >>> claude-codex-local >>>\n"
+            "alias cc='/old/cc'\n"
+            "alias claude-local='/old/cc'\n"
+            "# <<< claude-codex-local <<<\n"
+            "export BAZ=qux\n"
+        )
+        cx_script = self._make_script(tmp_path, "cx")
+        wiz._install_shell_aliases(cx_script, "codex", non_interactive=True)
+
+        body = rc.read_text()
+        # Legacy fence is gone — replaced by the per-harness fence.
+        assert "# >>> claude-codex-local >>>" not in body
+        assert "# <<< claude-codex-local <<<" not in body
+        # Legacy claude block was preserved as a claude-tagged block.
+        assert "# >>> claude-codex-local:claude >>>" in body
+        assert "alias cc='/old/cc'" in body
+        # New codex block was appended alongside.
+        assert "# >>> claude-codex-local:codex >>>" in body
+        assert "alias cx=" in body
+        assert str(cx_script) in body
+        # Surrounding content preserved.
+        assert "export FOO=bar" in body
+        assert "export BAZ=qux" in body
+
+    def test_migration_from_legacy_codex_block(self, isolated_state, tmp_path):
+        """A legacy unified block containing alias cx= is migrated to the codex fence."""
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text(
+            "# >>> claude-codex-local >>>\n"
+            "alias cx='/old/cx'\n"
+            "alias codex-local='/old/cx'\n"
+            "# <<< claude-codex-local <<<\n"
+        )
+        cc_script = self._make_script(tmp_path, "cc")
+        wiz._install_shell_aliases(cc_script, "claude", non_interactive=True)
+
+        body = rc.read_text()
+        assert "# >>> claude-codex-local >>>" not in body
+        # Legacy codex block was preserved as a codex-tagged block.
+        assert "# >>> claude-codex-local:codex >>>" in body
+        assert "alias cx='/old/cx'" in body
+        # New claude block was appended alongside.
+        assert "# >>> claude-codex-local:claude >>>" in body
+        assert "alias cc=" in body
+        assert str(cc_script) in body
+
+    def test_migration_then_reinstall_same_harness_replaces_legacy(self, isolated_state, tmp_path):
+        """Re-installing the harness that owned the legacy block replaces its contents."""
+        _, wiz, _ = isolated_state
+        from pathlib import Path
+
+        rc = Path.home() / ".zshrc"
+        rc.write_text(
+            "# >>> claude-codex-local >>>\n"
+            "alias cc='/old/cc'\n"
+            "alias claude-local='/old/cc'\n"
+            "# <<< claude-codex-local <<<\n"
+        )
+        cc_script = self._make_script(tmp_path, "cc")
+        wiz._install_shell_aliases(cc_script, "claude", non_interactive=True)
+
+        body = rc.read_text()
+        assert "# >>> claude-codex-local >>>" not in body
+        assert body.count("# >>> claude-codex-local:claude >>>") == 1
+        # Old alias path gone, new script path in.
+        assert "/old/cc" not in body
+        assert str(cc_script) in body
 
 
 # ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ State is persisted to `.claude-codex-local/wizard-state.json` so a failed run ca
 The user-facing surface after setup:
 
 - `.claude-codex-local/bin/cc` (or `cx`) — a short bash wrapper that invokes the configured launch command
-- `~/.zshrc` / `~/.bashrc` — a fenced block (`# >>> claude-codex-local >>>` … `# <<< claude-codex-local <<<`) with the shell aliases; idempotently replaced on re-run
+- `~/.zshrc` / `~/.bashrc` — one fenced block per harness (`# >>> claude-codex-local:claude >>>` … `# <<< claude-codex-local:claude <<<` for the Claude harness, `# >>> claude-codex-local:codex >>>` … `# <<< claude-codex-local:codex <<<` for Codex); each block is idempotently replaced on re-run of its own harness, and the two blocks coexist so `cc` and `cx` can both be installed at once. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
 
 ## Engine Strategies
 

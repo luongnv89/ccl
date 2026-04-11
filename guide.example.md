@@ -56,10 +56,20 @@ Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
 
 ## Rollback
 
-To wipe the local bridge:
+Each harness (claude / codex) has its own fenced block, so you can remove
+just one harness without touching any other you may have set up.
+
+To wipe only the claude harness:
 
 1. Delete the fenced block from `~/.zshrc` (between the
-   `# >>> claude-codex-local >>>` and `# <<< claude-codex-local <<<`
-   markers).
+   `# >>> claude-codex-local:claude >>>` and
+   `# <<< claude-codex-local:claude <<<` markers).
+2. `rm -f <REPO_ROOT>/.claude-codex-local/bin/cc`
+3. `rm -f <REPO_ROOT>/guide.md`
+
+To wipe the local bridge entirely:
+
+1. Delete every `# >>> claude-codex-local:<harness> >>>` block from
+   `~/.zshrc`.
 2. `rm -rf <REPO_ROOT>/.claude-codex-local`
 3. `rm -f <REPO_ROOT>/guide.md`
