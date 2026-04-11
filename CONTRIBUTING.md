@@ -19,14 +19,14 @@ cd claude-codex-local
 
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 pre-commit install
 ```
 
 Run the wizard locally:
 
 ```bash
-./bin/claude-codex-local
+ccl
 ```
 
 ## Branching Strategy

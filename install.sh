@@ -134,16 +134,15 @@ setup_venv() {
     info "Upgrading pip"
     "$pip" install --quiet --upgrade pip || warn "pip upgrade failed, continuing"
 
-    info "Installing Python dependencies"
-    "$pip" install --quiet -r "$CCL_INSTALL_DIR/requirements.txt" \
-        || die "Failed to install requirements"
-    ok "Dependencies installed"
+    info "Installing claude-codex-local (editable)"
+    "$pip" install --quiet -e "$CCL_INSTALL_DIR" \
+        || die "Failed to install claude-codex-local"
+    ok "Package installed — `ccl` available at $venv/bin/ccl"
 }
 
 run_wizard() {
-    local entry="$CCL_INSTALL_DIR/bin/claude-codex-local"
-    [ -x "$entry" ] || chmod +x "$entry" 2>/dev/null || true
-    [ -x "$entry" ] || die "Wizard entry point missing: $entry"
+    local entry="$CCL_INSTALL_DIR/.venv/bin/ccl"
+    [ -x "$entry" ] || die "ccl entry point missing: $entry"
 
     if [ -n "${CCL_NO_RUN:-}" ]; then
         info "CCL_NO_RUN set — skipping wizard."
@@ -159,7 +158,7 @@ run_wizard() {
         return 0
     fi
 
-    info "Launching interactive wizard…"
+    info "Launching interactive wizard (ccl)…"
     printf '\n'
     exec "$entry"
 }

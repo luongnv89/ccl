@@ -1,3 +1,3 @@
-"""claude-codex-local — local backend bridge for Claude Code and Codex."""
+"""claude-codex-local — wire up Claude Code and Codex to a local LLM engine."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

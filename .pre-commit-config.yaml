@@ -24,7 +24,7 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        files: ^claude_codex_local/(bridge|wizard)\.py$
+        files: ^claude_codex_local/(core|wizard)\.py$
         additional_dependencies: []
 
   - repo: https://github.com/PyCQA/bandit
@@ -32,7 +32,7 @@ repos:
     hooks:
       - id: bandit
         args: [-q, -ll, --skip, "B310,B404,B603,B607"]
-        files: ^claude_codex_local/(bridge|wizard)\.py$
+        files: ^claude_codex_local/(core|wizard)\.py$
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
@@ -46,7 +46,7 @@ repos:
       # Hooks prefer the repo venv python if present, else fall back to python3.
       - id: pytest-unit
         name: pytest (unit, fast)
-        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q tests/test_bridge_unit.py tests/test_wizard_unit.py tests/test_supplementary.py'
+        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q tests/test_core_unit.py tests/test_wizard_unit.py tests/test_supplementary.py'
         language: system
         pass_filenames: false
         stages: [pre-commit]

@@ -28,17 +28,17 @@ import pytest
 @pytest.fixture
 def isolated_state(tmp_path, monkeypatch):
     """
-    Point STATE_DIR at tmp_path/state and reload bridge + wizard so their
+    Point STATE_DIR at tmp_path/state and reload core + wizard so their
     module-level STATE_DIR constants pick up the override. Also reroutes
     Path.home() to tmp_path so shell-alias installs land in the sandbox.
-    Returns (bridge_module, wizard_module, state_dir).
+    Returns (core_module, wizard_module, state_dir).
     """
     state_dir = tmp_path / "state"
     guide_root = tmp_path / "repo"
     guide_root.mkdir()
 
     monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(state_dir))
-    # HOME is what bridge.ORIG_HOME reads at import time — give it a clean
+    # HOME is what core.ORIG_HOME reads at import time — give it a clean
     # one so ensure_path() doesn't prepend the real ~/.lmstudio/bin.
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -48,8 +48,8 @@ def isolated_state(tmp_path, monkeypatch):
     # Make Path.home() resolve to the sandbox so shell-rc edits stay confined.
     monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-    # Reload bridge first, then wizard (wizard imports bridge).
-    import claude_codex_local.bridge as pb_mod
+    # Reload core first, then wizard (wizard imports core).
+    import claude_codex_local.core as pb_mod
 
     pb_mod = importlib.reload(pb_mod)
     import claude_codex_local.wizard as wiz_mod

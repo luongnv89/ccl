@@ -1,11 +1,10 @@
 # Local coding guide (example)
 
-> **Note:** This is an example of the `guide.md` file that
-> `claude-codex-local` generates on your machine after a successful
-> wizard run. Real values (absolute paths, chosen model, engine,
-> harness) will be filled in from your actual run. The real
-> `guide.md` is gitignored — this `guide.example.md` is committed
-> only as reference documentation.
+> **Note:** This is an example of the `guide.md` file that `ccl`
+> generates on your machine after a successful wizard run. Real
+> values (absolute paths, chosen model, engine, harness) will be
+> filled in from your actual run. The real `guide.md` is gitignored —
+> this `guide.example.md` is committed only as reference documentation.
 
 ## What was set up
 
@@ -42,11 +41,11 @@ You can still pass extra args: `cc -p "what does foo.py do?"`.
   `source ~/.zshrc`.
 - **Engine not responding?** Re-run the wizard smoke test:
   ```bash
-  claude-codex-local doctor
+  ccl doctor
   ```
 - **Want to switch models?** Re-run the wizard:
   ```bash
-  python3 -m wizard
+  ccl setup --resume
   ```
 
 ## Return to official mode

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-import claude_codex_local.bridge as pb
+import claude_codex_local.core as pb
 import claude_codex_local.wizard as wiz
 
 # ---------------------------------------------------------------------------
