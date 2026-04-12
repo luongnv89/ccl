@@ -288,9 +288,7 @@ class VLLMAdapter:
 
         try:
             url = self._full_url("/v1/models")
-            req = urllib.request.Request(
-                url, headers=self._build_headers(), method="GET"
-            )
+            req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 if resp.status == 200:
                     return {
@@ -317,9 +315,7 @@ class VLLMAdapter:
             import urllib.request
 
             url = self._full_url("/v1/models")
-            req = urllib.request.Request(
-                url, headers=self._build_headers(), method="GET"
-            )
+            req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 body = json.loads(resp.read())
                 models = body.get("data", [])
@@ -341,16 +337,11 @@ class VLLMAdapter:
 
         try:
             url = self._full_url("/v1/models")
-            req = urllib.request.Request(
-                url, headers=self._build_headers(), method="GET"
-            )
+            req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 body = json.loads(resp.read())
                 models = body.get("data", [])
-                return [
-                    {"name": m["id"], "format": "unknown", "local": True}
-                    for m in models
-                ]
+                return [{"name": m["id"], "format": "unknown", "local": True} for m in models]
         except Exception:
             return []
 

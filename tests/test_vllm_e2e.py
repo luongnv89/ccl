@@ -46,8 +46,10 @@ class FakeVLLMResponse:
         class HeaderDict:
             def __init__(self, data):
                 self._data = data
+
             def get(self, key, default=""):
                 return self._data.get(key, default)
+
         return HeaderDict(self._headers)
 
 
@@ -69,11 +71,14 @@ class TestVLLMAdapterIntegration:
             call_count[0] += 1
             if "models" in req.full_url:
                 return FakeVLLMResponse(
-                    {"data": [
-                        {"id": "model-a", "object": "model"},
-                        {"id": "model-b", "object": "model"},
-                    ], "object": "list"},
-                    headers={"X-VLLM-Version": "0.5.0"}
+                    {
+                        "data": [
+                            {"id": "model-a", "object": "model"},
+                            {"id": "model-b", "object": "model"},
+                        ],
+                        "object": "list",
+                    },
+                    headers={"X-VLLM-Version": "0.5.0"},
                 )
             else:
                 return FakeVLLMResponse(
@@ -128,6 +133,7 @@ class TestSmokeTestIntegration:
 
     def test_smoke_test_full_response_with_timing(self, monkeypatch):
         """Test smoke test includes timing information."""
+
         def mock_urlopen(req, timeout):
             time.sleep(0.01)  # Simulate network delay
             return FakeVLLMResponse(
@@ -184,6 +190,7 @@ class TestSmokeTestIntegration:
 
         def mock_urlopen(req, timeout):
             import json
+
             captured_data.append(json.loads(req.data.decode()))
             return FakeVLLMResponse(
                 {
@@ -233,6 +240,7 @@ class TestVLLMErrorHandlingIntegration:
 
     def test_smoke_test_handles_connection_error(self, monkeypatch):
         """Test smoke test handles connection errors gracefully."""
+
         def mock_urlopen(*a, **kw):
             raise Exception("Connection refused")
 
@@ -250,10 +258,9 @@ class TestVLLMErrorHandlingIntegration:
 
     def test_smoke_test_handles_missing_usage(self, monkeypatch):
         """Test smoke test handles responses without usage field."""
+
         def mock_urlopen(req, timeout):
-            return FakeVLLMResponse(
-                {"choices": [{"message": {"content": "READY"}}]}
-            )
+            return FakeVLLMResponse({"choices": [{"message": {"content": "READY"}}]})
 
         with patch("urllib.request.urlopen", mock_urlopen):
             result = pb.smoke_test_vllm_model(
@@ -270,6 +277,7 @@ class TestVLLMErrorHandlingIntegration:
 
     def test_adapter_handles_empty_model_list(self, monkeypatch):
         """Test adapter handles empty model list gracefully."""
+
         def mock_urlopen(req, timeout):
             return FakeVLLMResponse({"data": [], "object": "list"})
 

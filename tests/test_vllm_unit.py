@@ -134,12 +134,17 @@ class TestVLLMAdapterFullURL:
         monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
         adapter = pb.VLLMAdapter()
         assert adapter._full_url("/v1/models") == "http://localhost:8000/v1/models"
-        assert adapter._full_url("/v1/chat/completions") == "http://localhost:8000/v1/chat/completions"
+        assert (
+            adapter._full_url("/v1/chat/completions") == "http://localhost:8000/v1/chat/completions"
+        )
 
     def test_accepts_absolute_url(self, monkeypatch):
         """Test that absolute URLs are returned as-is."""
         adapter = pb.VLLMAdapter()
-        assert adapter._full_url("http://other-host:8000/v1/models") == "http://other-host:8000/v1/models"
+        assert (
+            adapter._full_url("http://other-host:8000/v1/models")
+            == "http://other-host:8000/v1/models"
+        )
 
 
 class TestVLLMAdapterBuildHeaders:
@@ -172,9 +177,7 @@ class TestVLLMAdapterDetect:
         def mock_urlopen(req, timeout):
             assert req.method == "GET"
             assert "v1/models" in req.full_url
-            return FakeResponse(
-                {"data": [{"id": "model1", "object": "model"}], "object": "list"}
-            )
+            return FakeResponse({"data": [{"id": "model1", "object": "model"}], "object": "list"})
 
         with patch("urllib.request.urlopen", mock_urlopen):
             adapter = pb.VLLMAdapter()
@@ -215,10 +218,7 @@ class TestVLLMAdapterDetect:
         monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
 
         def mock_urlopen(req, timeout):
-            return FakeResponse(
-                {"data": []},
-                headers={"X-VLLM-Version": "0.5.0"}
-            )
+            return FakeResponse({"data": []}, headers={"X-VLLM-Version": "0.5.0"})
 
         with patch("urllib.request.urlopen", mock_urlopen):
             adapter = pb.VLLMAdapter()
@@ -234,9 +234,7 @@ class TestVLLMAdapterHealthcheck:
         monkeypatch.setenv("VLLM_BASE_URL", "http://localhost:8000")
 
         def mock_urlopen(req, timeout):
-            return FakeResponse(
-                {"data": [{"id": "model1", "object": "model"}], "object": "list"}
-            )
+            return FakeResponse({"data": [{"id": "model1", "object": "model"}], "object": "list"})
 
         with patch("urllib.request.urlopen", mock_urlopen):
             adapter = pb.VLLMAdapter()
@@ -458,6 +456,7 @@ class TestSmokeTestVLLMModelSuccess:
 
     def test_smoke_test_response_format(self, monkeypatch):
         """Test that response matches expected format."""
+
         def mock_urlopen(req, timeout):
             return FakeResponse(
                 {
@@ -489,6 +488,7 @@ class TestSmokeTestVLLMModelErrors:
 
     def test_smoke_test_connection_refused(self, monkeypatch):
         """Test handling of connection refused error."""
+
         def mock_urlopen(*a, **kw):
             raise FakeURLError("Connection refused")
 
@@ -507,6 +507,7 @@ class TestSmokeTestVLLMModelErrors:
 
     def test_smoke_test_http_error_404(self, monkeypatch):
         """Test handling of 404 HTTP error."""
+
         def mock_urlopen(req, timeout):
             raise FakeHTTPError(
                 req.full_url,
@@ -530,6 +531,7 @@ class TestSmokeTestVLLMModelErrors:
 
     def test_smoke_test_http_error_401(self, monkeypatch):
         """Test handling of 401 unauthorized error."""
+
         def mock_urlopen(req, timeout):
             raise FakeHTTPError(
                 req.full_url,
@@ -553,6 +555,7 @@ class TestSmokeTestVLLMModelErrors:
 
     def test_smoke_test_timeout(self, monkeypatch):
         """Test handling of request timeout."""
+
         def mock_urlopen(*a, **kw):
             raise urllib.error.URLError("Timeout")
 
@@ -679,6 +682,7 @@ class TestVLLMAdapterEdgeCases:
 
     def test_empty_model_name(self, monkeypatch):
         """Test smoke test with empty model name."""
+
         def mock_urlopen(req, timeout):
             return FakeResponse(
                 {
@@ -700,10 +704,9 @@ class TestVLLMAdapterEdgeCases:
 
     def test_response_without_usage(self, monkeypatch):
         """Test handling of response without usage field."""
+
         def mock_urlopen(req, timeout):
-            return FakeResponse(
-                {"choices": [{"message": {"content": "READY"}}]}
-            )
+            return FakeResponse({"choices": [{"message": {"content": "READY"}}]})
 
         with patch("urllib.request.urlopen", mock_urlopen):
             result = pb.smoke_test_vllm_model(
@@ -720,6 +723,7 @@ class TestVLLMAdapterEdgeCases:
 
     def test_response_without_choices(self, monkeypatch):
         """Test handling of response without choices field."""
+
         def mock_urlopen(req, timeout):
             raise Exception("Invalid response format")
 
