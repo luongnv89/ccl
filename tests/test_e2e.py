@@ -386,9 +386,10 @@ class TestCliSubprocesses:
             },
         )
         # Should return 0 on success in non-interactive mode
-        assert result.returncode == 0 or result.returncode in [1, 2], (
-            f"Setup failed: {result.stderr}"
-        )
+        assert result.returncode == 0 or result.returncode in [
+            1,
+            2,
+        ], f"Setup failed: {result.stderr}"
 
     def test_ccl_setup_help(self, fake_bin, tmp_path):
         """Test ccl setup --help shows usage information."""
@@ -418,7 +419,11 @@ class TestCliSubprocesses:
             fake_bin=fake_bin,
         )
         assert result.returncode == 0
-        assert "usage" in result.stdout.lower() or "find-model" in result.stdout.lower() or "find" in result.stdout.lower()
+        assert (
+            "usage" in result.stdout.lower()
+            or "find-model" in result.stdout.lower()
+            or "find" in result.stdout.lower()
+        )
 
     def test_ccl_find_model_non_interactive(self, fake_bin, tmp_path, monkeypatch):
         """Test ccl find-model runs in non-interactive mode."""
@@ -437,9 +442,9 @@ class TestCliSubprocesses:
             },
         )
         # Should succeed even with minimal output
-        assert result.returncode == 0 or result.returncode == 1, (
-            f"find-model failed: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0 or result.returncode == 1
+        ), f"find-model failed: {result.stderr}"
 
     # ----- Edge cases for ccl doctor command -----
 
@@ -447,8 +452,7 @@ class TestCliSubprocesses:
         """Test ccl doctor after a successful setup shows clean state."""
         # First, run setup to create state
         monkeypatch.setattr(
-            sys, "argv",
-            ["claude_codex_local.wizard", "setup", "--non-interactive"]
+            sys, "argv", ["claude_codex_local.wizard", "setup", "--non-interactive"]
         )
 
         result = self._spawn_ccl(
@@ -505,6 +509,7 @@ class TestCliSubprocesses:
 
     def test_ccl_find_model_standalone_with_models(self, fake_bin, tmp_path, monkeypatch):
         """Test ccl find-model returns model candidates when available."""
+
         # Configure llmfit stub to return coding models
         def custom_llmfit():
             return """case "$1" in
