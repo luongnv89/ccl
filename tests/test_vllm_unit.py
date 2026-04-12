@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import json
 import urllib.error
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
 import claude_codex_local.core as pb
-
 
 # ---------------------------------------------------------------------------
 # Test fixtures for mocked HTTP responses

@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
 import claude_codex_local.core as pb
-
 
 # ---------------------------------------------------------------------------
 # Fixtures for mocked HTTP responses

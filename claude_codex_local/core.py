@@ -263,9 +263,8 @@ class VLLMAdapter:
 
     def __post_init__(self):
         """Initialize configuration from environment variables."""
-        self._base_url = os.environ.get(
-            "VLLM_BASE_URL", "http://localhost:8000"
-        ).rstrip("/")
+        base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000")
+        self._base_url = base.rstrip("/") if isinstance(base, str) else base
         self._api_key = os.environ.get("VLLM_API_KEY", "")
         self._timeout = int(os.environ.get("VLLM_TIMEOUT", "60"))
         self._max_tokens = int(os.environ.get("VLLM_MAX_TOKENS", "2048"))
@@ -799,8 +798,8 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
 
 def smoke_test_vllm_model(
     model: str,
-    base_url: str = "http://localhost:8000",
-    api_key: str = "",
+    base_url: str | None = "http://localhost:8000",
+    api_key: str | None = "",
     timeout: int = 60,
     max_tokens: int = 2048,
 ) -> dict[str, Any]:
@@ -831,7 +830,7 @@ def smoke_test_vllm_model(
     import urllib.error
     import urllib.request
 
-    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+    url = f"{(base_url or 'http://localhost:8000').rstrip('/')}/v1/chat/completions"
     payload = json.dumps(
         {
             "model": model,
@@ -868,6 +867,7 @@ def smoke_test_vllm_model(
             "tokens_per_second": tokens_per_second,
             "completion_tokens": completion_tokens,
             "duration_seconds": duration_seconds,
+            "detail": None,
         }
 
     except urllib.error.HTTPError as exc:
