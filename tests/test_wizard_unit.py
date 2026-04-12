@@ -900,9 +900,9 @@ class TestCLIArgumentParsing:
 
     def test_help_shows_resume_at_top_level(self, isolated_state, monkeypatch):
         """The help output should show --resume as a top-level option."""
-        from claude_codex_local.wizard import _build_parser
         import io
-        import sys
+
+        from claude_codex_local.wizard import _build_parser
 
         parser = _build_parser()
         f = io.StringIO()
@@ -917,8 +917,9 @@ class TestCLIArgumentParsing:
 
     def test_help_shows_non_interactive_at_top_level(self, isolated_state, monkeypatch):
         """The help output should show --non-interactive as a top-level option."""
-        from claude_codex_local.wizard import _build_parser
         import io
+
+        from claude_codex_local.wizard import _build_parser
 
         parser = _build_parser()
         f = io.StringIO()
