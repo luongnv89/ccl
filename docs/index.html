@@ -886,7 +886,7 @@
       <div class="hero-left">
         <div class="hero-badge reveal">
           <span class="hero-badge-dot"></span>
-          v0.6.0 · Open Source
+          v0.7.0 · Open Source
         </div>
 
         <h1 class="hero-headline reveal">
@@ -1242,12 +1242,33 @@
 
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:32px">
 
+      <!-- v0.7.0 -->
+      <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.7.0</span>
+          <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-12</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Machine specifications table (CPU cores/name, RAM total/available, GPU details) displayed during environment discovery step (#31)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Comprehensive e2e test suite covering all <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl</code> CLI commands: <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">setup</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">doctor</code>, <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">find-model</code>, and their flags — 26 tests total (#29, #32)</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--red);margin-bottom:8px">Fixed</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✓</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--resume</code> and <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">--non-interactive</code> flags are now available at the top-level <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl</code> parser, so <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">ccl --resume</code> works without specifying the <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">setup</code> subcommand explicitly (#28, #30)</li>
+          </ul>
+        </div>
+      </div>
+
       <!-- v0.6.0 -->
       <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.6.0</span>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--cyan)">v0.6.0</span>
           <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-11</span>
-          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
         </div>
         <div style="margin-bottom:12px">
           <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
@@ -1436,7 +1457,7 @@
         <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
         <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round"/>
       </svg>
-      <strong>claude-codex-local</strong> · v0.6.0
+      <strong>claude-codex-local</strong> · v0.7.0
     </div>
     <ul class="footer-links">
       <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
