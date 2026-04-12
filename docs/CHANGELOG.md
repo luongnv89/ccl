@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-12
+
+### Added
+- Machine specifications table (CPU cores/name, RAM total/available, GPU details) displayed during environment discovery step (#31)
+- Comprehensive e2e test suite covering all `ccl` CLI commands: `setup`, `doctor`, `find-model`, and their flags — 26 tests total (#29, #32)
+
+### Fixed
+- `--resume` and `--non-interactive` flags are now available at the top-level `ccl` parser, so `ccl --resume` works without specifying the `setup` subcommand explicitly (#28, #30)
+
 ## [0.6.0] - 2026-04-11
 
 ### Added
