@@ -409,9 +409,9 @@ class TestAdapters:
         assert result["ok"] is True
         assert "2" in result["detail"]
 
-    def test_all_adapters_registry_contains_all_three(self):
+    def test_all_adapters_registry_contains_all_four(self):
         names = {a.name for a in pb.ALL_ADAPTERS}
-        assert names == {"ollama", "lmstudio", "llamacpp"}
+        assert names == {"ollama", "lmstudio", "llamacpp", "vllm"}
 
 
 # ---------------------------------------------------------------------------

@@ -241,11 +241,141 @@ class LlamaCppAdapter:
         return {"provider": "llamacpp", "extra_flags": []}
 
 
+@dataclass
+class VLLMAdapter:
+    """RuntimeAdapter implementation for vLLM server.
+
+    vLLM provides an OpenAI-compatible HTTP API at http://localhost:8000/v1/* by default.
+    Supports /v1/chat/completions for chat-based inference and /v1/models for listing.
+
+    Configuration via environment variables:
+      - VLLM_BASE_URL: vLLM server URL (default: http://localhost:8000)
+      - VLLM_API_KEY: Optional API key for authentication
+      - VLLM_TIMEOUT: Request timeout in seconds (default: 60)
+      - VLLM_MAX_TOKENS: Default max_tokens for requests (default: 2048)
+    """
+
+    name: str = "vllm"
+    _base_url: str | None = None
+    _api_key: str | None = None
+    _timeout: int = 60
+    _max_tokens: int = 2048
+
+    def __post_init__(self):
+        """Initialize configuration from environment variables."""
+        self._base_url = os.environ.get(
+            "VLLM_BASE_URL", "http://localhost:8000"
+        ).rstrip("/")
+        self._api_key = os.environ.get("VLLM_API_KEY", "")
+        self._timeout = int(os.environ.get("VLLM_TIMEOUT", "60"))
+        self._max_tokens = int(os.environ.get("VLLM_MAX_TOKENS", "2048"))
+
+    def _full_url(self, endpoint: str) -> str:
+        """Construct full URL for a given endpoint."""
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            return endpoint
+        return f"{self._base_url}{endpoint}"
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build HTTP headers for API requests."""
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
+
+    def detect(self) -> dict[str, Any]:
+        """Check if vLLM server is accessible."""
+        import urllib.request
+
+        try:
+            url = self._full_url("/v1/models")
+            req = urllib.request.Request(
+                url, headers=self._build_headers(), method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                if resp.status == 200:
+                    return {
+                        "present": True,
+                        "version": resp.headers.get("X-VLLM-Version", "unknown"),
+                        "base_url": self._base_url,
+                    }
+        except urllib.error.URLError:
+            pass
+        except Exception:
+            pass
+        return {"present": False, "version": ""}
+
+    def healthcheck(self) -> dict[str, Any]:
+        """Check vLLM server health and report status."""
+        detect_info = self.detect()
+        if not detect_info.get("present"):
+            return {
+                "ok": False,
+                "detail": f"vLLM server not reachable at {self._base_url}. "
+                "Start vLLM server: vllm server --model <model_path>",
+            }
+        try:
+            import urllib.request
+
+            url = self._full_url("/v1/models")
+            req = urllib.request.Request(
+                url, headers=self._build_headers(), method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                body = json.loads(resp.read())
+                models = body.get("data", [])
+                return {
+                    "ok": True,
+                    "detail": f"vLLM server up at {self._base_url}, {len(models)} model(s) available",
+                }
+        except urllib.error.URLError:
+            return {
+                "ok": False,
+                "detail": f"vLLM server at {self._base_url} is not responding",
+            }
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+
+    def list_models(self) -> list[dict[str, Any]]:
+        """List available models from vLLM server."""
+        import urllib.request
+
+        try:
+            url = self._full_url("/v1/models")
+            req = urllib.request.Request(
+                url, headers=self._build_headers(), method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                body = json.loads(resp.read())
+                models = body.get("data", [])
+                return [
+                    {"name": m["id"], "format": "unknown", "local": True}
+                    for m in models
+                ]
+        except Exception:
+            return []
+
+    def run_test(self, model: str) -> dict[str, Any]:
+        """Smoke-test a model via vLLM's chat API."""
+        return smoke_test_vllm_model(
+            model,
+            base_url=self._base_url,
+            api_key=self._api_key,
+            timeout=self._timeout,
+            max_tokens=self._max_tokens,
+        )
+
+    def recommend_params(self, mode: str) -> dict[str, Any]:
+        """Return runtime-specific params for the given mode."""
+        return {"provider": "vllm", "extra_flags": []}
+
+
 # Registry of adapters in preference order (LM Studio MLX first on Apple Silicon).
-ALL_ADAPTERS: list[OllamaAdapter | LMStudioAdapter | LlamaCppAdapter] = [
+ALL_ADAPTERS: list[OllamaAdapter | LMStudioAdapter | LlamaCppAdapter | VLLMAdapter] = [
     LMStudioAdapter(),
     OllamaAdapter(),
     LlamaCppAdapter(),
+    VLLMAdapter(),
 ]
 
 
@@ -658,6 +788,97 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
         }
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# vLLM helpers
+# ---------------------------------------------------------------------------
+
+
+def smoke_test_vllm_model(
+    model: str,
+    base_url: str = "http://localhost:8000",
+    api_key: str = "",
+    timeout: int = 60,
+    max_tokens: int = 2048,
+) -> dict[str, Any]:
+    """
+    Smoke-test a model hosted by a vLLM server via its OpenAI-compatible API.
+
+    The vLLM server should be running and serving the specified model.
+    Uses /v1/chat/completions endpoint with a test prompt.
+
+    Args:
+        model: Model name/id to test
+        base_url: vLLM server base URL (default: http://localhost:8000)
+        api_key: Optional API key for authentication
+        timeout: Request timeout in seconds (default: 60)
+        max_tokens: Maximum tokens to generate (default: 2048)
+
+    Returns:
+        {
+            "ok": bool,
+            "response": str,
+            "tokens_per_second": float | None,
+            "completion_tokens": int | None,
+            "duration_seconds": float | None,
+            "error": str | None
+        }
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with exactly READY"}],
+            "max_tokens": max_tokens,
+            "temperature": 0,
+        }
+    ).encode()
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib.request.Request(url, data=payload, headers=headers)
+    start = time.time()
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+
+        duration_seconds = max(time.time() - start, 1e-6)
+        text = body["choices"][0]["message"]["content"].strip()
+        usage = body.get("usage") or {}
+        raw_completion = usage.get("completion_tokens")
+        completion_tokens = int(raw_completion) if isinstance(raw_completion, int) else None
+
+        tokens_per_second: float | None = None
+        if completion_tokens is not None and completion_tokens > 0:
+            tokens_per_second = completion_tokens / duration_seconds
+
+        return {
+            "ok": "READY" in text.upper(),
+            "response": text,
+            "tokens_per_second": tokens_per_second,
+            "completion_tokens": completion_tokens,
+            "duration_seconds": duration_seconds,
+        }
+
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        return {
+            "ok": False,
+            "error": f"HTTP {exc.code}: {error_body}",
+            "detail": str(exc),
+        }
+    except urllib.error.URLError as exc:
+        return {"ok": False, "error": f"Connection failed: {exc.reason}", "detail": str(exc)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
