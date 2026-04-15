@@ -614,7 +614,29 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
     header("Step 2.4 — Pick a model")
     engine = state.primary_engine
 
+    # If llamacpp is primary and a server is already running with a model loaded,
+    # offer to use that model directly — the user clearly already has it set up.
+    running_llamacpp_model: str | None = None
+    if engine == "llamacpp":
+        status = pb.llamacpp_info()
+        if status.get("server_running") and status.get("model"):
+            running_llamacpp_model = status["model"]
+            info(
+                f"Detected running llama-server on port {status['server_port']} "
+                f"serving model [bold]{running_llamacpp_model}[/bold]."
+            )
+
     if non_interactive:
+        if running_llamacpp_model:
+            state.model_name = running_llamacpp_model
+            state.engine_model_tag = running_llamacpp_model
+            state.model_source = "running-server"
+            state.model_candidate = {}
+            ok(
+                f"Non-interactive pick: [bold]{state.engine_model_tag}[/bold] (from running llama-server)"
+            )
+            state.mark("2.4")
+            return True
         # Non-interactive: go straight through find-model (prefers installed models).
         candidate = _find_model_auto(engine, state.profile)
         if not candidate:
@@ -627,17 +649,35 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
         ok(f"Non-interactive pick: [bold]{state.engine_model_tag}[/bold]")
     else:
         while True:
-            mode = questionary.select(
-                "How do you want to choose the model?",
-                choices=[
+            choices: list[Any] = []
+            if running_llamacpp_model:
+                choices.append(
+                    questionary.Choice(
+                        f"Use running llama-server model: {running_llamacpp_model}",
+                        value="running",
+                    )
+                )
+            choices.extend(
+                [
                     questionary.Choice("I'll type a specific model name", value="direct"),
                     questionary.Choice("Help me pick (llmfit recommendation)", value="find-model"),
                     questionary.Choice("Cancel setup", value="cancel"),
-                ],
+                ]
+            )
+            mode = questionary.select(
+                "How do you want to choose the model?",
+                choices=choices,
             ).ask()
             if mode is None or mode == "cancel":
                 fail("Setup cancelled by user.")
                 return False
+            if mode == "running" and running_llamacpp_model:
+                state.model_name = running_llamacpp_model
+                state.engine_model_tag = running_llamacpp_model
+                state.model_source = "running-server"
+                state.model_candidate = {}
+                ok(f"Using running llama-server model: [bold]{running_llamacpp_model}[/bold]")
+                break
             if mode == "direct":
                 name = questionary.text(
                     f"Model name for engine '{engine}' (e.g. qwen3-coder:30b):",
@@ -829,7 +869,13 @@ def _model_already_installed(engine: str, tag: str, profile: dict[str, Any]) -> 
         return any(m.get("name") == tag for m in profile.get("ollama", {}).get("models", []))
     if engine == "lmstudio":
         return any(m.get("path") == tag for m in profile.get("lmstudio", {}).get("models", []))
-    return False  # llama.cpp: treat as not cached — user manages GGUFs manually
+    if engine == "llamacpp":
+        # If the llama-server is already running and serving this model alias,
+        # treat it as installed — the user has it set up and we shouldn't
+        # prompt for a download.
+        status = pb.llamacpp_info()
+        return bool(status.get("server_running") and status.get("model") == tag)
+    return False
 
 
 def _estimate_model_size(state: WizardState) -> int | None:
