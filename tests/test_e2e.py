@@ -186,7 +186,7 @@ class TestCoreDebugCli:
         pb.main()
         data = json.loads(capsys.readouterr().out)
         names = {a["name"] for a in data["adapters"]}
-        assert names == {"ollama", "lmstudio", "llamacpp"}
+        assert names == {"ollama", "lmstudio", "llamacpp", "vllm"}
 
 
 # ---------------------------------------------------------------------------
