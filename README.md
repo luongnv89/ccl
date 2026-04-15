@@ -283,4 +283,4 @@ For security issues, see [SECURITY.md](SECURITY.md).
 
 ---
 
-[MIT](LICENSE) — © 2024 Luong NGUYEN
+[MIT](LICENSE) — © 2026 Luong NGUYEN
