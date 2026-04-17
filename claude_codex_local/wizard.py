@@ -38,6 +38,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from claude_codex_local import __version__
 from claude_codex_local import core as pb
 
 console = Console()
@@ -123,12 +124,14 @@ _CCL_BANNER = r"""
 """
 
 _CCL_TAGLINE = "Hit your limit? Need privacy? Just swap the model."
+_CCL_REPO_URL = "https://github.com/luongnv89/claude-codex-local"
 
 
 def print_welcome_banner() -> None:
-    """Print the ASCII 3D CCL banner and project tagline to the console."""
+    """Print the ASCII 3D CCL banner, tagline, version, and repo URL."""
     console.print(_CCL_BANNER, style="bold cyan", highlight=False)
     console.print(f"  [bold white]{_CCL_TAGLINE}[/bold white]")
+    console.print(f"  [dim]v{__version__}  ·  [link={_CCL_REPO_URL}]{_CCL_REPO_URL}[/link][/dim]")
     console.print()
 
 
@@ -1851,8 +1854,6 @@ def run_find_model_standalone() -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    from claude_codex_local import __version__
-
     parser = argparse.ArgumentParser(
         prog="ccl",
         description=(
