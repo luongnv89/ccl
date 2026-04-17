@@ -602,7 +602,7 @@ class TestFindModelAuto:
         monkeypatch.setattr(
             pb,
             "llmfit_coding_candidates",
-            lambda: [
+            lambda *a, **k: [
                 {
                     "name": "Qwen/Qwen3-Coder-30B",
                     "ollama_tag": "qwen3-coder:30b",
@@ -618,7 +618,7 @@ class TestFindModelAuto:
 
     def test_returns_none_when_nothing_at_all(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
         profile = {"ollama": {"models": []}, "lmstudio": {"models": []}}
         assert wiz._find_model_auto("ollama", profile) is None
 
@@ -629,7 +629,7 @@ class TestFindModelAuto:
 
 
 class TestBuildProfileRecommendations:
-    def _candidates(self):
+    def _candidates(self, *a, **k):
         return [
             {
                 "name": "Qwen/Qwen3-Coder-30B",
@@ -749,7 +749,7 @@ class TestStep24PickerIntegration:
             "disk": {"free_bytes": 1 << 40},
         }
 
-    def _candidates(self):
+    def _candidates(self, *a, **k):
         return [
             {
                 "name": "Qwen/Qwen3-Coder-30B",

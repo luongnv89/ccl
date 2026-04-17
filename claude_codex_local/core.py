@@ -951,17 +951,24 @@ def llmfit_estimate_size_bytes(candidate_or_name: dict[str, Any] | str) -> int |
     return int(gb * (1024**3))
 
 
-def llmfit_coding_candidates() -> list[dict[str, Any]]:
+def llmfit_coding_candidates(ram_gb: float | None = None) -> list[dict[str, Any]]:
     """
     Run `llmfit fit --json`, filter to Coding category, and return a deduplicated
     list of candidates enriched with:
       - ollama_tag:   Ollama registry name (or None)
       - lms_mlx_path: lmstudio-community MLX model path for the recommended quant (or None)
+
+    When `ram_gb` is provided, `--ram` is passed to llmfit so rankings account
+    for currently-available memory instead of total system RAM.
     """
     if not command_version("llmfit").get("present"):
         return []
+    cmd: list[str] = ["llmfit"]
+    if ram_gb is not None and ram_gb > 0:
+        cmd.extend(["--ram", f"{ram_gb:.2f}G"])
+    cmd.extend(["fit", "--json"])
     try:
-        cp = run(["llmfit", "fit", "--json"])
+        cp = run(cmd)
         data = json.loads(cp.stdout)
     except Exception:
         return []
@@ -1529,6 +1536,19 @@ def machine_profile() -> dict[str, Any]:
 
 RECOMMENDATION_MODES: tuple[str, ...] = ("balanced", "fast", "quality")
 
+
+def _available_ram_gb(profile: dict[str, Any]) -> float | None:
+    """Return `available_ram_gb` from the llmfit system block, if present."""
+    sys_block = (
+        (profile.get("llmfit_system") or {}).get("system") or profile.get("llmfit_system") or {}
+    )
+    val = sys_block.get("available_ram_gb")
+    try:
+        return float(val) if val is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 # Human-readable descriptions for each recommendation profile. Shown in the
 # wizard model picker so users understand the speed/quality tradeoff before
 # choosing a profile. Keep these short (one sentence each).
@@ -1580,7 +1600,7 @@ def recommend_for_mode(profile: dict[str, Any], mode: str, engine: str) -> dict[
     if engine not in ("ollama", "lmstudio", "llamacpp"):
         return None
 
-    candidates = llmfit_coding_candidates()
+    candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
     ranked = rank_candidates_for_mode(candidates, mode)
     if not ranked:
         return None
@@ -1638,9 +1658,22 @@ def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[di
         "code",
     )
 
+    # Embedding / reranker / TTS / vision-only models are not usable as chat
+    # coding models — hide them from the picker to avoid surprising failures.
+    excluded_keywords = (
+        "embed",
+        "embedding",
+        "reranker",
+        "rerank",
+    )
+
     def _is_coder(text: str) -> bool:
         lower = text.lower()
         return any(k in lower for k in coder_keywords)
+
+    def _is_excluded(text: str) -> bool:
+        lower = text.lower()
+        return any(k in lower for k in excluded_keywords)
 
     entries: list[dict[str, Any]] = []
     if engine == "ollama":
@@ -1648,7 +1681,7 @@ def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[di
             if not m.get("local"):
                 continue
             name = m.get("name")
-            if not name:
+            if not name or _is_excluded(name):
                 continue
             entries.append(
                 {
@@ -1661,7 +1694,7 @@ def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[di
     elif engine == "lmstudio":
         for m in profile.get("lmstudio", {}).get("models", []) or []:
             path = m.get("path")
-            if not path:
+            if not path or _is_excluded(path):
                 continue
             entries.append(
                 {
@@ -1716,7 +1749,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
     lms_installed = {m["path"]: m for m in lms_data.get("models", [])}
     lms_usable = lms_present  # set to False if Responses API check fails
 
-    candidates = llmfit_coding_candidates()
+    candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
 
     # Re-rank candidates according to mode before any selection pass.
     if mode == "fast" and candidates:

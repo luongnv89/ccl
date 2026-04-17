@@ -313,7 +313,7 @@ class TestFindModelStandalone:
         monkeypatch.setattr(
             wiz,
             "_find_model_interactive",
-            lambda engine: {"display": "Qwen3", "tag": "qwen3-coder:30b"},
+            lambda engine, profile=None: {"display": "Qwen3", "tag": "qwen3-coder:30b"},
         )
         assert wiz.run_find_model_standalone() == 0
 
@@ -326,7 +326,7 @@ class TestFindModelStandalone:
                 "presence": {"llmfit": True, "engines": ["ollama"]},
             },
         )
-        monkeypatch.setattr(wiz, "_find_model_interactive", lambda engine: None)
+        monkeypatch.setattr(wiz, "_find_model_interactive", lambda engine, profile=None: None)
         assert wiz.run_find_model_standalone() == 1
 
 

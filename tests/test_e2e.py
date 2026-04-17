@@ -80,7 +80,7 @@ def _installed_profile(pb_mod, harness="claude", engine="ollama"):
     }
 
 
-def _stub_candidates():
+def _stub_candidates(*a, **k):
     return [
         {
             "name": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
@@ -152,7 +152,7 @@ class TestCoreDebugCli:
         bad["ollama"]["models"] = []
         bad["presence"]["engines"] = []
         monkeypatch.setattr(pb, "machine_profile", lambda: bad)
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
         monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "doctor"])
         pb.main()
         data = json.loads(capsys.readouterr().out)

@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import shlex
 import stat
@@ -203,13 +204,14 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     spec_table.add_column("Value", style="green")
 
     if llmfit_sys:
-        cpu_name = llmfit_sys.get("cpu_name", "Unknown")
-        cpu_cores = llmfit_sys.get("cpu_cores", "Unknown")
-        total_ram = llmfit_sys.get("total_ram_gb", "?")
-        available_ram = llmfit_sys.get("available_ram_gb", "?")
-        has_gpu = llmfit_sys.get("has_gpu", False)
-        gpu_name = llmfit_sys.get("gpu_name", "N/A") if has_gpu else "N/A"
-        gpu_vram = llmfit_sys.get("gpu_vram_gb", 0) if has_gpu else 0
+        sys_info = llmfit_sys.get("system", llmfit_sys)
+        cpu_name = sys_info.get("cpu_name", "Unknown")
+        cpu_cores = sys_info.get("cpu_cores", "Unknown")
+        total_ram = sys_info.get("total_ram_gb", "?")
+        available_ram = sys_info.get("available_ram_gb", "?")
+        has_gpu = sys_info.get("has_gpu", False)
+        gpu_name = sys_info.get("gpu_name", "N/A") if has_gpu else "N/A"
+        gpu_vram = sys_info.get("gpu_vram_gb", 0) if has_gpu else 0
 
         spec_table.add_row("CPU", f"{cpu_name} ({cpu_cores} cores)")
         spec_table.add_row("RAM", f"{total_ram} GB (Available: {available_ram} GB)")
@@ -217,7 +219,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
             spec_table.add_row("GPU", f"{gpu_name} ({gpu_vram} GB VRAM)")
         spec_table.add_row(
             "Platform",
-            f"{llmfit_sys.get('system', 'Unknown')} / {llmfit_sys.get('machine', 'Unknown')}",
+            f"{platform.system()} / {platform.machine()}",
         )
     else:
         spec_table.add_row("CPU", "Not available (llmfit not installed)")
@@ -662,6 +664,7 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
             items: dict[str, dict[str, Any]] = {}
 
             if running_llamacpp_model:
+                choices.append(questionary.Separator("── Running server ──"))
                 choices.append(
                     questionary.Choice(
                         f"Use running llama-server model: {running_llamacpp_model}",
@@ -670,27 +673,29 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                 )
 
             # --- Recommendation profiles (Speed / Balanced / Quality) ---
-            profile_choice_added = False
+            profile_entries: list[questionary.Choice] = []
             for pmode in pb.RECOMMENDATION_MODES:
                 rec = profile_recommendations.get(pmode)
                 if rec is None:
                     continue
                 key = f"profile:{pmode}"
                 items[key] = rec
-                choices.append(
+                profile_entries.append(
                     questionary.Choice(
                         _profile_choice_label(pmode, rec),
                         value=key,
                     )
                 )
-                profile_choice_added = True
-            if profile_choice_added:
+            if profile_entries:
+                choices.append(questionary.Separator("── Suggested by llmfit ──"))
+                choices.extend(profile_entries)
                 info(
                     "Speed/Quality/Balanced profiles come from llmfit's ranking of coding models "
                     f"for your {engine} engine."
                 )
 
             # --- Installed local models for the chosen engine ---
+            installed_entries: list[questionary.Choice] = []
             for idx, entry in enumerate(installed_models):
                 if running_llamacpp_model and entry.get("running"):
                     # Already surfaced as the top "running llama-server" choice.
@@ -698,13 +703,17 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                 key = f"installed:{idx}"
                 items[key] = entry
                 size_suffix = f"  ({entry.get('size')})" if entry.get("size") else ""
-                choices.append(
+                installed_entries.append(
                     questionary.Choice(
                         f"Use installed {entry['source']} model: {entry['display']}{size_suffix}",
                         value=key,
                     )
                 )
+            if installed_entries:
+                choices.append(questionary.Separator("── Installed on this machine ──"))
+                choices.extend(installed_entries)
 
+            choices.append(questionary.Separator("── Other ──"))
             choices.extend(
                 [
                     questionary.Choice("I'll type a specific model name", value="direct"),
@@ -764,7 +773,7 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                 state.engine_model_tag = _map_to_engine(name.strip(), engine) or name.strip()
                 state.model_source = "direct"
             else:
-                picked = _find_model_interactive(engine)
+                picked = _find_model_interactive(engine, state.profile)
                 if not picked:
                     continue
                 state.model_name = picked["display"]
@@ -929,7 +938,7 @@ def _find_model_auto(engine: str, profile: dict[str, Any] | None = None) -> dict
             return {"display": path, "tag": path, "score": None, "candidate": {"name": path}}
 
     # 2. Fall back to llmfit's top candidate that maps to this engine.
-    candidates = pb.llmfit_coding_candidates()
+    candidates = pb.llmfit_coding_candidates(ram_gb=pb._available_ram_gb(profile))
     for c in candidates:
         tag = _candidate_tag(c, engine)
         if tag:
@@ -937,11 +946,14 @@ def _find_model_auto(engine: str, profile: dict[str, Any] | None = None) -> dict
     return None
 
 
-def _find_model_interactive(engine: str) -> dict[str, Any] | None:
+def _find_model_interactive(
+    engine: str, profile: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     if not _ensure_llmfit():
         return None
     info("Running llmfit to rank coding models for this machine...")
-    candidates = pb.llmfit_coding_candidates()
+    ram_gb = pb._available_ram_gb(profile) if profile else None
+    candidates = pb.llmfit_coding_candidates(ram_gb=ram_gb)
     if not candidates:
         fail("llmfit returned no coding candidates.")
         return None
@@ -2209,7 +2221,7 @@ def run_find_model_standalone() -> int:
     engines = profile["presence"]["engines"] or ["ollama"]
     engine = engines[0]
     info(f"Ranking models for engine: {engine}")
-    picked = _find_model_interactive(engine)
+    picked = _find_model_interactive(engine, profile)
     if picked:
         console.print(f"\n[bold]You picked:[/bold] {picked['display']}")
         console.print(f"[bold]Engine tag:[/bold] {picked['tag']}")

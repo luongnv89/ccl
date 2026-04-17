@@ -264,7 +264,7 @@ def _empty_profile():
 
 class TestSelectBestModel:
     def test_hardcoded_fallback_when_no_candidates(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
         monkeypatch.setattr(pb, "smoke_test_ollama_model", lambda tag: {"ok": True})
         rec = pb.select_best_model(_empty_profile(), mode="balanced")
         assert rec["selected_model"] == "qwen2.5-coder:7b"
@@ -278,7 +278,7 @@ class TestSelectBestModel:
         monkeypatch.setattr(
             pb,
             "llmfit_coding_candidates",
-            lambda: [
+            lambda *a, **k: [
                 {
                     "name": "Qwen/Qwen3-Coder-30B",
                     "score": 90,
@@ -302,7 +302,7 @@ class TestSelectBestModel:
         monkeypatch.setattr(
             pb,
             "llmfit_coding_candidates",
-            lambda: [
+            lambda *a, **k: [
                 {
                     "name": "Qwen/Qwen3-Coder-30B",
                     "score": 90,
@@ -324,7 +324,7 @@ class TestSelectBestModel:
         monkeypatch.setattr(
             pb,
             "llmfit_coding_candidates",
-            lambda: [
+            lambda *a, **k: [
                 {
                     "name": "Qwen/Qwen3-Coder-30B",
                     "score": 90,
@@ -346,7 +346,7 @@ class TestSelectBestModel:
         monkeypatch.setattr(
             pb,
             "llmfit_coding_candidates",
-            lambda: [
+            lambda *a, **k: [
                 {
                     "name": "Qwen/Qwen3-Coder-30B",
                     "score": 95,
@@ -372,7 +372,7 @@ class TestSelectBestModel:
         assert rec["mode"] == "fast"
 
     def test_invalid_mode_coerced_to_balanced(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
         rec = pb.select_best_model(_empty_profile(), mode="bogus")
         assert rec["mode"] == "balanced"
 
@@ -383,7 +383,7 @@ class TestSelectBestModel:
 
 
 class TestRankCandidatesForMode:
-    def _candidates(self):
+    def _candidates(self, *a, **k):
         return [
             {
                 "name": "Qwen/Qwen3-Coder-30B",
@@ -441,7 +441,7 @@ class TestRankCandidatesForMode:
 
 
 class TestRecommendForMode:
-    def _candidates(self):
+    def _candidates(self, *a, **k):
         return [
             {
                 "name": "Qwen/Qwen3-Coder-30B",
@@ -481,7 +481,7 @@ class TestRecommendForMode:
         assert rec["engine_tag"] == "Qwen/Qwen3-Coder-30B"
 
     def test_returns_none_when_no_candidates(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
         assert pb.recommend_for_mode(_empty_profile(), "balanced", "ollama") is None
 
     def test_returns_none_for_unknown_engine(self, monkeypatch):
@@ -494,7 +494,7 @@ class TestRecommendForMode:
         monkeypatch.setattr(
             pb,
             "llmfit_coding_candidates",
-            lambda: [
+            lambda *a, **k: [
                 {
                     "name": "Foo/NoOllamaTag",
                     "score": 99,
