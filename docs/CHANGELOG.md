@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-17
+
+### Fixed
+- Machine specifications table now shows real CPU, RAM, and GPU values — the wizard was reading `llmfit system --json` fields from the top level, but they are wrapped under a `system` key; Platform row now comes from `platform.system()` / `platform.machine()` since llmfit does not emit those keys (#46)
+- llmfit ranking now uses **available** RAM instead of total — `llmfit fit --json` is invoked with `--ram <available_ram_gb>G` so the Speed/Balanced/Quality picks match what will actually fit on the host right now (#46)
+- Embedding and reranker models are hidden from the installed-models picker for both Ollama and LM Studio — they cannot serve as chat coding models and were surfacing as confusing choices (e.g. `embeddinggemma:300m`, `nomic-embed-text:latest`) (#46)
+- Step 2.4 model picker is now grouped with visual separators — `Running server` / `Suggested by llmfit` / `Installed on this machine` / `Other` — so categories are visually distinct (#46)
+
 ## [0.8.0] - 2026-04-17
 
 ### Added

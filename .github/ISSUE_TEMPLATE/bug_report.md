@@ -28,7 +28,7 @@ What actually happened instead.
 
 - OS: [e.g., macOS 14.0, Ubuntu 22.04]
 - Python version: [e.g., 3.11.4]
-- claude-codex-local version: [e.g., 0.8.0]
+- claude-codex-local version: [e.g., 0.8.1]
 - Engine: [e.g., Ollama 0.3.0, LM Studio 0.2.x]
 - Harness: [e.g., Claude Code, Codex CLI]
 
