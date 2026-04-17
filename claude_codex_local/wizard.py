@@ -1180,8 +1180,12 @@ def _looks_like_missing_repo(hf_repo: str, err: str) -> bool:
         return False
     # Streamed failure — probe the HF search API. Exact-case hit means the
     # repo exists and the failure was something else (auth, quota, network).
+    # Critical: if the search API itself fails (network down, HF outage),
+    # we must NOT treat that as "repo missing" — otherwise we trigger a
+    # fuzzy fallback that will find nothing and mask the real download
+    # failure. Propagate the original error instead by returning False.
     try:
-        hits = pb.huggingface_search_models(hf_repo, limit=10)
+        hits = pb.huggingface_search_models(hf_repo, limit=10, raise_on_error=True)
     except Exception:
         return False
     hits_lower = {h.lower() for h in hits}
