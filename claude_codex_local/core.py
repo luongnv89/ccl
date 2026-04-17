@@ -1142,7 +1142,26 @@ def huggingface_download_gguf(
             # return ``path=None`` and let the caller rely on HF's default
             # cache resolution.
             proc = subprocess.Popen(cmd, env=ensure_path(None))
-            rc = proc.wait(timeout=3600)
+            try:
+                rc = proc.wait(timeout=3600)
+            except KeyboardInterrupt:
+                # Don't leave the child HF CLI running when the user hits
+                # Ctrl-C — escalate terminate → wait → kill, then re-raise
+                # so the wizard's KI handler can print its clean message.
+                import contextlib
+
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        with contextlib.suppress(subprocess.TimeoutExpired):
+                            proc.wait(timeout=3)
+                except Exception:
+                    # Best-effort cleanup: the child may already be gone.
+                    pass
+                raise
             elapsed = time.monotonic() - start
             if rc != 0:
                 return {
@@ -1261,6 +1280,7 @@ def huggingface_search_models(
     limit: int = 10,
     *,
     timeout: float = 10.0,
+    raise_on_error: bool = False,
 ) -> list[str]:
     """
     Search the Hugging Face Hub for model IDs matching ``query``.
@@ -1268,8 +1288,12 @@ def huggingface_search_models(
     Uses the public `/api/models?search=` endpoint via ``urllib.request`` so
     there is no new runtime dependency. Returns a flat list of model IDs (e.g.
     ``["bartowski/Qwen2.5-Coder-7B-Instruct-GGUF", ...]``) ordered as HF
-    returned them. Silently returns ``[]`` on any network or parsing error so
-    callers can gracefully degrade to a re-prompt.
+    returned them.
+
+    By default this silently returns ``[]`` on any network or parsing error
+    so callers can gracefully degrade to a re-prompt. Pass
+    ``raise_on_error=True`` when the caller needs to distinguish "no hits"
+    from "the search API itself failed" — the raw exception is propagated.
     """
     import urllib.error
     import urllib.parse
@@ -1284,6 +1308,8 @@ def huggingface_search_models(
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https only
             body = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        if raise_on_error:
+            raise
         return []
     if not isinstance(body, list):
         return []

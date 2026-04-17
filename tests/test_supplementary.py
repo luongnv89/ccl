@@ -900,7 +900,7 @@ class TestFuzzySearchDownloadFlow:
         # HF search returns NO exact match for "user/typo" → triggers fuzzy
         # search fallback even though the direct error was generic.
         monkeypatch.setattr(
-            pb, "huggingface_search_models", lambda q, limit=10: ["other/unrelated"]
+            pb, "huggingface_search_models", lambda q, limit=10, **kw: ["other/unrelated"]
         )
         monkeypatch.setattr(
             pb,
@@ -1066,3 +1066,205 @@ class TestDownloadModelSummary:
             primary_engine="ollama", engine_model_tag="qwen3-coder:7b", model_name="qwen3-coder:7b"
         )
         assert wiz._download_model(state) is False
+
+    def test_download_keyboard_interrupt_llamacpp_returns_false(self, isolated_state, monkeypatch):
+        """Ctrl-C during the llamacpp / HF CLI download path must also be
+        handled by the wizard and return False cleanly (PR #44 review note)."""
+        pb, wiz, _ = isolated_state
+
+        def raise_ki(tag):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(wiz, "_download_gguf_via_hf_cli", raise_ki)
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            engine_model_tag="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+            model_name="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+        )
+        assert wiz._download_model(state) is False
+
+
+# ---------------------------------------------------------------------------
+# PR #44 review notes — regression tests for the three fixes.
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingfaceDownloadGgufKI:
+    """huggingface_download_gguf must terminate the streamed Popen child on
+    KeyboardInterrupt so we don't leak an orphan HF CLI process."""
+
+    def test_streamed_ki_terminates_child_and_reraises(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+
+        events: list[str] = []
+
+        class _FakePopen:
+            def __init__(self, cmd, env=None):
+                events.append("spawn")
+
+            def wait(self, timeout=None):
+                # First wait() — from the download logic — raises KI, as if
+                # the user pressed Ctrl-C while the child was running.
+                # Second wait() — from our cleanup path — completes quickly.
+                if "terminate" not in events:
+                    raise KeyboardInterrupt()
+                events.append("wait-after-terminate")
+                return 0
+
+            def terminate(self):
+                events.append("terminate")
+
+            def kill(self):
+                events.append("kill")
+
+        monkeypatch.setattr(pb.subprocess, "Popen", _FakePopen)
+
+        import pytest
+
+        with pytest.raises(KeyboardInterrupt):
+            pb.huggingface_download_gguf("some/repo", stream=True)
+
+        # The critical invariant: terminate() was called before re-raising,
+        # and we waited (bounded) for the child before giving up.
+        assert "spawn" in events
+        assert "terminate" in events
+        # Terminate happened before we let the KI propagate — so the child
+        # had a chance to exit. If terminate didn't hang, kill() wasn't used.
+        assert events.index("terminate") > events.index("spawn")
+
+    def test_streamed_ki_force_kills_when_terminate_hangs(self, isolated_state, monkeypatch):
+        """If the child ignores SIGTERM within 3s, escalate to SIGKILL."""
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+
+        events: list[str] = []
+
+        class _StubbornPopen:
+            def __init__(self, cmd, env=None):
+                events.append("spawn")
+
+            def wait(self, timeout=None):
+                events.append(f"wait({timeout})")
+                # Initial wait → KI. Subsequent waits after terminate →
+                # always hang (TimeoutExpired) to force the kill escalation.
+                if len([e for e in events if e.startswith("wait")]) == 1:
+                    raise KeyboardInterrupt()
+                raise pb.subprocess.TimeoutExpired(cmd="hf", timeout=timeout)
+
+            def terminate(self):
+                events.append("terminate")
+
+            def kill(self):
+                events.append("kill")
+
+        monkeypatch.setattr(pb.subprocess, "Popen", _StubbornPopen)
+
+        import pytest
+
+        with pytest.raises(KeyboardInterrupt):
+            pb.huggingface_download_gguf("some/repo", stream=True)
+
+        assert "terminate" in events
+        assert "kill" in events
+        # Order: terminate, then wait(timeout=3), then kill.
+        assert events.index("terminate") < events.index("kill")
+
+
+class TestLooksLikeMissingRepoSearchApiError:
+    """PR #44 review note: when the HF search API itself fails, _looks_like_missing_repo
+    must NOT return True — otherwise a network outage masquerades as a missing
+    repo and triggers a fuzzy fallback that finds nothing."""
+
+    def test_search_api_network_error_does_not_trigger_fuzzy(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+
+        def boom(query, limit=10, raise_on_error=False):
+            if raise_on_error:
+                raise OSError("network unreachable")
+            return []
+
+        monkeypatch.setattr(pb, "huggingface_search_models", boom)
+        # A generic streamed-failure error — without search-API signal, we
+        # can't know whether the repo is missing, so we must NOT claim it is.
+        assert (
+            wiz._looks_like_missing_repo("user/real-repo", "huggingface-cli exited with status 1")
+            is False
+        )
+
+    def test_search_api_timeout_does_not_trigger_fuzzy(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+
+        def boom(query, limit=10, raise_on_error=False):
+            if raise_on_error:
+                raise TimeoutError("HF API timed out")
+            return []
+
+        monkeypatch.setattr(pb, "huggingface_search_models", boom)
+        assert (
+            wiz._looks_like_missing_repo("user/real-repo", "huggingface-cli exited with status 1")
+            is False
+        )
+
+    def test_search_api_success_with_no_hits_still_triggers(self, isolated_state, monkeypatch):
+        """Positive control: when the API responds OK but reports no matches,
+        the fuzzy path should still fire — that's the original #38 behaviour."""
+        pb, wiz, _ = isolated_state
+
+        def ok(query, limit=10, raise_on_error=False):
+            return ["other/unrelated"]
+
+        monkeypatch.setattr(pb, "huggingface_search_models", ok)
+        assert (
+            wiz._looks_like_missing_repo("user/typo-here", "huggingface-cli exited with status 1")
+            is True
+        )
+
+    def test_download_flow_surfaces_error_when_search_api_down(self, isolated_state, monkeypatch):
+        """End-to-end: streamed download fails, search API is down → we
+        surface the original download error rather than launching a fuzzy
+        picker that would find nothing."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_download_gguf",
+            lambda *a, **kw: {
+                "ok": False,
+                "path": None,
+                "error": "huggingface-cli exited with status 1",
+                "not_found": False,
+                "bytes_downloaded": None,
+                "elapsed_seconds": 0.3,
+            },
+        )
+
+        def search_boom(query, limit=10, raise_on_error=False):
+            if raise_on_error:
+                raise OSError("offline")
+            return []
+
+        monkeypatch.setattr(pb, "huggingface_search_models", search_boom)
+
+        # If the fuzzy picker is reached, this will explode — which is the
+        # bug we're guarding against.
+        def _should_not_be_called(*a, **kw):
+            raise AssertionError("fuzzy picker must not be invoked when the HF search API is down")
+
+        monkeypatch.setattr(wiz, "_prompt_fuzzy_hf_match", _should_not_be_called)
+
+        out = wiz._download_gguf_via_hf_cli("user/real-repo")
+        assert out["ok"] is False
+        assert "exited with status 1" in (out["error"] or "")
