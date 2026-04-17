@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Live progress for model downloads: `ollama pull`, `lms get`, and the Hugging Face CLI now stream their own progress bars (bytes, speed, ETA) straight to the terminal, and the wizard prints a post-download summary with the final size and elapsed time. Ctrl-C cleanly aborts an in-flight pull (#39)
+- Fuzzy-search fallback for Hugging Face GGUF downloads: when a repo is not found, the wizard queries the Hub's search API, presents up to 3 closest matches as a numbered picker, and lets the user either pick one or re-enter a different name. When no similar models are found the wizard reports it and re-prompts for a new name (#38)
+
 ## [0.7.0] - 2026-04-12
 
 ### Added

@@ -1088,6 +1088,8 @@ def huggingface_download_gguf(
     repo_id: str,
     filename: str | None = None,
     local_dir: str | None = None,
+    *,
+    stream: bool = True,
 ) -> dict[str, Any]:
     """
     Download a GGUF model file from Hugging Face Hub via the HuggingFace CLI.
@@ -1097,16 +1099,32 @@ def huggingface_download_gguf(
         filename:  Specific file to download (e.g. "model-Q4_K_M.gguf").
                    When None the entire repo is fetched (picks the first GGUF).
         local_dir: Directory to store the file. Defaults to the HF cache.
+        stream:    When True (default) the CLI's stdout/stderr stream to the
+                   terminal so the user can see the HF CLI's built-in progress
+                   bar (download speed / bytes / ETA). When False, output is
+                   captured and returned only in error paths — useful for unit
+                   tests that assert on the returned path.
 
     Returns:
-        {"ok": bool, "path": str | None, "error": str | None}
+        {"ok": bool, "path": str | None, "error": str | None,
+         "bytes_downloaded": int | None, "elapsed_seconds": float | None,
+         "not_found": bool}
+
+        ``not_found`` is True only when the HF CLI reports the repo does not
+        exist (e.g. 404 / RepositoryNotFoundError). This lets callers trigger a
+        fuzzy-search fallback without scraping the raw error text.
     """
+    import time
+
     det = huggingface_cli_detect()
     if not det.get("present"):
         return {
             "ok": False,
             "path": None,
             "error": "HuggingFace CLI (hf / huggingface-cli) not found — install with: pip install 'huggingface_hub[cli]'",
+            "bytes_downloaded": None,
+            "elapsed_seconds": None,
+            "not_found": False,
         }
 
     cmd = [det["binary"], "download", repo_id]
@@ -1115,15 +1133,207 @@ def huggingface_download_gguf(
     if local_dir:
         cmd += ["--local-dir", local_dir]
 
+    start = time.monotonic()
     try:
+        if stream:
+            # Inherit stdout+stderr so the HF CLI's progress bar is visible to
+            # the user. We lose stdout capture, so we can only recover a precise
+            # path when the caller supplied ``local_dir``. When not supplied,
+            # return ``path=None`` and let the caller rely on HF's default
+            # cache resolution.
+            proc = subprocess.Popen(cmd, env=ensure_path(None))
+            rc = proc.wait(timeout=3600)
+            elapsed = time.monotonic() - start
+            if rc != 0:
+                return {
+                    "ok": False,
+                    "path": None,
+                    "error": f"huggingface-cli exited with status {rc}",
+                    "bytes_downloaded": None,
+                    "elapsed_seconds": elapsed,
+                    "not_found": False,  # can't scrape stderr we didn't capture
+                }
+            resolved_path = None
+            size_bytes: int | None = None
+            if local_dir:
+                if filename:
+                    candidate = Path(local_dir) / filename
+                    if candidate.exists():
+                        resolved_path = str(candidate)
+                        try:
+                            size_bytes = candidate.stat().st_size
+                        except OSError:
+                            size_bytes = None
+                else:
+                    resolved_path = local_dir
+                    try:
+                        size_bytes = _dir_size_bytes(Path(local_dir))
+                    except OSError:
+                        size_bytes = None
+            return {
+                "ok": True,
+                "path": resolved_path,
+                "error": None,
+                "bytes_downloaded": size_bytes,
+                "elapsed_seconds": elapsed,
+                "not_found": False,
+            }
+        # Non-streaming path preserves the original contract — capture stdout
+        # and read the final path from its last line. Used by unit tests.
         cp = run(cmd, timeout=600, check=False)
+        elapsed = time.monotonic() - start
         if cp.returncode != 0:
-            return {"ok": False, "path": None, "error": (cp.stderr or cp.stdout).strip()}
-        # huggingface-cli download prints the resolved path on stdout
+            err = (cp.stderr or cp.stdout).strip()
+            return {
+                "ok": False,
+                "path": None,
+                "error": err,
+                "bytes_downloaded": None,
+                "elapsed_seconds": elapsed,
+                "not_found": _looks_like_not_found(err),
+            }
         path = cp.stdout.strip().splitlines()[-1] if cp.stdout.strip() else None
-        return {"ok": True, "path": path, "error": None}
+        size_bytes = None
+        if path:
+            try:
+                p = Path(path)
+                if p.is_file():
+                    size_bytes = p.stat().st_size
+                elif p.is_dir():
+                    size_bytes = _dir_size_bytes(p)
+            except OSError:
+                size_bytes = None
+        return {
+            "ok": True,
+            "path": path,
+            "error": None,
+            "bytes_downloaded": size_bytes,
+            "elapsed_seconds": elapsed,
+            "not_found": False,
+        }
     except Exception as exc:
-        return {"ok": False, "path": None, "error": str(exc)}
+        elapsed = time.monotonic() - start
+        return {
+            "ok": False,
+            "path": None,
+            "error": str(exc),
+            "bytes_downloaded": None,
+            "elapsed_seconds": elapsed,
+            "not_found": _looks_like_not_found(str(exc)),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Helpers for the HF download flow (#38, #39)
+# ---------------------------------------------------------------------------
+
+
+_HF_NOT_FOUND_MARKERS = (
+    "repository not found",
+    "repositorynotfounderror",
+    "404 client error",
+    "not found for url",
+    "entry not found",
+    "revisionnotfounderror",
+)
+
+
+def _looks_like_not_found(text: str) -> bool:
+    """Heuristic predicate for HF "repo/file does not exist" errors."""
+    t = (text or "").lower()
+    return any(marker in t for marker in _HF_NOT_FOUND_MARKERS)
+
+
+def _dir_size_bytes(root: Path) -> int:
+    """Sum of every regular file under ``root`` (best-effort)."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for fname in filenames:
+            try:
+                total += (Path(dirpath) / fname).stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def huggingface_search_models(
+    query: str,
+    limit: int = 10,
+    *,
+    timeout: float = 10.0,
+) -> list[str]:
+    """
+    Search the Hugging Face Hub for model IDs matching ``query``.
+
+    Uses the public `/api/models?search=` endpoint via ``urllib.request`` so
+    there is no new runtime dependency. Returns a flat list of model IDs (e.g.
+    ``["bartowski/Qwen2.5-Coder-7B-Instruct-GGUF", ...]``) ordered as HF
+    returned them. Silently returns ``[]`` on any network or parsing error so
+    callers can gracefully degrade to a re-prompt.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    if not query or not query.strip():
+        return []
+    try:
+        params = urllib.parse.urlencode({"search": query.strip(), "limit": limit})
+        url = f"https://huggingface.co/api/models?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "claude-codex-local"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https only
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return []
+    if not isinstance(body, list):
+        return []
+    ids: list[str] = []
+    for item in body:
+        if not isinstance(item, dict):
+            continue
+        mid = item.get("id") or item.get("modelId")
+        if isinstance(mid, str) and mid:
+            ids.append(mid)
+    return ids
+
+
+def huggingface_fuzzy_find(query: str, *, max_results: int = 3) -> list[str]:
+    """
+    Suggest up to ``max_results`` Hugging Face model IDs that closely resemble
+    ``query``. Combines the HF search endpoint with ``difflib.get_close_matches``
+    for ranking so typos like "qwen2.5-codr" still resolve.
+
+    Returns an empty list when the query is blank, the network is unavailable,
+    or nothing plausibly matches.
+    """
+    import difflib
+
+    candidates = huggingface_search_models(query, limit=10)
+    if not candidates:
+        return []
+    # Rank by similarity to the user's query (case-insensitive). `get_close_matches`
+    # with a low cutoff keeps partial matches in; we clamp to max_results at the end.
+    ranked = difflib.get_close_matches(
+        query.lower(),
+        [c.lower() for c in candidates],
+        n=max_results,
+        cutoff=0.3,
+    )
+    if ranked:
+        # Map lowercase picks back to their original-cased IDs, preserving
+        # difflib's ranking order.
+        lut = {c.lower(): c for c in candidates}
+        deduped: list[str] = []
+        for low in ranked:
+            orig = lut.get(low)
+            if orig and orig not in deduped:
+                deduped.append(orig)
+            if len(deduped) >= max_results:
+                break
+        return deduped
+    # difflib found nothing — fall back to HF's own ordering so we still
+    # surface *some* suggestion instead of silently failing.
+    return candidates[:max_results]
 
 
 def llamacpp_detect() -> dict[str, Any]:

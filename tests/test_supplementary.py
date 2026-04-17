@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # core.llamacpp_detect — all-missing and one-present branches.
@@ -417,8 +418,13 @@ class TestHuggingfaceDownloadGguf:
         assert result["ok"] is False
         assert "not found" in result["error"]
         assert result["path"] is None
+        # Schema contract (#38/#39): every result exposes these keys.
+        assert result["bytes_downloaded"] is None
+        assert result["elapsed_seconds"] is None
+        assert result["not_found"] is False
 
-    def test_success_returns_path(self, isolated_state, monkeypatch):
+    def test_success_returns_path_non_streaming(self, isolated_state, monkeypatch):
+        """stream=False preserves the original capture-based path extraction."""
         pb, _, _ = isolated_state
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
@@ -430,10 +436,11 @@ class TestHuggingfaceDownloadGguf:
                 a[0], 0, "/home/user/.cache/huggingface/hub/model.gguf\n", ""
             ),
         )
-        result = pb.huggingface_download_gguf("org/repo", filename="model.gguf")
+        result = pb.huggingface_download_gguf("org/repo", filename="model.gguf", stream=False)
         assert result["ok"] is True
         assert result["path"] == "/home/user/.cache/huggingface/hub/model.gguf"
         assert result["error"] is None
+        assert isinstance(result["elapsed_seconds"], float)
 
     def test_uses_detected_binary_name(self, isolated_state, monkeypatch):
         # The download command must use the binary name returned by detect,
@@ -450,10 +457,10 @@ class TestHuggingfaceDownloadGguf:
                 captured.append(cmd) or subprocess.CompletedProcess(cmd, 0, "/tmp/model.gguf\n", "")
             ),
         )
-        pb.huggingface_download_gguf("org/repo")
+        pb.huggingface_download_gguf("org/repo", stream=False)
         assert captured[0][0] == "hf"
 
-    def test_download_failure(self, isolated_state, monkeypatch):
+    def test_download_failure_non_streaming_flags_not_found(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
         monkeypatch.setattr(
             pb,
@@ -463,11 +470,12 @@ class TestHuggingfaceDownloadGguf:
         monkeypatch.setattr(
             pb,
             "run",
-            lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, "", "Repository not found"),
+            lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, "", "Repository Not Found"),
         )
-        result = pb.huggingface_download_gguf("nonexistent/repo")
+        result = pb.huggingface_download_gguf("nonexistent/repo", stream=False)
         assert result["ok"] is False
-        assert "Repository not found" in result["error"]
+        assert "Repository Not Found" in result["error"]
+        assert result["not_found"] is True
 
     def test_exception_is_caught(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
@@ -477,9 +485,72 @@ class TestHuggingfaceDownloadGguf:
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("network error"))
         )
-        result = pb.huggingface_download_gguf("org/repo")
+        result = pb.huggingface_download_gguf("org/repo", stream=False)
         assert result["ok"] is False
         assert "network error" in result["error"]
+
+    def test_streaming_success_uses_popen(self, isolated_state, monkeypatch, tmp_path):
+        """stream=True delegates to subprocess.Popen so progress is visible."""
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+
+        class _FakeProc:
+            def __init__(self, cmd, env=None):
+                self.cmd = cmd
+                self.env = env
+
+            def wait(self, timeout=None):
+                # Simulate the CLI writing a file into local_dir.
+                dest = Path(local_dir) / "m.gguf"
+                dest.write_bytes(b"hello-gguf")
+                return 0
+
+        local_dir = str(tmp_path / "hf-dl")
+        Path(local_dir).mkdir(parents=True)
+        calls: list[list[str]] = []
+
+        def fake_popen(cmd, env=None):
+            calls.append(cmd)
+            return _FakeProc(cmd, env=env)
+
+        monkeypatch.setattr(pb.subprocess, "Popen", fake_popen)
+        result = pb.huggingface_download_gguf(
+            "org/repo", filename="m.gguf", local_dir=local_dir, stream=True
+        )
+        assert result["ok"] is True
+        assert result["path"] == str(Path(local_dir) / "m.gguf")
+        assert result["bytes_downloaded"] == len(b"hello-gguf")
+        assert result["not_found"] is False
+        assert isinstance(result["elapsed_seconds"], float)
+        # sanity: Popen was invoked with the detected binary
+        assert calls and calls[0][0] == "hf"
+
+    def test_streaming_failure_returns_rc_message(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+
+        class _FailProc:
+            def wait(self, timeout=None):
+                return 42
+
+        monkeypatch.setattr(pb.subprocess, "Popen", lambda cmd, env=None: _FailProc())
+        result = pb.huggingface_download_gguf("org/repo", stream=True)
+        assert result["ok"] is False
+        assert "42" in result["error"]
+        # Streaming path can't scrape stderr, so we don't claim 404.
+        assert result["not_found"] is False
+
+    def test_looks_like_not_found_predicate(self, isolated_state):
+        pb, _, _ = isolated_state
+        assert pb._looks_like_not_found("HTTPError: 404 Client Error")
+        assert pb._looks_like_not_found("RepositoryNotFoundError: ...")
+        assert pb._looks_like_not_found("Repository not found")
+        assert not pb._looks_like_not_found("Permission denied")
+        assert not pb._looks_like_not_found("")
 
 
 # ---------------------------------------------------------------------------
@@ -508,15 +579,21 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
-            lambda repo, filename=None, local_dir=None: {
+            lambda repo, filename=None, local_dir=None, stream=True: {
                 "ok": True,
                 "path": "/tmp/model.gguf",
                 "error": None,
+                "bytes_downloaded": 1234,
+                "elapsed_seconds": 0.5,
+                "not_found": False,
             },
         )
         result = wiz._download_gguf_via_hf_cli("org/repo")
         assert result["ok"] is True
         assert result["path"] == "/tmp/model.gguf"
+        # The wrapper must echo the successful repo_id back so _download_model
+        # can detect whether a fuzzy-search pick changed the selection (#38).
+        assert result["repo_id"] == "org/repo"
 
     def test_splits_repo_and_filename(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
@@ -527,9 +604,16 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
-            lambda repo, filename=None, local_dir=None: (
+            lambda repo, filename=None, local_dir=None, stream=True: (
                 captured.update({"repo": repo, "filename": filename})
-                or {"ok": True, "path": "/tmp/model.gguf", "error": None}
+                or {
+                    "ok": True,
+                    "path": "/tmp/model.gguf",
+                    "error": None,
+                    "bytes_downloaded": 100,
+                    "elapsed_seconds": 0.1,
+                    "not_found": False,
+                }
             ),
         )
         wiz._download_gguf_via_hf_cli("org/repo model-Q4_K_M.gguf")
@@ -541,10 +625,444 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
         )
+        # A failure that doesn't look like not-found should propagate as-is
+        # without invoking the fuzzy-search loop.
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
-            lambda *a, **kw: {"ok": False, "path": None, "error": "404"},
+            lambda *a, **kw: {
+                "ok": False,
+                "path": None,
+                "error": "Permission denied",
+                "not_found": False,
+                "bytes_downloaded": None,
+                "elapsed_seconds": 0.1,
+            },
         )
+        # Ensure the fuzzy-search probe is never exercised here.
+        monkeypatch.setattr(pb, "huggingface_search_models", lambda *a, **kw: ["org/repo"])
         result = wiz._download_gguf_via_hf_cli("org/repo")
         assert result["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Hugging Face fuzzy search (#38) — huggingface_search_models and
+# huggingface_fuzzy_find plus the wizard's fuzzy re-prompt loop.
+# ---------------------------------------------------------------------------
+
+
+class _StubAsk:
+    def __init__(self, value):
+        self._value = value
+
+    def ask(self):
+        return self._value
+
+
+class TestHuggingfaceSearchModels:
+    def test_returns_ids_on_success(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import json as _json
+
+        payload = _json.dumps(
+            [{"id": "org/alpha-gguf"}, {"modelId": "org/beta-gguf"}, {"no_id": True}]
+        ).encode("utf-8")
+
+        class _Resp:
+            def read(self):
+                return payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(pb, "huggingface_search_models", pb.huggingface_search_models)  # sanity
+        # Patch urllib.request.urlopen inside core.
+        import urllib.request as _ur
+
+        monkeypatch.setattr(_ur, "urlopen", lambda req, timeout=10.0: _Resp())
+        out = pb.huggingface_search_models("qwen2.5-coder")
+        assert "org/alpha-gguf" in out
+        assert "org/beta-gguf" in out
+
+    def test_returns_empty_on_blank_query(self, isolated_state):
+        pb, _, _ = isolated_state
+        assert pb.huggingface_search_models("") == []
+        assert pb.huggingface_search_models("   ") == []
+
+    def test_returns_empty_on_network_error(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.error as _ue
+        import urllib.request as _ur
+
+        def boom(req, timeout=10.0):
+            raise _ue.URLError("DNS failure")
+
+        monkeypatch.setattr(_ur, "urlopen", boom)
+        assert pb.huggingface_search_models("qwen") == []
+
+    def test_handles_unexpected_payload(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+
+        class _Resp:
+            def read(self):
+                return b"not-json"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        import urllib.request as _ur
+
+        monkeypatch.setattr(_ur, "urlopen", lambda req, timeout=10.0: _Resp())
+        assert pb.huggingface_search_models("qwen") == []
+
+
+class TestHuggingfaceFuzzyFind:
+    def test_clamps_to_three_matches(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_search_models",
+            lambda q, limit=10: [
+                "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+                "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF",
+                "bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+                "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF",
+                "some/other-unrelated-model",
+            ],
+        )
+        out = pb.huggingface_fuzzy_find("qwen2.5-coder-7b-instruct-gguf", max_results=3)
+        assert len(out) == 3
+        assert all("Qwen2.5-Coder" in m for m in out)
+
+    def test_returns_empty_when_no_candidates(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_search_models", lambda q, limit=10: [])
+        assert pb.huggingface_fuzzy_find("does-not-exist") == []
+
+    def test_falls_back_to_api_order_when_difflib_returns_nothing(
+        self, isolated_state, monkeypatch
+    ):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_search_models",
+            lambda q, limit=10: ["totally/unrelated-name-a", "another/unrelated-b"],
+        )
+        out = pb.huggingface_fuzzy_find("qwen-cod", max_results=3)
+        # Query has ~nothing in common with candidates → difflib yields [],
+        # but we still surface *some* suggestion.
+        assert len(out) == 2
+        assert out[0] == "totally/unrelated-name-a"
+
+
+class TestFuzzySearchReprompt:
+    """Tests for _prompt_fuzzy_hf_match (#38) — numbered picker + re-entry."""
+
+    def test_picker_returns_selected_match(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_fuzzy_find",
+            lambda q, max_results=3: [
+                "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+                "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF",
+                "bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+            ],
+        )
+        monkeypatch.setattr(
+            wiz.questionary,
+            "select",
+            lambda *a, **kw: _StubAsk("bartowski/Qwen2.5-Coder-3B-Instruct-GGUF"),
+        )
+        out = wiz._prompt_fuzzy_hf_match("qwen2.5-coder")
+        assert out == "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF"
+
+    def test_picker_reprompt_lets_user_type_new_name(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda q, max_results=3: ["some/match"])
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("__reenter__"))
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("user/custom-typed"))
+        out = wiz._prompt_fuzzy_hf_match("qwen2.5-coder")
+        assert out == "user/custom-typed"
+
+    def test_picker_cancel_returns_none(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda q, max_results=3: ["some/match"])
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("__cancel__"))
+        out = wiz._prompt_fuzzy_hf_match("qwen2.5-coder")
+        assert out is None
+
+    def test_zero_matches_reprompts_for_name(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        # No fuzzy hits — the picker should be skipped and we drop directly
+        # into the text re-entry prompt.
+        monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda q, max_results=3: [])
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("user/backup-typed"))
+        out = wiz._prompt_fuzzy_hf_match("gibberish")
+        assert out == "user/backup-typed"
+
+    def test_zero_matches_blank_reentry_returns_none(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda q, max_results=3: [])
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk(""))
+        assert wiz._prompt_fuzzy_hf_match("gibberish") is None
+
+
+class TestFuzzySearchDownloadFlow:
+    """End-to-end wizard flow: failure → fuzzy search → retry with picked repo."""
+
+    def test_not_found_triggers_fuzzy_and_retries_with_new_repo(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+        # Call 1: fail with 404. Call 2: success with the fuzzy-picked repo.
+        calls: list[str] = []
+
+        def fake_download(repo, filename=None, local_dir=None, stream=True):
+            calls.append(repo)
+            if len(calls) == 1:
+                return {
+                    "ok": False,
+                    "path": None,
+                    "error": "404 Client Error: Repository Not Found",
+                    "not_found": True,
+                    "bytes_downloaded": None,
+                    "elapsed_seconds": 0.3,
+                }
+            return {
+                "ok": True,
+                "path": "/tmp/picked/model.gguf",
+                "error": None,
+                "bytes_downloaded": 1_000_000,
+                "elapsed_seconds": 5.0,
+                "not_found": False,
+            }
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", fake_download)
+        monkeypatch.setattr(
+            pb,
+            "huggingface_fuzzy_find",
+            lambda q, max_results=3: ["bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"],
+        )
+        monkeypatch.setattr(
+            wiz.questionary,
+            "select",
+            lambda *a, **kw: _StubAsk("bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"),
+        )
+        out = wiz._download_gguf_via_hf_cli("user/typo-here")
+        assert out["ok"] is True
+        # Second attempt used the fuzzy-picked repo, not the original typo.
+        assert calls == ["user/typo-here", "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"]
+        assert out["repo_id"] == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        assert out["path"] == "/tmp/picked/model.gguf"
+
+    def test_streamed_failure_probed_via_search_api(self, isolated_state, monkeypatch):
+        """When the CLI error is just 'exited with status N', we consult the HF
+        search API to decide whether the repo is missing (#38 trigger)."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+        attempt = {"n": 0}
+
+        def fake_download(repo, filename=None, local_dir=None, stream=True):
+            attempt["n"] += 1
+            if attempt["n"] == 1:
+                return {
+                    "ok": False,
+                    "path": None,
+                    "error": "huggingface-cli exited with status 1",
+                    "not_found": False,
+                    "bytes_downloaded": None,
+                    "elapsed_seconds": 0.3,
+                }
+            return {
+                "ok": True,
+                "path": "/tmp/good/model.gguf",
+                "error": None,
+                "bytes_downloaded": 42,
+                "elapsed_seconds": 0.1,
+                "not_found": False,
+            }
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", fake_download)
+        # HF search returns NO exact match for "user/typo" → triggers fuzzy
+        # search fallback even though the direct error was generic.
+        monkeypatch.setattr(
+            pb, "huggingface_search_models", lambda q, limit=10: ["other/unrelated"]
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_fuzzy_find",
+            lambda q, max_results=3: ["bartowski/real-repo"],
+        )
+        monkeypatch.setattr(
+            wiz.questionary, "select", lambda *a, **kw: _StubAsk("bartowski/real-repo")
+        )
+        out = wiz._download_gguf_via_hf_cli("user/typo")
+        assert out["ok"] is True
+        assert out["repo_id"] == "bartowski/real-repo"
+
+    def test_user_cancels_fuzzy_picker_returns_failure(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_download_gguf",
+            lambda *a, **kw: {
+                "ok": False,
+                "path": None,
+                "error": "Repository not found",
+                "not_found": True,
+                "bytes_downloaded": None,
+                "elapsed_seconds": 0.3,
+            },
+        )
+        monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda q, max_results=3: ["some/match"])
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("__cancel__"))
+        out = wiz._download_gguf_via_hf_cli("user/typo")
+        assert out["ok"] is False
+        assert out["repo_id"] == "user/typo"
+
+
+# ---------------------------------------------------------------------------
+# Download progress & summary formatting (#39) — human formatters and the
+# _download_model summary-line behaviour for ollama / lmstudio / llamacpp.
+# ---------------------------------------------------------------------------
+
+
+class TestHumanFormatters:
+    def test_human_bytes_tiers(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._human_bytes(0) == "0 B"
+        assert wiz._human_bytes(512) == "512 B"
+        assert wiz._human_bytes(2048).startswith("2.0 KiB")
+        assert wiz._human_bytes(5 * 1024 * 1024).endswith("MiB")
+        assert wiz._human_bytes(10 * 1024**3).endswith("GiB")
+
+    def test_human_duration_scales(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._human_duration(3.2) == "3.2s"
+        assert "m" in wiz._human_duration(95)
+        assert "h" in wiz._human_duration(3700)
+
+
+class TestDownloadModelSummary:
+    """_download_model should always print a time-bounded summary (#39)."""
+
+    def test_ollama_success_prints_summary(self, isolated_state, monkeypatch, capsys):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "machine_profile", lambda: {"ollama": {"models": []}})
+        # subprocess.run → no-op (simulates a silent-but-fast pull).
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            wiz.subprocess,
+            "run",
+            lambda cmd, check=True: (
+                calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", "")
+            ),
+        )
+        # Stub hint lookup so the summary line contains "Downloaded ... in ...".
+        monkeypatch.setattr(wiz, "_ollama_model_size_hint", lambda tag: "3.4 GB")
+        state = wiz.WizardState(
+            primary_engine="ollama", engine_model_tag="qwen3-coder:7b", model_name="qwen3-coder:7b"
+        )
+        state.profile = {"ollama": {"models": []}}
+        assert wiz._download_model(state) is True
+        out = capsys.readouterr().out
+        assert "Downloaded qwen3-coder:7b" in out
+        assert "3.4 GB" in out
+        assert "in " in out  # elapsed time appears
+        # sanity: we actually invoked the pull.
+        assert calls and calls[0] == ["ollama", "pull", "qwen3-coder:7b"]
+
+    def test_lmstudio_success_prints_summary(self, isolated_state, monkeypatch, capsys):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "machine_profile", lambda: {"lmstudio": {"models": []}})
+        monkeypatch.setattr(pb, "lms_binary", lambda: "/fake/lms")
+        monkeypatch.setattr(
+            wiz.subprocess,
+            "run",
+            lambda cmd, check=True: subprocess.CompletedProcess(cmd, 0, "", ""),
+        )
+        monkeypatch.setattr(wiz, "_lms_model_size_hint", lambda tag: "512.0 MiB")
+        state = wiz.WizardState(
+            primary_engine="lmstudio",
+            engine_model_tag="qwen/qwen3-coder-7b",
+            model_name="qwen/qwen3-coder-7b",
+        )
+        assert wiz._download_model(state) is True
+        out = capsys.readouterr().out
+        assert "Downloaded qwen/qwen3-coder-7b" in out
+        assert "512.0 MiB" in out
+        assert "in " in out
+
+    def test_llamacpp_fuzzy_pick_updates_state_tag(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda: {"llamacpp": {"present": True, "server_running": False}},
+        )
+        monkeypatch.setattr(
+            wiz,
+            "_download_gguf_via_hf_cli",
+            lambda repo: {
+                "ok": True,
+                "path": "/tmp/picked.gguf",
+                "repo_id": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+                "bytes_downloaded": 1234,
+                "elapsed_seconds": 2.5,
+            },
+        )
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            engine_model_tag="user/typo-here",
+            model_name="user/typo-here",
+        )
+        assert wiz._download_model(state) is True
+        # The fuzzy-search picker changed the repo ID → state must be updated
+        # so step 2.6 wires the correct model (#38 + #39 together).
+        assert state.engine_model_tag == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        assert state.model_name == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        assert state.profile.get("llamacpp_model_path") == "/tmp/picked.gguf"
+
+    def test_download_failure_returns_false(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+
+        def boom(cmd, check=True):
+            raise subprocess.CalledProcessError(1, cmd)
+
+        monkeypatch.setattr(wiz.subprocess, "run", boom)
+        state = wiz.WizardState(
+            primary_engine="ollama", engine_model_tag="qwen3-coder:7b", model_name="qwen3-coder:7b"
+        )
+        assert wiz._download_model(state) is False
+
+    def test_download_keyboard_interrupt_returns_false(self, isolated_state, monkeypatch):
+        """Ctrl-C during a pull must stop the indicator cleanly (#39 AC)."""
+        _, wiz, _ = isolated_state
+
+        def raise_ki(cmd, check=True):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(wiz.subprocess, "run", raise_ki)
+        state = wiz.WizardState(
+            primary_engine="ollama", engine_model_tag="qwen3-coder:7b", model_name="qwen3-coder:7b"
+        )
+        assert wiz._download_model(state) is False

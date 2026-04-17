@@ -1070,7 +1070,15 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
       - A repo + filename like "org/repo filename.gguf"
         (downloads the specific file)
 
-    Returns {"ok": bool, "path": str|None}.
+    Shows the HF CLI's native progress bar (bytes / speed / ETA) by inheriting
+    stdout. On completion prints a summary with total bytes and elapsed time
+    (issue #39). When the repo cannot be found, falls back to a fuzzy search
+    of the Hub and lets the user pick from up to 3 close matches or re-enter a
+    different name (issue #38).
+
+    Returns {"ok": bool, "path": str|None, "repo_id": str|None}. ``repo_id`` is
+    the resolved repo ID that was actually downloaded — it may differ from the
+    caller's input when the user picked a fuzzy-search suggestion.
     """
     if not pb.huggingface_cli_detect().get("present"):
         warn("HuggingFace CLI (hf / huggingface-cli) is not installed.")
@@ -1087,7 +1095,7 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
                 )
             except subprocess.CalledProcessError as exc:
                 fail(f"pip install failed: {exc}")
-                return {"ok": False, "path": None}
+                return {"ok": False, "path": None, "repo_id": None}
             # pip installs the CLI binary into the same scripts directory as
             # the running Python interpreter.  That directory may not be on
             # the current process PATH yet (the user hasn't sourced their
@@ -1102,27 +1110,162 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
                 "HuggingFace CLI still not found after install attempt.\n"
                 "Re-run the wizard with --resume once it is available."
             )
-            return {"ok": False, "path": None}
+            return {"ok": False, "path": None, "repo_id": None}
 
-    # Split "repo_id filename.gguf" if the caller passed both in one string.
-    parts = repo_id.split(None, 1)
-    hf_repo = parts[0]
-    filename = parts[1] if len(parts) > 1 else None
+    current = repo_id
+    # Cap fuzzy-search re-entries so a pathological input cannot loop forever.
+    for _attempt in range(5):
+        # Split "repo_id filename.gguf" if the caller passed both in one string.
+        parts = current.split(None, 1)
+        hf_repo = parts[0]
+        filename = parts[1] if len(parts) > 1 else None
 
-    console.print(f"\n[cyan]Downloading {repo_id} from Hugging Face Hub...[/cyan]")
-    result = pb.huggingface_download_gguf(hf_repo, filename=filename)
-    if result["ok"]:
-        ok(f"Downloaded to: {result['path']}")
+        console.print(f"\n[cyan]Downloading {current} from Hugging Face Hub...[/cyan]")
+        result = pb.huggingface_download_gguf(hf_repo, filename=filename, stream=True)
+        if result.get("ok"):
+            summary_bits: list[str] = []
+            size = result.get("bytes_downloaded")
+            if isinstance(size, int) and size > 0:
+                summary_bits.append(_human_bytes(size))
+            elapsed = result.get("elapsed_seconds")
+            if isinstance(elapsed, int | float) and elapsed > 0:
+                summary_bits.append(f"in {_human_duration(float(elapsed))}")
+            summary = f" ({' '.join(summary_bits)})" if summary_bits else ""
+            ok(f"Downloaded {current}{summary}")
+            if result.get("path"):
+                info(f"Path: {result['path']}")
+            return {
+                "ok": True,
+                "path": result.get("path"),
+                "repo_id": current,
+                "bytes_downloaded": size,
+                "elapsed_seconds": elapsed,
+            }
+
+        err = result.get("error") or "unknown error"
+        fail(f"Hugging Face download failed: {err}")
+        # Even with streamed output we can sometimes tell a repo is missing —
+        # the Popen return code is non-zero but HF also prints "404 Client
+        # Error" to the inherited stderr, which we can't read. As a pragmatic
+        # signal, treat any failure that looks not-found OR any first failure
+        # on an unrecognised repo as a trigger for the fuzzy-search fallback.
+        looks_missing = bool(result.get("not_found")) or _looks_like_missing_repo(hf_repo, err)
+        if not looks_missing:
+            return {"ok": False, "path": None, "repo_id": current, "error": err}
+
+        # Offer fuzzy-search suggestions (#38).
+        next_repo = _prompt_fuzzy_hf_match(hf_repo)
+        if next_repo is None:
+            return {"ok": False, "path": None, "repo_id": current, "error": err}
+        # Re-attempt with the user's picked / re-entered repo. If they typed
+        # "org/repo filename.gguf" pass the filename through untouched.
+        current = next_repo
+
+    warn("Too many download attempts — giving up.")
+    return {"ok": False, "path": None, "repo_id": current, "error": "max attempts"}
+
+
+def _looks_like_missing_repo(hf_repo: str, err: str) -> bool:
+    """
+    Heuristic: does ``err`` look like HF couldn't find the repo?
+
+    We can't always tell from the wrapped error string (streamed runs only
+    surface "exited with status N"), so we also treat an unreachable repo as
+    missing when the HF search API has **zero** exact hits for it — this is a
+    strong signal the user's spelling is off.
+    """
+    if pb._looks_like_not_found(err):
+        return True
+    if "exited with status" not in err.lower():
+        return False
+    # Streamed failure — probe the HF search API. Exact-case hit means the
+    # repo exists and the failure was something else (auth, quota, network).
+    try:
+        hits = pb.huggingface_search_models(hf_repo, limit=10)
+    except Exception:
+        return False
+    hits_lower = {h.lower() for h in hits}
+    return hf_repo.lower() not in hits_lower
+
+
+def _prompt_fuzzy_hf_match(query: str) -> str | None:
+    """
+    Fuzzy-search Hugging Face for up to 3 models similar to ``query``, present
+    them as a numbered picker, and let the user re-enter a different name.
+
+    Returns the chosen repo ID (optionally including "<repo> <filename>" for
+    targeted downloads) or None when the user cancels.
+    """
+    info("Searching Hugging Face Hub for similar model names...")
+    matches = pb.huggingface_fuzzy_find(query, max_results=3)
+    if matches:
+        console.print("[cyan]Closest matches on Hugging Face:[/cyan]")
+        choices: list[Any] = []
+        for i, mid in enumerate(matches, 1):
+            choices.append(questionary.Choice(f"{i}. {mid}", value=mid))
+        choices.append(questionary.Choice("Enter a different model name...", value="__reenter__"))
+        choices.append(questionary.Choice("Cancel", value="__cancel__"))
+        pick = questionary.select(
+            "Pick a suggested model or re-enter the name:",
+            choices=choices,
+        ).ask()
+        if pick is None or pick == "__cancel__":
+            return None
+        if pick != "__reenter__":
+            return pick
     else:
-        fail(f"Hugging Face download failed: {result['error']}")
-    return result
+        warn(f"No similar models found on Hugging Face for '{query}'.")
+
+    retry = questionary.text(
+        "Enter a different Hugging Face repo (e.g. 'bartowski/Qwen2.5-Coder-7B-Instruct-GGUF')"
+        " or leave blank to cancel:",
+    ).ask()
+    if not retry or not retry.strip():
+        return None
+    return retry.strip()
+
+
+def _human_bytes(n: int) -> str:
+    """Format a byte count as the largest unit that keeps the number readable."""
+    if n < 0:
+        return str(n)
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    size = float(n)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} {units[-1]}"
+
+
+def _human_duration(seconds: float) -> str:
+    """Format a duration in seconds as e.g. '3.2s', '1m 42s', '1h 03m 20s'."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    total = int(seconds)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s"
 
 
 def _download_model(state: WizardState) -> bool:
+    import time
+
     engine = state.primary_engine
     tag = state.engine_model_tag
     llamacpp_model_path: str | None = None
+    llamacpp_bytes: int | None = None
+    llamacpp_elapsed: float | None = None
+    # Stream sub-command stdout/stderr straight to the user's terminal so the
+    # engines' own progress bars (ollama "pulling manifest...", lms download
+    # spinner, hf CLI tqdm) are visible. We bracket with time.monotonic() so
+    # we can always print a summary line on success — addresses issue #39.
     console.print(f"\n[cyan]Downloading {tag} via {engine}...[/cyan]")
+    start = time.monotonic()
     try:
         if engine == "ollama":
             subprocess.run(["ollama", "pull", tag], check=True)
@@ -1134,20 +1277,77 @@ def _download_model(state: WizardState) -> bool:
             subprocess.run([lms, "get", tag, "-y"], check=True)
         elif engine == "llamacpp":
             hf_result = _download_gguf_via_hf_cli(tag)
-            if not hf_result["ok"]:
+            if not hf_result.get("ok"):
                 return False
             llamacpp_model_path = hf_result.get("path")
+            llamacpp_bytes = hf_result.get("bytes_downloaded")
+            llamacpp_elapsed = hf_result.get("elapsed_seconds")
+            # A fuzzy-search re-pick returned a different repo ID than the
+            # one we started with — persist it so step 2.6 wires the harness
+            # to the model the user actually downloaded (#38).
+            resolved_repo = hf_result.get("repo_id")
+            if resolved_repo and resolved_repo != tag:
+                state.model_name = resolved_repo
+                state.engine_model_tag = resolved_repo
+                tag = resolved_repo
+                info(f"Updated model selection to: [bold]{resolved_repo}[/bold]")
+    except KeyboardInterrupt:
+        fail("Download interrupted by user.")
+        return False
     except subprocess.CalledProcessError as exc:
         fail(f"Download failed: {exc}")
         return False
-    if engine != "llamacpp":
-        ok(f"Downloaded {tag}")
+    elapsed = time.monotonic() - start
+    # Per-engine summary line — the body of work for issue #39's acceptance
+    # criteria ("success line with final size and elapsed time"). For engines
+    # without a reliable size hook we still show elapsed time.
+    if engine == "llamacpp":
+        # _download_gguf_via_hf_cli already printed its own summary; avoid a
+        # duplicate line here.
+        if llamacpp_elapsed is None and elapsed > 0:
+            info(f"Total wizard time for download: {_human_duration(elapsed)}")
+    else:
+        size_hint: str | None = None
+        if engine == "ollama":
+            size_hint = _ollama_model_size_hint(tag)
+        elif engine == "lmstudio":
+            size_hint = _lms_model_size_hint(tag)
+        bits = []
+        if size_hint:
+            bits.append(size_hint)
+        bits.append(f"in {_human_duration(elapsed)}")
+        ok(f"Downloaded {tag} ({' '.join(bits)})")
     # Refresh profile so 2.5 sees the new model; preserve llamacpp_model_path
     # since machine_profile() never returns that key.
     state.profile = pb.machine_profile()
     if engine == "llamacpp" and llamacpp_model_path:
         state.profile["llamacpp_model_path"] = llamacpp_model_path
+        if llamacpp_bytes:
+            state.profile.setdefault("llamacpp", {})["model_bytes"] = llamacpp_bytes
     return True
+
+
+def _ollama_model_size_hint(tag: str) -> str | None:
+    """Return the ollama-reported size for ``tag`` (e.g. '19 GB') or None."""
+    try:
+        for entry in pb.parse_ollama_list():
+            if entry.get("name") == tag and entry.get("size"):
+                return str(entry["size"])
+    except Exception:
+        pass
+    return None
+
+
+def _lms_model_size_hint(tag: str) -> str | None:
+    """Return the lmstudio-reported size for ``tag`` (bytes → human) or None."""
+    try:
+        info_out = pb.lms_info()
+        for m in info_out.get("models", []) or []:
+            if m.get("path") == tag and isinstance(m.get("size"), int):
+                return _human_bytes(int(m["size"]))
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
