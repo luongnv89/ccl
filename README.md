@@ -71,7 +71,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/
 Override defaults with env vars:
 
 ```bash
-CCL_REF=v0.7.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
+CCL_REF=v0.8.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
   bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 
@@ -153,7 +153,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 - macOS or Linux with zsh or bash
 - Python 3.10+
 - At least one harness: [Claude Code](https://claude.ai/code) or [Codex CLI](https://github.com/openai/codex)
-- At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), or llama.cpp
+- At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or llama.cpp
 - [`llmfit`](https://github.com/luongnv89/llmfit) on `PATH` (optional — for automatic model selection)
 
 ---
@@ -167,6 +167,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 | Codex CLI | Ollama | `qwen2.5-coder:0.5b` | Verified |
 | Claude Code | LM Studio | Qwen3 family | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
 | Any | llama.cpp | any | Inline-env code path exists, no live proof yet |
+| Any | vLLM | any | New in 0.8.0 — adapter shipped with tests |
 
 ---
 
