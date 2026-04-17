@@ -821,6 +821,28 @@ class TestWelcomeBanner:
         assert "Hit your limit" in wiz._CCL_TAGLINE
         assert "swap the model" in wiz._CCL_TAGLINE
 
+    def test_repo_url_is_github(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._CCL_REPO_URL.startswith("https://github.com/")
+        assert "claude-codex-local" in wiz._CCL_REPO_URL
+
+    def test_banner_output_contains_version(self, isolated_state):
+        """print_welcome_banner must render the current package version."""
+        _, wiz, _ = isolated_state
+        with wiz.console.capture() as cap:
+            wiz.print_welcome_banner()
+        output = cap.get()
+        assert wiz.__version__ in output
+        assert f"v{wiz.__version__}" in output
+
+    def test_banner_output_contains_github_url(self, isolated_state):
+        """print_welcome_banner must render the GitHub repository URL."""
+        _, wiz, _ = isolated_state
+        with wiz.console.capture() as cap:
+            wiz.print_welcome_banner()
+        output = cap.get()
+        assert wiz._CCL_REPO_URL in output
+
     def test_banner_not_shown_on_resume(self, isolated_state, monkeypatch):
         """Banner must not appear when --resume is used."""
         _, wiz, _ = isolated_state
