@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-17
+
 ### Added
+- vLLM backend adapter with unit and e2e test coverage — high-throughput inference engine now joins Ollama, LM Studio, and llama.cpp as a first-class engine option
+- Wizard detects an already-running `llama-server` and offers its active model as a pick, so you can keep your warm process instead of re-pulling a GGUF
+- Wizard pre-populates the model picker with models discovered on-host and recommendation profile picks, so the first press of Enter lands on a sensible default (#35, #36)
+- Wizard welcome banner now shows the installed version and repository URL, so users know which build they are running and where to file issues (#37)
 - Live progress for model downloads: `ollama pull`, `lms get`, and the Hugging Face CLI now stream their own progress bars (bytes, speed, ETA) straight to the terminal, and the wizard prints a post-download summary with the final size and elapsed time. Ctrl-C cleanly aborts an in-flight pull (#39)
 - Fuzzy-search fallback for Hugging Face GGUF downloads: when a repo is not found, the wizard queries the Hub's search API, presents up to 3 closest matches as a numbered picker, and lets the user either pick one or re-enter a different name. When no similar models are found the wizard reports it and re-prompts for a new name (#38)
+
+### Fixed
+- Post-review polish for the fuzzy fallback and KI wizard flow (#45)
+- vLLM adapter type annotations and lint warnings cleared under `mypy` and `ruff`
+- Removed a stray agent worktree gitlink that broke CI on fresh clones
 
 ## [0.7.0] - 2026-04-12
 
