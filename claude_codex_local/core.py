@@ -1291,6 +1291,169 @@ def machine_profile() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+RECOMMENDATION_MODES: tuple[str, ...] = ("balanced", "fast", "quality")
+
+# Human-readable descriptions for each recommendation profile. Shown in the
+# wizard model picker so users understand the speed/quality tradeoff before
+# choosing a profile. Keep these short (one sentence each).
+RECOMMENDATION_MODE_DESCRIPTIONS: dict[str, str] = {
+    "balanced": "Best score within comfortable memory headroom — good default for most machines.",
+    "fast": "Prioritises tokens/second — smallest model that still fits, snappiest replies.",
+    "quality": "Highest llmfit score regardless of size — best output, may be slower.",
+}
+
+
+def rank_candidates_for_mode(candidates: list[dict[str, Any]], mode: str) -> list[dict[str, Any]]:
+    """
+    Re-rank a list of llmfit coding candidates according to the requested mode.
+
+    Mirrors the sort logic in `select_best_model` so UI callers can preview the
+    per-mode winner without triggering smoke tests or model loads.
+
+    Returns a new list (does not mutate the input).
+    """
+    mode = mode if mode in RECOMMENDATION_MODES else "balanced"
+    if not candidates:
+        return []
+    if mode == "fast":
+        return sorted(
+            candidates,
+            key=lambda c: (-(c.get("estimated_tps") or 0), -(c.get("score") or 0)),
+        )
+    if mode == "quality":
+        return sorted(candidates, key=lambda c: -(c.get("score") or 0))
+    # "balanced" uses the default order (score descending) as produced by
+    # llmfit_coding_candidates().
+    return list(candidates)
+
+
+def recommend_for_mode(profile: dict[str, Any], mode: str, engine: str) -> dict[str, Any] | None:
+    """
+    Lightweight recommendation helper used by the wizard's profile picker.
+
+    Returns the best llmfit coding candidate for `mode` that maps to `engine`,
+    or None when llmfit is unavailable or no candidate applies to the engine.
+
+    Unlike `select_best_model`, this helper does NOT run smoke tests or touch
+    LM Studio / Ollama — it is safe to call many times while building UI choices.
+
+    The returned dict is the raw llmfit candidate augmented with:
+      - engine_tag: engine-specific tag for the chosen engine
+      - mode:       the mode this recommendation was computed for
+    """
+    if engine not in ("ollama", "lmstudio", "llamacpp"):
+        return None
+
+    candidates = llmfit_coding_candidates()
+    ranked = rank_candidates_for_mode(candidates, mode)
+    if not ranked:
+        return None
+
+    for c in ranked:
+        tag = _candidate_tag_for_engine(c, engine)
+        if tag:
+            return {**c, "engine_tag": tag, "mode": mode}
+    return None
+
+
+def _candidate_tag_for_engine(c: dict[str, Any], engine: str) -> str | None:
+    """
+    Pull the engine-specific tag from an llmfit candidate.
+
+    Mirrors wizard._candidate_tag but lives in core so the recommendation
+    helpers do not depend on the wizard module.
+    """
+    if engine == "ollama":
+        return c.get("ollama_tag")
+    if engine == "lmstudio":
+        return c.get("lms_hub_name") or c.get("lms_mlx_path")
+    if engine == "llamacpp":
+        # llama.cpp accepts the raw HF reference; any candidate with a name
+        # is usable via the HuggingFace CLI download path.
+        return c.get("name")
+    return None
+
+
+def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[dict[str, Any]]:
+    """
+    Return locally-installed models for the chosen engine, cached in `profile`.
+
+    Each entry is a small dict with at least:
+      - tag:     engine-specific identifier usable as `engine_model_tag`
+      - display: human-readable label for the UI
+      - source:  short label ("ollama", "lmstudio", "llamacpp")
+
+    The list is ordered so that recognisable coding models (qwen-coder,
+    deepseek-coder, codellama, starcoder, …) come first — the same preference
+    the wizard already applies in its non-interactive model-auto pick.
+
+    This function never hits the network; it only reads fields already
+    collected by `machine_profile()`.
+    """
+    coder_keywords = (
+        "qwen3-coder",
+        "qwen2.5-coder",
+        "deepseek-coder",
+        "codellama",
+        "starcoder",
+        "granite-code",
+        "wizardcoder",
+        "coder",
+        "code",
+    )
+
+    def _is_coder(text: str) -> bool:
+        lower = text.lower()
+        return any(k in lower for k in coder_keywords)
+
+    entries: list[dict[str, Any]] = []
+    if engine == "ollama":
+        for m in profile.get("ollama", {}).get("models", []) or []:
+            if not m.get("local"):
+                continue
+            name = m.get("name")
+            if not name:
+                continue
+            entries.append(
+                {
+                    "tag": name,
+                    "display": name,
+                    "source": "ollama",
+                    "size": m.get("size"),
+                }
+            )
+    elif engine == "lmstudio":
+        for m in profile.get("lmstudio", {}).get("models", []) or []:
+            path = m.get("path")
+            if not path:
+                continue
+            entries.append(
+                {
+                    "tag": path,
+                    "display": path,
+                    "source": "lmstudio",
+                    "format": m.get("format"),
+                }
+            )
+    elif engine == "llamacpp":
+        # llama.cpp does not ship a "model registry" — the only thing we can
+        # surface is the model already loaded in a running llama-server.
+        status = profile.get("llamacpp") or {}
+        if status.get("server_running") and status.get("model"):
+            entries.append(
+                {
+                    "tag": status["model"],
+                    "display": f"{status['model']} (running on port {status.get('server_port')})",
+                    "source": "llamacpp",
+                    "running": True,
+                }
+            )
+
+    # Stable sort: coder-likely models first, then alphabetic by display.
+    entries.sort(key=lambda e: (0 if _is_coder(e["display"]) else 1, e["display"]))
+    return entries
+
+
 def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[str, Any]:
     """
     Use llmfit to pick the best coding model for the requested mode.

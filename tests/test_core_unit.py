@@ -378,6 +378,224 @@ class TestSelectBestModel:
 
 
 # ---------------------------------------------------------------------------
+# rank_candidates_for_mode — pure helper used by the wizard profile picker.
+# ---------------------------------------------------------------------------
+
+
+class TestRankCandidatesForMode:
+    def _candidates(self):
+        return [
+            {
+                "name": "Qwen/Qwen3-Coder-30B",
+                "score": 95,
+                "estimated_tps": 12,
+                "ollama_tag": "qwen3-coder:30b",
+            },
+            {
+                "name": "Qwen/Qwen2.5-Coder-7B",
+                "score": 70,
+                "estimated_tps": 80,
+                "ollama_tag": "qwen2.5-coder:7b",
+            },
+            {
+                "name": "Qwen/Qwen2.5-Coder-3B",
+                "score": 55,
+                "estimated_tps": 120,
+                "ollama_tag": "qwen2.5-coder:3b",
+            },
+        ]
+
+    def test_balanced_preserves_input_order(self):
+        c = self._candidates()
+        out = pb.rank_candidates_for_mode(c, "balanced")
+        assert [m["name"] for m in out] == [m["name"] for m in c]
+
+    def test_fast_sorts_by_tps_descending(self):
+        out = pb.rank_candidates_for_mode(self._candidates(), "fast")
+        assert out[0]["name"].endswith("Qwen2.5-Coder-3B")
+        assert out[-1]["name"].endswith("Qwen3-Coder-30B")
+
+    def test_quality_sorts_by_score_descending(self):
+        out = pb.rank_candidates_for_mode(self._candidates(), "quality")
+        assert out[0]["name"].endswith("Qwen3-Coder-30B")
+        assert out[-1]["name"].endswith("Qwen2.5-Coder-3B")
+
+    def test_invalid_mode_coerced_to_balanced(self):
+        c = self._candidates()
+        out = pb.rank_candidates_for_mode(c, "bogus")
+        assert [m["name"] for m in out] == [m["name"] for m in c]
+
+    def test_empty_input_returns_empty(self):
+        assert pb.rank_candidates_for_mode([], "fast") == []
+
+    def test_does_not_mutate_input(self):
+        c = self._candidates()
+        snapshot = [m["name"] for m in c]
+        pb.rank_candidates_for_mode(c, "fast")
+        assert [m["name"] for m in c] == snapshot
+
+
+# ---------------------------------------------------------------------------
+# recommend_for_mode — engine-aware top pick for a given mode.
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendForMode:
+    def _candidates(self):
+        return [
+            {
+                "name": "Qwen/Qwen3-Coder-30B",
+                "score": 95,
+                "estimated_tps": 12,
+                "ollama_tag": "qwen3-coder:30b",
+                "lms_hub_name": "qwen/qwen3-coder-30b",
+            },
+            {
+                "name": "Qwen/Qwen2.5-Coder-7B",
+                "score": 70,
+                "estimated_tps": 80,
+                "ollama_tag": "qwen2.5-coder:7b",
+                "lms_hub_name": "qwen/qwen2.5-coder-7b",
+            },
+        ]
+
+    def test_fast_picks_fastest_for_ollama(self, monkeypatch):
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        rec = pb.recommend_for_mode(_empty_profile(), "fast", "ollama")
+        assert rec is not None
+        assert rec["engine_tag"] == "qwen2.5-coder:7b"
+        assert rec["mode"] == "fast"
+
+    def test_quality_picks_highest_score_for_lmstudio(self, monkeypatch):
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        rec = pb.recommend_for_mode(_empty_profile(), "quality", "lmstudio")
+        assert rec is not None
+        assert rec["engine_tag"] == "qwen/qwen3-coder-30b"
+        assert rec["mode"] == "quality"
+
+    def test_llamacpp_returns_raw_name(self, monkeypatch):
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        rec = pb.recommend_for_mode(_empty_profile(), "balanced", "llamacpp")
+        assert rec is not None
+        # llama.cpp uses the HF name directly.
+        assert rec["engine_tag"] == "Qwen/Qwen3-Coder-30B"
+
+    def test_returns_none_when_no_candidates(self, monkeypatch):
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda: [])
+        assert pb.recommend_for_mode(_empty_profile(), "balanced", "ollama") is None
+
+    def test_returns_none_for_unknown_engine(self, monkeypatch):
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        assert pb.recommend_for_mode(_empty_profile(), "balanced", "vllm") is None
+
+    def test_skips_candidates_without_engine_tag(self, monkeypatch):
+        # A candidate with no ollama_tag must be skipped; the next matching
+        # candidate must be picked instead.
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda: [
+                {
+                    "name": "Foo/NoOllamaTag",
+                    "score": 99,
+                    "estimated_tps": 50,
+                    "ollama_tag": None,
+                },
+                {
+                    "name": "Qwen/Qwen2.5-Coder-7B",
+                    "score": 70,
+                    "estimated_tps": 80,
+                    "ollama_tag": "qwen2.5-coder:7b",
+                },
+            ],
+        )
+        rec = pb.recommend_for_mode(_empty_profile(), "balanced", "ollama")
+        assert rec is not None
+        assert rec["engine_tag"] == "qwen2.5-coder:7b"
+
+
+# ---------------------------------------------------------------------------
+# installed_models_for_engine — discovery helper used by the wizard.
+# ---------------------------------------------------------------------------
+
+
+class TestInstalledModelsForEngine:
+    def test_ollama_lists_local_models_only(self):
+        profile = {
+            "ollama": {
+                "models": [
+                    {"name": "qwen3-coder:30b", "local": True, "size": "19 GB"},
+                    {"name": "phantom:latest", "local": False, "size": "-"},
+                ]
+            }
+        }
+        out = pb.installed_models_for_engine(profile, "ollama")
+        assert [e["tag"] for e in out] == ["qwen3-coder:30b"]
+        assert out[0]["source"] == "ollama"
+
+    def test_ollama_orders_coder_models_first(self):
+        profile = {
+            "ollama": {
+                "models": [
+                    {"name": "llama2:7b", "local": True},
+                    {"name": "qwen2.5-coder:7b", "local": True},
+                    {"name": "deepseek-coder:6.7b", "local": True},
+                ]
+            }
+        }
+        out = pb.installed_models_for_engine(profile, "ollama")
+        tags = [e["tag"] for e in out]
+        # Coder models come before the non-coder one.
+        assert tags.index("qwen2.5-coder:7b") < tags.index("llama2:7b")
+        assert tags.index("deepseek-coder:6.7b") < tags.index("llama2:7b")
+
+    def test_lmstudio_lists_model_paths(self):
+        profile = {
+            "lmstudio": {
+                "models": [
+                    {"path": "qwen/qwen3-coder-30b", "format": "mlx"},
+                    {"path": "meta/llama-3-8b", "format": "mlx"},
+                ]
+            }
+        }
+        out = pb.installed_models_for_engine(profile, "lmstudio")
+        tags = [e["tag"] for e in out]
+        # qwen3-coder surfaces first because of the coder-first ordering rule.
+        assert tags[0] == "qwen/qwen3-coder-30b"
+
+    def test_llamacpp_surfaces_running_server_model(self):
+        profile = {
+            "llamacpp": {
+                "present": True,
+                "server_running": True,
+                "server_port": 8001,
+                "model": "local/qwen3-coder-30b.gguf",
+            }
+        }
+        out = pb.installed_models_for_engine(profile, "llamacpp")
+        assert len(out) == 1
+        assert out[0]["tag"] == "local/qwen3-coder-30b.gguf"
+        assert out[0]["running"] is True
+
+    def test_llamacpp_returns_empty_when_server_not_running(self):
+        profile = {
+            "llamacpp": {
+                "present": True,
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            }
+        }
+        assert pb.installed_models_for_engine(profile, "llamacpp") == []
+
+    def test_empty_engine_section_returns_empty(self):
+        assert pb.installed_models_for_engine({"ollama": {"models": []}}, "ollama") == []
+
+    def test_unknown_engine_returns_empty(self):
+        assert pb.installed_models_for_engine({}, "vllm") == []
+
+
+# ---------------------------------------------------------------------------
 # Runtime adapters — verify Protocol implementations return normalised dicts.
 # ---------------------------------------------------------------------------
 

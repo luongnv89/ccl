@@ -624,6 +624,333 @@ class TestFindModelAuto:
 
 
 # ---------------------------------------------------------------------------
+# _build_profile_recommendations — Speed/Balanced/Quality pre-fill (issue #35).
+# ---------------------------------------------------------------------------
+
+
+class TestBuildProfileRecommendations:
+    def _candidates(self):
+        return [
+            {
+                "name": "Qwen/Qwen3-Coder-30B",
+                "score": 95,
+                "estimated_tps": 12,
+                "ollama_tag": "qwen3-coder:30b",
+                "lms_hub_name": "qwen/qwen3-coder-30b",
+                "fit_level": "Good",
+            },
+            {
+                "name": "Qwen/Qwen2.5-Coder-7B",
+                "score": 70,
+                "estimated_tps": 80,
+                "ollama_tag": "qwen2.5-coder:7b",
+                "lms_hub_name": "qwen/qwen2.5-coder-7b",
+                "fit_level": "Perfect",
+            },
+        ]
+
+    def test_returns_empty_map_when_llmfit_missing(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        out = wiz._build_profile_recommendations("ollama", {})
+        # All three keys present, all values None (graceful no-op).
+        assert set(out.keys()) == set(pb.RECOMMENDATION_MODES)
+        assert all(v is None for v in out.values())
+
+    def test_returns_per_mode_tags_for_ollama(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        out = wiz._build_profile_recommendations("ollama", {})
+        assert out["quality"]["engine_tag"] == "qwen3-coder:30b"
+        assert out["fast"]["engine_tag"] == "qwen2.5-coder:7b"
+        assert out["balanced"]["engine_tag"] == "qwen3-coder:30b"
+
+    def test_does_not_crash_when_llmfit_raises(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
+
+        def boom(*_a, **_kw):
+            raise RuntimeError("llmfit exploded")
+
+        monkeypatch.setattr(pb, "recommend_for_mode", boom)
+        out = wiz._build_profile_recommendations("ollama", {})
+        assert all(v is None for v in out.values())
+
+    def test_respects_engine_argument_for_lmstudio(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        out = wiz._build_profile_recommendations("lmstudio", {})
+        # Picks lms_hub_name, not ollama_tag — ensures engine is honored.
+        assert out["quality"]["engine_tag"] == "qwen/qwen3-coder-30b"
+
+
+class TestProfileChoiceLabel:
+    def test_label_contains_tag_and_metrics(self, isolated_state):
+        _, wiz, _ = isolated_state
+        rec = {
+            "engine_tag": "qwen3-coder:30b",
+            "score": 95,
+            "estimated_tps": 12,
+            "fit_level": "Good",
+        }
+        label = wiz._profile_choice_label("balanced", rec)
+        assert "Balanced" in label
+        assert "qwen3-coder:30b" in label
+        assert "score=95" in label
+        assert "12 tok/s" in label
+
+    def test_label_handles_missing_metrics(self, isolated_state):
+        _, wiz, _ = isolated_state
+        label = wiz._profile_choice_label("fast", {"engine_tag": "x:y"})
+        assert "Speed" in label
+        assert "x:y" in label
+
+
+# ---------------------------------------------------------------------------
+# step_2_4_pick_model — mixed picker (issue #35 + #36 integration).
+# ---------------------------------------------------------------------------
+
+
+class _StubAsk:
+    """Minimal questionary stub returning a pre-programmed answer."""
+
+    def __init__(self, answer):
+        self._answer = answer
+
+    def ask(self):
+        return self._answer
+
+
+class TestStep24PickerIntegration:
+    """
+    Integration tests for the refactored step_2_4_pick_model picker that must
+    surface both Speed/Balanced/Quality profiles and installed local models
+    alongside the existing manual-entry / llmfit fallback choices.
+    """
+
+    def _profile_with_installed_ollama(self):
+        return {
+            "ollama": {
+                "models": [
+                    {"name": "llama2:7b", "local": True},
+                    {"name": "qwen2.5-coder:7b", "local": True, "size": "4.1 GB"},
+                ]
+            },
+            "lmstudio": {"present": False, "models": []},
+            "llamacpp": {"present": False, "server_running": False},
+            "disk": {"free_bytes": 1 << 40},
+        }
+
+    def _candidates(self):
+        return [
+            {
+                "name": "Qwen/Qwen3-Coder-30B",
+                "score": 95,
+                "estimated_tps": 12,
+                "ollama_tag": "qwen3-coder:30b",
+                "lms_hub_name": "qwen/qwen3-coder-30b",
+                "fit_level": "Good",
+            },
+            {
+                "name": "Qwen/Qwen2.5-Coder-7B",
+                "score": 70,
+                "estimated_tps": 80,
+                "ollama_tag": "qwen2.5-coder:7b",
+                "lms_hub_name": "qwen/qwen2.5-coder-7b",
+                "fit_level": "Perfect",
+            },
+        ]
+
+    def test_installed_model_choice_pre_populated(self, isolated_state, monkeypatch):
+        """Picking an installed model skips download and marks step complete (#36)."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        # Capture the choices the picker renders, then return the first installed
+        # model choice so the test flow mimics a user picking it.
+        captured_choices: list = []
+
+        def fake_select(msg, choices):
+            captured_choices.extend(choices)
+            for c in choices:
+                if isinstance(c.value, str) and c.value.startswith("installed:"):
+                    return _StubAsk(c.value)
+            return _StubAsk(None)
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        # _handle_model_presence → model must be already installed so no confirm dialog.
+        state = wiz.WizardState(primary_engine="ollama")
+        state.profile = self._profile_with_installed_ollama()
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
+        # Picked tag corresponds to the installed ollama model.
+        assert state.engine_model_tag == "qwen2.5-coder:7b"
+        assert state.model_source == "installed"
+        assert "2.4" in state.completed_steps
+        # Picker surfaced at least the three profile choices + 2 installed models.
+        profile_choices = [
+            c
+            for c in captured_choices
+            if isinstance(c.value, str) and c.value.startswith("profile:")
+        ]
+        installed_choices = [
+            c
+            for c in captured_choices
+            if isinstance(c.value, str) and c.value.startswith("installed:")
+        ]
+        assert len(profile_choices) >= 1
+        assert len(installed_choices) >= 1
+
+    def test_profile_choice_picks_recommended_tag(self, isolated_state, monkeypatch):
+        """Picking a Speed/Quality/Balanced profile fills the state with the llmfit tag (#35)."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+
+        def fake_select(msg, choices):
+            for c in choices:
+                if c.value == "profile:quality":
+                    return _StubAsk(c.value)
+            return _StubAsk(None)
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        # Model is not installed — _handle_model_presence will ask for download.
+        # Stub the confirm prompts to accept defaults and the actual download.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+
+        # Stub the download step so we don't shell out.
+        monkeypatch.setattr(wiz, "_download_model", lambda _state: True)
+
+        state = wiz.WizardState(primary_engine="ollama")
+        # Profile with no installed ollama coders so the quality pick is not
+        # trivially already installed.
+        state.profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": False, "models": []},
+            "llamacpp": {"present": False, "server_running": False},
+            "disk": {"free_bytes": 1 << 40},
+        }
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
+        assert state.engine_model_tag == "qwen3-coder:30b"
+        assert state.model_source == "profile:quality"
+        assert "2.4" in state.completed_steps
+
+    def test_direct_entry_still_works(self, isolated_state, monkeypatch):
+        """Manual model entry path is unchanged when the user chooses 'I'll type a name'."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": False, "version": ""}
+        )
+
+        def fake_select(msg, choices):
+            for c in choices:
+                if c.value == "direct":
+                    return _StubAsk(c.value)
+            return _StubAsk(None)
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("qwen3-coder:30b"))
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+
+        state = wiz.WizardState(primary_engine="ollama")
+        state.profile = {
+            "ollama": {"models": [{"name": "qwen3-coder:30b", "local": True, "size": "19 GB"}]},
+            "lmstudio": {"present": False, "models": []},
+            "llamacpp": {"present": False, "server_running": False},
+            "disk": {"free_bytes": 1 << 40},
+        }
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
+        assert state.engine_model_tag == "qwen3-coder:30b"
+        assert state.model_source == "direct"
+        assert "2.4" in state.completed_steps
+
+    def test_cancel_returns_false(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": False, "version": ""}
+        )
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("cancel"))
+        state = wiz.WizardState(primary_engine="ollama")
+        state.profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": False, "models": []},
+            "llamacpp": {"present": False, "server_running": False},
+        }
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is False
+        assert "2.4" not in state.completed_steps
+
+    def test_profile_choices_filtered_to_chosen_engine(self, isolated_state, monkeypatch):
+        """
+        Profile recommendations must target state.primary_engine. When the engine
+        is lmstudio the profile picks must surface lms_hub_name, not ollama_tag.
+        """
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
+        )
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+
+        captured_choices: list = []
+
+        def fake_select(msg, choices):
+            captured_choices.extend(choices)
+            # Cancel immediately — we just want to inspect the choice list.
+            for c in choices:
+                if c.value == "cancel":
+                    return _StubAsk(c.value)
+            return _StubAsk(None)
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+
+        state = wiz.WizardState(primary_engine="lmstudio")
+        state.profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+            "llamacpp": {"present": False, "server_running": False},
+            "disk": {"free_bytes": 1 << 40},
+        }
+        # Also verify the underlying recommendations dict that the picker
+        # consumes — a more direct assertion that doesn't rely on label parsing.
+        recs = wiz._build_profile_recommendations("lmstudio", state.profile)
+        assert recs["quality"]["engine_tag"].startswith("qwen/")
+        assert recs["balanced"]["engine_tag"].startswith("qwen/")
+        # An ollama-style tag would contain a colon after the model family.
+        for _mode, rec in recs.items():
+            if rec is None:
+                continue
+            assert (
+                ":" not in rec["engine_tag"]
+            ), f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+
+        wiz.step_2_4_pick_model(state, non_interactive=False)
+
+        # Extract the choice labels for profile entries and ensure at least
+        # one shows the lmstudio hub name rather than the ollama tag.
+        labels = [c.title if hasattr(c, "title") else str(c) for c in captured_choices]
+        joined = "\n".join(labels)
+        assert "qwen/qwen3-coder-30b" in joined or "qwen/qwen2.5-coder-7b" in joined
+
+    def test_non_interactive_prefers_installed_model(self, isolated_state):
+        """--non-interactive path still hits _find_model_auto (installed-first)."""
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_engine="ollama")
+        state.profile = self._profile_with_installed_ollama()
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "qwen2.5-coder:7b"
+
+
+# ---------------------------------------------------------------------------
 # Smoke test speed reporting — throughput verdicts + slow-model prompt.
 # ---------------------------------------------------------------------------
 

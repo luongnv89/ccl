@@ -651,8 +651,16 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
         state.model_candidate = candidate.get("candidate") or {}
         ok(f"Non-interactive pick: [bold]{state.engine_model_tag}[/bold]")
     else:
+        # Pre-populate discovered local models for the chosen engine (issue #36)
+        # and per-mode llmfit recommendations (issue #35). Both read from the
+        # cached profile captured in step 2.1 — we never re-probe here.
+        installed_models = pb.installed_models_for_engine(state.profile, engine)
+        profile_recommendations = _build_profile_recommendations(engine, state.profile)
+        _show_profile_recommendations_preview(profile_recommendations)
         while True:
             choices: list[Any] = []
+            items: dict[str, dict[str, Any]] = {}
+
             if running_llamacpp_model:
                 choices.append(
                     questionary.Choice(
@@ -660,10 +668,49 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                         value="running",
                     )
                 )
+
+            # --- Recommendation profiles (Speed / Balanced / Quality) ---
+            profile_choice_added = False
+            for pmode in pb.RECOMMENDATION_MODES:
+                rec = profile_recommendations.get(pmode)
+                if rec is None:
+                    continue
+                key = f"profile:{pmode}"
+                items[key] = rec
+                choices.append(
+                    questionary.Choice(
+                        _profile_choice_label(pmode, rec),
+                        value=key,
+                    )
+                )
+                profile_choice_added = True
+            if profile_choice_added:
+                info(
+                    "Speed/Quality/Balanced profiles come from llmfit's ranking of coding models "
+                    f"for your {engine} engine."
+                )
+
+            # --- Installed local models for the chosen engine ---
+            for idx, entry in enumerate(installed_models):
+                if running_llamacpp_model and entry.get("running"):
+                    # Already surfaced as the top "running llama-server" choice.
+                    continue
+                key = f"installed:{idx}"
+                items[key] = entry
+                size_suffix = f"  ({entry.get('size')})" if entry.get("size") else ""
+                choices.append(
+                    questionary.Choice(
+                        f"Use installed {entry['source']} model: {entry['display']}{size_suffix}",
+                        value=key,
+                    )
+                )
+
             choices.extend(
                 [
                     questionary.Choice("I'll type a specific model name", value="direct"),
-                    questionary.Choice("Help me pick (llmfit recommendation)", value="find-model"),
+                    questionary.Choice(
+                        "Help me pick (full llmfit ranked list)", value="find-model"
+                    ),
                     questionary.Choice("Cancel setup", value="cancel"),
                 ]
             )
@@ -681,6 +728,32 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                 state.model_candidate = {}
                 ok(f"Using running llama-server model: [bold]{running_llamacpp_model}[/bold]")
                 break
+            if mode.startswith("profile:"):
+                pmode = mode.split(":", 1)[1]
+                rec = items[mode]
+                state.model_name = rec.get("name") or rec["engine_tag"]
+                state.engine_model_tag = rec["engine_tag"]
+                state.model_source = f"profile:{pmode}"
+                state.model_candidate = {
+                    k: v for k, v in rec.items() if k not in ("engine_tag", "mode")
+                }
+                ok(
+                    f"Picked {pmode} profile: [bold]{state.engine_model_tag}[/bold] "
+                    f"(score={rec.get('score')}, ~{rec.get('estimated_tps')} tok/s)"
+                )
+                if _handle_model_presence(state):
+                    break
+                continue
+            if mode.startswith("installed:"):
+                entry = items[mode]
+                state.model_name = entry["display"]
+                state.engine_model_tag = entry["tag"]
+                state.model_source = "installed"
+                state.model_candidate = {}
+                ok(f"Using installed model: [bold]{state.engine_model_tag}[/bold]")
+                if _handle_model_presence(state):
+                    break
+                continue
             if mode == "direct":
                 name = questionary.text(
                     f"Model name for engine '{engine}' (e.g. qwen3-coder:30b):",
@@ -704,6 +777,93 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
 
     state.mark("2.4")
     return True
+
+
+def _build_profile_recommendations(
+    engine: str, profile: dict[str, Any]
+) -> dict[str, dict[str, Any] | None]:
+    """
+    Return per-mode llmfit recommendations mapped to `engine`.
+
+    Missing llmfit → every mode maps to None (the picker silently omits the
+    profile options in that case, avoiding a crash when llmfit is not
+    installed). The caller can show a hint suggesting `_ensure_llmfit()`
+    through the existing "Help me pick" path.
+    """
+    llmfit_present = pb.command_version("llmfit").get("present", False)
+    out: dict[str, dict[str, Any] | None] = {m: None for m in pb.RECOMMENDATION_MODES}
+    if not llmfit_present:
+        return out
+    for m in pb.RECOMMENDATION_MODES:
+        try:
+            out[m] = pb.recommend_for_mode(profile, m, engine)
+        except Exception:
+            out[m] = None
+    return out
+
+
+def _profile_choice_label(mode: str, rec: dict[str, Any]) -> str:
+    """Human-readable single-line label for a recommendation profile choice."""
+    title = {
+        "balanced": "Balanced profile",
+        "fast": "Speed profile",
+        "quality": "Quality profile",
+    }.get(mode, f"{mode.title()} profile")
+    tag = rec.get("engine_tag") or rec.get("name") or "?"
+    score = rec.get("score")
+    tps = rec.get("estimated_tps")
+    fit = rec.get("fit_level", "?")
+    bits = [f"→ {tag}"]
+    if score is not None:
+        bits.append(f"score={score}")
+    if tps is not None:
+        bits.append(f"~{tps} tok/s")
+    if fit:
+        bits.append(f"fit={fit}")
+    return f"{title}  " + "  ".join(bits)
+
+
+def _show_profile_recommendations_preview(
+    recommendations: dict[str, dict[str, Any] | None],
+) -> None:
+    """
+    Print a small table summarising the Speed/Balanced/Quality recommendations
+    before the picker menu appears. Each row documents the speed/quality
+    tradeoff (issue #35 acceptance criterion).
+    """
+    if not any(recommendations.values()):
+        info(
+            "Recommendation profiles require llmfit. Install llmfit or pick "
+            "an installed model / type a model name below."
+        )
+        return
+    table = Table(
+        title="Recommendation profiles (llmfit + this machine)",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Profile", style="bold")
+    table.add_column("Recommended model")
+    table.add_column("Score", justify="right")
+    table.add_column("~tok/s", justify="right")
+    table.add_column("Notes", overflow="fold")
+    for pmode in pb.RECOMMENDATION_MODES:
+        rec = recommendations.get(pmode)
+        note = pb.RECOMMENDATION_MODE_DESCRIPTIONS.get(pmode, "")
+        if rec is None:
+            table.add_row(pmode.title(), "—", "—", "—", note + "  (no match)")
+            continue
+        tag = rec.get("engine_tag") or rec.get("name") or "?"
+        score = rec.get("score")
+        tps = rec.get("estimated_tps")
+        table.add_row(
+            pmode.title(),
+            str(tag),
+            "—" if score is None else str(score),
+            "—" if tps is None else f"{tps}",
+            note,
+        )
+    console.print(table)
 
 
 def _map_to_engine(user_input: str, engine: str) -> str | None:
