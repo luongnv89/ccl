@@ -1037,7 +1037,7 @@ class TestDownloadModelSummary:
         )
         assert wiz._download_model(state) is True
         # The fuzzy-search picker changed the repo ID → state must be updated
-        # so step 2.6 wires the correct model (#38 + #39 together).
+        # so step 6 wires the correct model (#38 + #39 together).
         assert state.engine_model_tag == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
         assert state.model_name == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
         assert state.profile.get("llamacpp_model_path") == "/tmp/picked.gguf"
