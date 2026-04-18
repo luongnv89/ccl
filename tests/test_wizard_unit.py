@@ -26,21 +26,21 @@ class TestWizardState:
             primary_engine="ollama",
             model_name="qwen3-coder:30b",
             engine_model_tag="qwen3-coder:30b",
-            completed_steps=["2.1", "2.2"],
+            completed_steps=["1", "2"],
         )
         state.save()
         reloaded = wiz.WizardState.load()
         assert reloaded.primary_harness == "claude"
         assert reloaded.primary_engine == "ollama"
-        assert reloaded.completed_steps == ["2.1", "2.2"]
+        assert reloaded.completed_steps == ["1", "2"]
 
     def test_mark_is_idempotent(self, isolated_state):
         _, wiz, _ = isolated_state
         state = wiz.WizardState()
-        state.mark("2.1")
-        state.mark("2.1")
-        state.mark("2.2")
-        assert state.completed_steps == ["2.1", "2.2"]
+        state.mark("1")
+        state.mark("1")
+        state.mark("2")
+        assert state.completed_steps == ["1", "2"]
 
     def test_load_handles_corrupt_state_file(self, isolated_state):
         _, wiz, state_dir = isolated_state
@@ -795,7 +795,7 @@ class TestStep24PickerIntegration:
         # Picked tag corresponds to the installed ollama model.
         assert state.engine_model_tag == "qwen2.5-coder:7b"
         assert state.model_source == "installed"
-        assert "2.4" in state.completed_steps
+        assert "4" in state.completed_steps
         # Picker surfaced at least the three profile choices + 2 installed models.
         profile_choices = [
             c
@@ -844,7 +844,7 @@ class TestStep24PickerIntegration:
         assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
         assert state.engine_model_tag == "qwen3-coder:30b"
         assert state.model_source == "profile:quality"
-        assert "2.4" in state.completed_steps
+        assert "4" in state.completed_steps
 
     def test_direct_entry_still_works(self, isolated_state, monkeypatch):
         """Manual model entry path is unchanged when the user chooses 'I'll type a name'."""
@@ -873,7 +873,7 @@ class TestStep24PickerIntegration:
         assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
         assert state.engine_model_tag == "qwen3-coder:30b"
         assert state.model_source == "direct"
-        assert "2.4" in state.completed_steps
+        assert "4" in state.completed_steps
 
     def test_cancel_returns_false(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
@@ -888,7 +888,7 @@ class TestStep24PickerIntegration:
             "llamacpp": {"present": False, "server_running": False},
         }
         assert wiz.step_2_4_pick_model(state, non_interactive=False) is False
-        assert "2.4" not in state.completed_steps
+        assert "4" not in state.completed_steps
 
     def test_profile_choices_filtered_to_chosen_engine(self, isolated_state, monkeypatch):
         """
@@ -1080,7 +1080,7 @@ class TestStep2_5SmokeTest:
         )
         state = self._setup_state(wiz)
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
-        assert "2.5" in state.completed_steps
+        assert "5" in state.completed_steps
         assert state.smoke_test_result["tokens_per_second"] == 42.0
 
     def test_slow_model_non_interactive_still_passes(self, isolated_state, monkeypatch):
@@ -1098,7 +1098,7 @@ class TestStep2_5SmokeTest:
         )
         state = self._setup_state(wiz)
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
-        assert "2.5" in state.completed_steps
+        assert "5" in state.completed_steps
 
     def test_slow_model_interactive_decline_aborts(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
@@ -1121,7 +1121,7 @@ class TestStep2_5SmokeTest:
         monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _FakeAsk())
         state = self._setup_state(wiz)
         assert wiz.step_2_5_smoke_test(state, non_interactive=False) is False
-        assert "2.5" not in state.completed_steps
+        assert "5" not in state.completed_steps
 
     def test_failed_smoke_test_reports_failure(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
@@ -1130,7 +1130,7 @@ class TestStep2_5SmokeTest:
         )
         state = self._setup_state(wiz)
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
-        assert "2.5" not in state.completed_steps
+        assert "5" not in state.completed_steps
 
 
 # ---------------------------------------------------------------------------
