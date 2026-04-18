@@ -118,23 +118,23 @@ The tool is built around a single interactive first-run experience that takes a 
 
 1. **Install** — user installs the tool via a single package command.
 2. **First run** — user runs the tool for the first time and is dropped into a guided, interactive flow:
-   - **2.1 Discover environment** — detect installed harnesses (Claude Code, Codex), engines (Ollama, LM Studio, llama.cpp), `llmfit`, and remaining disk space. Verify that the user has at least one harness, one engine, and `llmfit`.
-   - **2.2 Install missing pieces** — if any required component is missing, interactively ask the user which one to install and spawn a sub-process to install it.
-   - **2.3 Choose preferences** — if multiple harnesses or engines are present, ask the user to pick a primary. Save the primary choice to config but remember secondary choices as fallbacks. Users can opt to enable both Claude and Codex paths.
-   - **2.4 Pick a model** — the user drives this step. The tool asks: *"Which model do you want to use?"* and accepts one of:
-     - a direct model name (mapped into the selected engine's naming scheme if needed), or
-     - an opt-in `find-model` path that runs `llmfit` against the machine profile and ranks candidates, then lets the user pick one from the list.
-     - Once a model is chosen, the standard download/disk branches apply:
-       - if the model already exists locally → continue.
-       - if the model is missing and fits in free space → ask the user to confirm download.
-       - if the model is missing and larger than free space → ask the user to free space before downloading.
-       - if the user cancels the download → re-ask for a different model, or exit cleanly.
-     - The final choice is persisted in config. `find-model` is always available later as a standalone subcommand for users who want a recommendation on demand.
-   - **2.5 Smoke test engine + model** — run a minimal test with the selected engine and selected model to verify it actually works.
-   - **2.6 Wire up the harness** — configure the selected harness to start with the selected engine + selected model via a single command.
-   - **2.7 Verify the final command** — run an end-to-end test of the exact command the user will use day-to-day.
-   - **2.8 Write `guide.md`** — generate a short personalized guide telling the user exactly how to launch their chosen harness against the local model from now on.
-3. **Daily use** — user runs their favorite harness against the local model via the single configured command.
+3. **Discover environment** — detect installed harnesses (Claude Code, Codex), engines (Ollama, LM Studio, llama.cpp), `llmfit`, and remaining disk space. Verify that the user has at least one harness, one engine, and `llmfit`.
+4. **Install missing pieces** — if any required component is missing, interactively ask the user which one to install and spawn a sub-process to install it.
+5. **Choose preferences** — if multiple harnesses or engines are present, ask the user to pick a primary. Save the primary choice to config but remember secondary choices as fallbacks. Users can opt to enable both Claude and Codex paths.
+6. **Pick a model** — the user drives this step. The tool asks: *"Which model do you want to use?"* and accepts one of:
+   - a direct model name (mapped into the selected engine's naming scheme if needed), or
+   - an opt-in `find-model` path that runs `llmfit` against the machine profile and ranks candidates, then lets the user pick one from the list.
+   - Once a model is chosen, the standard download/disk branches apply:
+     - if the model already exists locally → continue.
+     - if the model is missing and fits in free space → ask the user to confirm download.
+     - if the model is missing and larger than free space → ask the user to free space before downloading.
+     - if the user cancels the download → re-ask for a different model, or exit cleanly.
+   - The final choice is persisted in config. `find-model` is always available later as a standalone subcommand for users who want a recommendation on demand.
+7. **Smoke test engine + model** — run a minimal test with the selected engine and selected model to verify it actually works.
+8. **Wire up the harness** — configure the selected harness to start with the selected engine + selected model via a single command.
+9. **Verify the final command** — run an end-to-end test of the exact command the user will use day-to-day.
+10. **Write `guide.md`** — generate a short personalized guide telling the user exactly how to launch their chosen harness against the local model from now on.
+11. **Daily use** — user runs their favorite harness against the local model via the single configured command.
 
 Every step is idempotent: re-running the tool should re-use existing config, skip already-done steps, and only re-prompt on changes or failures.
 
