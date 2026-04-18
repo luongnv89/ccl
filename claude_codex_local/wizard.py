@@ -4,14 +4,14 @@ Interactive first-run wizard for claude-codex-local.
 
 Implements the 8-step flow from PRD v1.2 §4.1:
 
-  2.1 Discover environment (harnesses, engines, llmfit, disk)
-  2.2 Install missing components (guided sub-process)
-  2.3 Pick preferences (primary harness + engine)
-  2.4 Pick a model (user-first, optional find-model helper)
-  2.5 Smoke test engine + model
-  2.6 Wire up harness (isolated settings.json / launch config)
-  2.7 Verify launch command end-to-end
-  2.8 Generate personalized guide.md
+  1 Discover environment (harnesses, engines, llmfit, disk)
+  2 Install missing components (guided sub-process)
+  3 Pick preferences (primary harness + engine)
+  4 Pick a model (user-first, optional find-model helper)
+  5 Smoke test engine + model
+  6 Wire up harness (isolated settings.json / launch config)
+  7 Verify launch command end-to-end
+  8 Generate personalized guide.md
 
 The wizard is idempotent and resumable: state is checkpointed to
 `.claude-codex-local/wizard-state.json` after every completed step.
@@ -163,12 +163,12 @@ def info(msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.1 — Discover environment
+# Step 1 — Discover environment
 # ---------------------------------------------------------------------------
 
 
 def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.1 — Discover environment")
+    header("Step 1 — Discover environment")
     profile = pb.machine_profile()
     state.profile = profile
 
@@ -235,10 +235,10 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     if presence["has_minimum"]:
         ok(f"Found harnesses: {', '.join(presence['harnesses'])}")
         ok(f"Found engines: {', '.join(presence['engines'])}")
-        state.mark("2.1")
+        state.mark("1")
         return True
 
-    # Missing pieces — fall through to step 2.2
+    # Missing pieces — fall through to step 2
     if not presence["harnesses"]:
         warn("No harness found (need claude or codex)")
     if not presence["engines"]:
@@ -247,7 +247,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
 
 
 # ---------------------------------------------------------------------------
-# Step 2.2 — Install missing components
+# Step 2 — Install missing components
 # ---------------------------------------------------------------------------
 
 INSTALL_HINTS: dict[str, dict[str, str]] = {
@@ -290,7 +290,7 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
 
 
 def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.2 — Install missing components")
+    header("Step 2 — Install missing components")
     presence = state.profile.get("presence", {})
 
     missing: list[str] = []
@@ -301,7 +301,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
 
     if not missing:
         info("Nothing missing.")
-        state.mark("2.2")
+        state.mark("2")
         return True
 
     console.print(f"Missing categories: [red]{', '.join(missing)}[/red]")
@@ -332,7 +332,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
     state.profile = pb.machine_profile()
     if state.profile["presence"]["has_minimum"]:
         ok("Minimum requirements now satisfied.")
-        state.mark("2.2")
+        state.mark("2")
         return True
     fail("Still missing required components. Install them and re-run the wizard.")
     return False
@@ -478,7 +478,7 @@ def _ensure_llmfit() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.3 — Pick preferences
+# Step 3 — Pick preferences
 # ---------------------------------------------------------------------------
 
 
@@ -487,7 +487,7 @@ _ALL_ENGINES = ["ollama", "lmstudio", "llamacpp"]
 
 
 def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.3 — Pick preferences")
+    header("Step 3 — Pick preferences")
     presence = state.profile["presence"]
     harnesses = presence["harnesses"]
     engines = presence["engines"]
@@ -575,7 +575,7 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
         info(
             f"Fallbacks: harnesses={state.secondary_harnesses or '-'} engines={state.secondary_engines or '-'}"
         )
-    state.mark("2.3")
+    state.mark("3")
     return True
 
 
@@ -611,12 +611,12 @@ def _default_engine(engines: list[str], profile: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.4 — Pick a model (user-first, optional find-model helper)
+# Step 4 — Pick a model (user-first, optional find-model helper)
 # ---------------------------------------------------------------------------
 
 
 def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.4 — Pick a model")
+    header("Step 4 — Pick a model")
     engine = state.primary_engine
 
     # If llamacpp is primary and a server is already running with a model loaded,
@@ -640,7 +640,7 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
             ok(
                 f"Non-interactive pick: [bold]{state.engine_model_tag}[/bold] (from running llama-server)"
             )
-            state.mark("2.4")
+            state.mark("4")
             return True
         # Non-interactive: go straight through find-model (prefers installed models).
         candidate = _find_model_auto(engine, state.profile)
@@ -655,7 +655,7 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
     else:
         # Pre-populate discovered local models for the chosen engine (issue #36)
         # and per-mode llmfit recommendations (issue #35). Both read from the
-        # cached profile captured in step 2.1 — we never re-probe here.
+        # cached profile captured in step 1 — we never re-probe here.
         installed_models = pb.installed_models_for_engine(state.profile, engine)
         profile_recommendations = _build_profile_recommendations(engine, state.profile)
         _show_profile_recommendations_preview(profile_recommendations)
@@ -784,7 +784,7 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
             if _handle_model_presence(state):
                 break
 
-    state.mark("2.4")
+    state.mark("4")
     return True
 
 
@@ -1299,7 +1299,7 @@ def _download_model(state: WizardState) -> bool:
             llamacpp_bytes = hf_result.get("bytes_downloaded")
             llamacpp_elapsed = hf_result.get("elapsed_seconds")
             # A fuzzy-search re-pick returned a different repo ID than the
-            # one we started with — persist it so step 2.6 wires the harness
+            # one we started with — persist it so step 6 wires the harness
             # to the model the user actually downloaded (#38).
             resolved_repo = hf_result.get("repo_id")
             if resolved_repo and resolved_repo != tag:
@@ -1333,7 +1333,7 @@ def _download_model(state: WizardState) -> bool:
             bits.append(size_hint)
         bits.append(f"in {_human_duration(elapsed)}")
         ok(f"Downloaded {tag} ({' '.join(bits)})")
-    # Refresh profile so 2.5 sees the new model; preserve llamacpp_model_path
+    # Refresh profile so step 5 sees the new model; preserve llamacpp_model_path
     # since machine_profile() never returns that key.
     state.profile = pb.machine_profile()
     if engine == "llamacpp" and llamacpp_model_path:
@@ -1367,12 +1367,12 @@ def _lms_model_size_hint(tag: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.5 — Smoke test engine + model
+# Step 5 — Smoke test engine + model
 # ---------------------------------------------------------------------------
 
 
 def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.5 — Smoke test engine + model")
+    header("Step 5 — Smoke test engine + model")
     engine = state.primary_engine
     tag = state.engine_model_tag
     info(f"Running minimal prompt through {engine} / {tag}...")
@@ -1414,7 +1414,7 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
     if not _report_smoke_test_speed(result, non_interactive=non_interactive):
         return False
 
-    state.mark("2.5")
+    state.mark("5")
     return True
 
 
@@ -1480,12 +1480,12 @@ def _report_smoke_test_speed(result: dict[str, Any], non_interactive: bool = Fal
 
 
 # ---------------------------------------------------------------------------
-# Step 2.6 — Wire up harness with isolated settings
+# Step 6 — Wire up harness with isolated settings
 # ---------------------------------------------------------------------------
 
 
 def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.6 — Wire up harness")
+    header("Step 6 — Wire up harness")
     harness = state.primary_harness
     engine = state.primary_engine
     tag = state.engine_model_tag
@@ -1512,7 +1512,7 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
     alias_short = "cc" if harness == "claude" else "cx"
     state.launch_command = [alias_short]
     ok(f"Harness wired. argv: [bold]{' '.join(shlex.quote(x) for x in result.argv)}[/bold]")
-    state.mark("2.6")
+    state.mark("6")
     return True
 
 
@@ -1623,7 +1623,7 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
 
 
 # ---------------------------------------------------------------------------
-# Step 2.65 — Helper script + shell aliases
+# Step 6.5 — Helper script + shell aliases
 # ---------------------------------------------------------------------------
 
 
@@ -1779,9 +1779,9 @@ def _install_shell_aliases(
 
 
 def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.65 — Install helper script + shell aliases")
+    header("Step 6.5 — Install helper script + shell aliases")
     if not state.wire_result:
-        fail("No wire result on state — run step 2.6 first.")
+        fail("No wire result on state — run step 6 first.")
         return False
     result = WireResult(
         argv=list(state.wire_result.get("argv", [])),
@@ -1796,22 +1796,22 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
     rc_path, names = _install_shell_aliases(script_path, harness, non_interactive)
     state.alias_names = names
     state.shell_rc_path = str(rc_path) if rc_path else ""
-    state.mark("2.65")
+    state.mark("6.5")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Step 2.7 — Verify launch command end-to-end
+# Step 7 — Verify launch command end-to-end
 # ---------------------------------------------------------------------------
 
 
 def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.7 — Verify launch command end-to-end")
+    header("Step 7 — Verify launch command end-to-end")
     harness = state.primary_harness
     engine = state.primary_engine
     tag = state.engine_model_tag
     if not state.wire_result:
-        fail("No wire result on state — run step 2.6 first.")
+        fail("No wire result on state — run step 6 first.")
         return False
     wire_env: dict[str, str] = dict(state.wire_result.get("env", {}))
 
@@ -1889,12 +1889,12 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
             console.print(f"[dim]{proc.stdout[-400:]}[/dim]")
         return False
     ok("End-to-end verify succeeded (got READY).")
-    state.mark("2.7")
+    state.mark("7")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Step 2.8 — Generate personalized guide.md
+# Step 8 — Generate personalized guide.md
 # ---------------------------------------------------------------------------
 
 GUIDE_TEMPLATE = """\
@@ -1972,7 +1972,7 @@ To wipe the local ccl setup entirely (both harnesses, if installed):
 
 
 def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2.8 — Generate personalized guide.md")
+    header("Step 8 — Generate personalized guide.md")
     alias_names = state.alias_names or (
         ["cc", "claude-local"] if state.primary_harness == "claude" else ["cx", "codex-local"]
     )
@@ -2007,7 +2007,7 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
     )
     GUIDE_PATH.write_text(content)
     ok(f"Wrote [bold]{GUIDE_PATH}[/bold]")
-    state.mark("2.8")
+    state.mark("8")
     return True
 
 
@@ -2016,15 +2016,15 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
 # ---------------------------------------------------------------------------
 
 STEPS: list[tuple[str, str, Callable[[WizardState, bool], bool]]] = [
-    ("2.1", "Discover environment", step_2_1_discover),
-    ("2.2", "Install missing components", step_2_2_install_missing),
-    ("2.3", "Pick preferences", step_2_3_pick_preferences),
-    ("2.4", "Pick a model", step_2_4_pick_model),
-    ("2.5", "Smoke test engine + model", step_2_5_smoke_test),
-    ("2.6", "Wire up harness", step_2_6_wire_harness),
-    ("2.65", "Install helper script + shell aliases", step_2_65_install_aliases),
-    ("2.7", "Verify launch command", step_2_7_verify),
-    ("2.8", "Generate guide.md", step_2_8_generate_guide),
+    ("1", "Discover environment", step_2_1_discover),
+    ("2", "Install missing components", step_2_2_install_missing),
+    ("3", "Pick preferences", step_2_3_pick_preferences),
+    ("4", "Pick a model", step_2_4_pick_model),
+    ("5", "Smoke test engine + model", step_2_5_smoke_test),
+    ("6", "Wire up harness", step_2_6_wire_harness),
+    ("6.5", "Install helper script + shell aliases", step_2_65_install_aliases),
+    ("7", "Verify launch command", step_2_7_verify),
+    ("8", "Generate guide.md", step_2_8_generate_guide),
 ]
 
 
@@ -2050,14 +2050,14 @@ def run_wizard(
         if resume and step_id in state.completed_steps and step_id != start_step:
             continue
         # Honor forced harness/engine by skipping the picker.
-        if step_id == "2.3" and state.primary_harness and state.primary_engine:
+        if step_id == "3" and state.primary_harness and state.primary_engine:
             ok(
                 f"Using forced picks: harness=[bold]{state.primary_harness}[/bold] engine=[bold]{state.primary_engine}[/bold]"
             )
-            state.mark("2.3")
+            state.mark("3")
             continue
-        # Step 2.2 is conditional: only run if 2.1 failed presence check.
-        if step_id == "2.2" and state.profile.get("presence", {}).get("has_minimum"):
+        # Step 2 is conditional: only run if step 1 failed presence check.
+        if step_id == "2" and state.profile.get("presence", {}).get("has_minimum"):
             continue
         ok_step = fn(state, non_interactive)
         if not ok_step:
@@ -2183,7 +2183,7 @@ def run_doctor() -> int:
             "helper script",
             state.helper_script_path,
             script_path.exists(),
-            "present" if script_path.exists() else "missing — re-run step 2.65",
+            "present" if script_path.exists() else "missing — re-run step 6.5",
         )
 
     # guide.md
@@ -2191,7 +2191,7 @@ def run_doctor() -> int:
         "guide.md",
         str(GUIDE_PATH),
         GUIDE_PATH.exists(),
-        "present" if GUIDE_PATH.exists() else "missing — re-run step 2.8",
+        "present" if GUIDE_PATH.exists() else "missing — re-run step 8",
     )
 
     console.print(check_table)
