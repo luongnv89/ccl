@@ -207,7 +207,7 @@ class TestWizardFullFlow:
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
-        # step 2.7 calls subprocess.run on the verify command directly.
+        # step 7 calls subprocess.run on the verify command directly.
         monkeypatch.setattr(wiz.subprocess, "run", _stub_subprocess_success)
 
         rc = wiz.run_wizard(non_interactive=True)
@@ -215,14 +215,14 @@ class TestWizardFullFlow:
 
         state = wiz.WizardState.load()
         assert set(state.completed_steps) >= {
-            "2.1",
-            "2.3",
-            "2.4",
-            "2.5",
-            "2.6",
-            "2.65",
-            "2.7",
-            "2.8",
+            "1",
+            "3",
+            "4",
+            "5",
+            "6",
+            "6.5",
+            "7",
+            "8",
         }
         assert state.primary_harness == "claude"
         assert state.primary_engine == "ollama"
@@ -258,10 +258,10 @@ class TestWizardFullFlow:
         )
         rc = wiz.run_wizard(non_interactive=True)
         assert rc == 1
-        # Completed up through 2.4; 2.5 should NOT be in completed_steps.
+        # Completed up through step 4; step 5 should NOT be in completed_steps.
         state = wiz.WizardState.load()
-        assert "2.5" not in state.completed_steps
-        assert "2.4" in state.completed_steps
+        assert "5" not in state.completed_steps
+        assert "4" in state.completed_steps
 
     def test_doctor_reports_clean_state_after_setup(self, isolated_state, monkeypatch, capsys):
         pb, wiz, _ = isolated_state
