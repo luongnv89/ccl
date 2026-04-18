@@ -203,56 +203,56 @@ There should be **no major change in how users use Claude Code or Codex**. The b
 
 1. **Install** — user installs the tool via package manager / script.
 2. **First run** — user executes the tool; it detects that no config exists and enters the interactive wizard.
-   - **2.1 Discover environment**
-     - Detect installed harnesses: Claude Code, Codex
-     - Detect installed engines: Ollama, LM Studio, llama.cpp
-     - Detect `llmfit`
-     - Detect free disk space
-     - Verify user has at least: one harness (Claude Code or Codex) + one engine (Ollama / LM Studio / llama.cpp) + `llmfit`
-   - **2.2 Install missing components**
-     - If any required category is missing, prompt user to choose which one to install
-     - Spawn a sub-process to install the chosen component
-     - Re-run discovery after install
-   - **2.3 Pick preferences**
-     - If multiple harnesses are present, ask which one to use as primary (Claude or Codex, or both)
-     - If multiple engines are present, ask which engine to prefer
-     - Save primary selections to config; keep secondary ones as fallbacks
-   - **2.4 Pick a model (user-first)**
-     - The tool asks the user which model they want to use. Two paths:
-       - **(default) Direct choice** — user types a model name (e.g. `qwen3-coder:30b` or `qwen/qwen3-coder-30b`). The tool maps the name into the selected engine's naming scheme if required.
-       - **(opt-in) Find best model** — user chooses "help me pick" and the tool runs `llmfit` against the machine profile, presents a ranked list of candidates, and lets the user select one. `find-model` is also exposed as a standalone subcommand so users can run it any time, not just during setup.
-     - Once a model is chosen, the download/disk branches apply identically to both paths:
-       - if the model exists locally → skip to 2.5
-       - if the model is missing and free disk space is sufficient → ask user to confirm download, then download
-       - if the model is missing and free disk space is not sufficient → ask user whether to clean storage first, then download
-       - if user cancels the download → re-ask for a different model, or exit cleanly
-     - The final choice is persisted in config (including whether it came from direct input or `find-model`)
-   - **2.5 Smoke test engine + model**
-     - Run a minimal coding prompt against the selected engine + selected model
-     - Fail fast with a clear error if the smoke test fails
-   - **2.6 Wire up harness**
-     - Write config so the selected harness can be launched against the selected engine + selected model via a single command
-   - **2.7 Verify the launch command**
-     - Actually run the single launch command end-to-end and confirm it succeeds
-   - **2.8 Write `guide.md`**
-     - Generate a personalized `guide.md` containing the exact launch command, harness, engine, model, and troubleshooting tips
-3. **Daily use** — user runs the single configured command to start their harness against the local model.
+3. **Discover environment**
+   - Detect installed harnesses: Claude Code, Codex
+   - Detect installed engines: Ollama, LM Studio, llama.cpp
+   - Detect `llmfit`
+   - Detect free disk space
+   - Verify user has at least: one harness (Claude Code or Codex) + one engine (Ollama / LM Studio / llama.cpp) + `llmfit`
+4. **Install missing components**
+   - If any required category is missing, prompt user to choose which one to install
+   - Spawn a sub-process to install the chosen component
+   - Re-run discovery after install
+5. **Pick preferences**
+   - If multiple harnesses are present, ask which one to use as primary (Claude or Codex, or both)
+   - If multiple engines are present, ask which engine to prefer
+   - Save primary selections to config; keep secondary ones as fallbacks
+6. **Pick a model (user-first)**
+   - The tool asks the user which model they want to use. Two paths:
+     - **(default) Direct choice** — user types a model name (e.g. `qwen3-coder:30b` or `qwen/qwen3-coder-30b`). The tool maps the name into the selected engine's naming scheme if required.
+     - **(opt-in) Find best model** — user chooses "help me pick" and the tool runs `llmfit` against the machine profile, presents a ranked list of candidates, and lets the user select one. `find-model` is also exposed as a standalone subcommand so users can run it any time, not just during setup.
+   - Once a model is chosen, the download/disk branches apply identically to both paths:
+     - if the model exists locally → skip to step 7
+     - if the model is missing and free disk space is sufficient → ask user to confirm download, then download
+     - if the model is missing and free disk space is not sufficient → ask user whether to clean storage first, then download
+     - if user cancels the download → re-ask for a different model, or exit cleanly
+   - The final choice is persisted in config (including whether it came from direct input or `find-model`)
+7. **Smoke test engine + model**
+   - Run a minimal coding prompt against the selected engine + selected model
+   - Fail fast with a clear error if the smoke test fails
+8. **Wire up harness**
+   - Write config so the selected harness can be launched against the selected engine + selected model via a single command
+9. **Verify the launch command**
+   - Actually run the single launch command end-to-end and confirm it succeeds
+10. **Write `guide.md`**
+    - Generate a personalized `guide.md` containing the exact launch command, harness, engine, model, and troubleshooting tips
+11. **Daily use** — user runs the single configured command to start their harness against the local model.
 
 ```mermaid
 flowchart TD
     A[Install tool] --> B[First run]
-    B --> C[2.1 Discover harnesses, engines, llmfit, disk]
+    B --> C[Step 3: Discover harnesses, engines, llmfit, disk]
     C --> D{At least 1 harness + 1 engine + llmfit?}
-    D -->|No| E[2.2 Ask user what to install + spawn installer]
+    D -->|No| E[Step 4: Ask user what to install + spawn installer]
     E --> C
-    D -->|Yes| F[2.3 Pick primary harness + engine]
-    F --> G[2.4 Ask user: which model?]
+    D -->|Yes| F[Step 5: Pick primary harness + engine]
+    F --> G[Step 6: Ask user: which model?]
     G --> G1{User choice}
     G1 -->|Direct name| H
     G1 -->|Help me pick| G2[Run llmfit → show ranked list]
     G2 --> G3[User picks from list]
     G3 --> H{Model installed?}
-    H -->|Yes| M[2.5 Smoke test engine + model]
+    H -->|Yes| M[Step 7: Smoke test engine + model]
     H -->|No| I{Fits in free disk?}
     I -->|Yes| J[Ask user to confirm download]
     I -->|No| K[Ask user to free space then download]
@@ -261,9 +261,9 @@ flowchart TD
     L -->|Yes| M
     L -->|No| G
     L -->|Exit| P[Cancel setup with message]
-    M --> Q[2.6 Wire up harness with single command]
-    Q --> R[2.7 Verify launch command end to end]
-    R --> S[2.8 Write personalized guide.md]
+    M --> Q[Step 8: Wire up harness with single command]
+    Q --> R[Step 9: Verify launch command end to end]
+    R --> S[Step 10: Write personalized guide.md]
     S --> T[Setup complete — user runs daily command]
 ```
 
@@ -486,7 +486,7 @@ The visible product should minimize workflow change and keep the harness experie
 - [ ] Detect Claude Code, Codex, Ollama, LM Studio, llama.cpp, `llmfit`, free disk
 - [ ] Profile machine hardware
 - [ ] Integrate `llmfit` and map model names into the selected engine
-- [ ] Interactive 8-step first-run wizard (2.1 → 2.8)
+- [ ] Interactive 8-step first-run wizard (steps 3 → 10)
 - [ ] Sub-process installer for missing harness/engine/`llmfit`
 - [ ] Disk-aware model download with user confirmation and cleanup prompt
 - [ ] User-specified fallback model path
