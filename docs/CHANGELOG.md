@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Machine specifications table now shows real CPU, RAM, and GPU values — the wizard was reading `llmfit system --json` fields from the top level, but they are wrapped under a `system` key; Platform row now comes from `platform.system()` / `platform.machine()` since llmfit does not emit those keys (#46)
 - llmfit ranking now uses **available** RAM instead of total — `llmfit fit --json` is invoked with `--ram <available_ram_gb>G` so the Speed/Balanced/Quality picks match what will actually fit on the host right now (#46)
 - Embedding and reranker models are hidden from the installed-models picker for both Ollama and LM Studio — they cannot serve as chat coding models and were surfacing as confusing choices (e.g. `embeddinggemma:300m`, `nomic-embed-text:latest`) (#46)
-- Step 2.4 model picker is now grouped with visual separators — `Running server` / `Suggested by llmfit` / `Installed on this machine` / `Other` — so categories are visually distinct (#46)
+- Step 4 (formerly 2.4) model picker is now grouped with visual separators — `Running server` / `Suggested by llmfit` / `Installed on this machine` / `Other` — so categories are visually distinct (#46)
 
 ## [0.8.0] - 2026-04-17
 
@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - HuggingFace CLI detection now checks both `hf` (modern) and `huggingface-cli` (legacy) binary names, uses the resolved binary in download commands, and injects the Python scripts directory into PATH immediately after pip install so the new binary is discoverable without reloading the shell (#21, #22)
-- `llmfit` check made optional — environment discovery (Step 2.1) no longer gates on llmfit being installed; llmfit is now checked only on-demand when the user requests model selection help (#24, #26)
+- `llmfit` check made optional — environment discovery (Step 1, formerly 2.1) no longer gates on llmfit being installed; llmfit is now checked only on-demand when the user requests model selection help (#24, #26)
 
 ## [0.5.0] - 2026-04-11
 

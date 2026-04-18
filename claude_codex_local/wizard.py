@@ -101,6 +101,20 @@ class WizardState:
             return cls()
         try:
             data = json.loads(STATE_FILE.read_text())
+            # Migrate pre-rename step IDs (2.1–2.8, 2.65) to the new sequential scheme.
+            legacy_to_new = {
+                "2.1": "1",
+                "2.2": "2",
+                "2.3": "3",
+                "2.4": "4",
+                "2.5": "5",
+                "2.6": "6",
+                "2.65": "6.5",
+                "2.7": "7",
+                "2.8": "8",
+            }
+            if "completed_steps" in data:
+                data["completed_steps"] = [legacy_to_new.get(s, s) for s in data["completed_steps"]]
             return cls(**data)
         except Exception:
             return cls()

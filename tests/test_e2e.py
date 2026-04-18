@@ -229,7 +229,7 @@ class TestWizardFullFlow:
         assert state.engine_model_tag == "qwen3-coder:30b"
         assert state.verify_result["ok"] is True
 
-        # Verifies step 2.65 wrote the helper script.
+        # Verifies step 6.5 wrote the helper script.
         helper = pb.STATE_DIR / "bin" / "cc"
         assert helper.exists()
         assert os.access(helper, os.X_OK)
@@ -244,7 +244,7 @@ class TestWizardFullFlow:
         assert "# <<< claude-codex-local:claude <<<" in rc_body
         assert "alias cc=" in rc_body
 
-        # Verifies step 2.8 wrote a guide.md.
+        # Verifies step 8 wrote a guide.md.
         assert wiz.GUIDE_PATH.exists()
         body = wiz.GUIDE_PATH.read_text()
         assert "qwen3-coder:30b" in body
