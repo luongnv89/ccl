@@ -1,6 +1,6 @@
 [project]
 name = "claude-codex-local"
-version = "0.8.1"
+version = "0.8.2"
 description = "Local backend bridge for Claude Code and Codex."
 readme = "README.md"
 license = "MIT"

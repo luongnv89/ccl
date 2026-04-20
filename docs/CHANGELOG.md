@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-04-20
+
+### Fixed
+- Wizard step IDs renumbered from the `2.x` scheme (`2.1`–`2.8`) to sequential integers (`1`–`8`), so progress indicators are consistent throughout the setup flow (#47)
+- Documentation updated to reflect the new sequential step numbering (`1`–`11` across all wizard sections)
+- E2e and unit tests updated to reference the new step IDs
+
 ## [0.8.1] - 2026-04-17
 
 ### Fixed
