@@ -26,6 +26,9 @@ Date: 2026-04-09
 - installed for the POC: `qwen2.5-coder:0.5b`
 - Ollama size shown locally: `397 MB`
 
+This was the historical POC model on a tiny VM. It is preserved here so the
+proof record stays auditable, not as a current recommendation.
+
 Why this model:
 
 - this machine is tiny

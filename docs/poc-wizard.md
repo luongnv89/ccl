@@ -89,12 +89,6 @@ execs `codex -m <tag> "$@"`.
 
 ## Known limitations
 
-- **LM Studio + Claude Code + Qwen3** hits `400 thinking.type`. Root cause:
-  Claude Code sends a `thinking` payload that Qwen3 reasoning models interpret
-  as an unterminated `<think>` block. The wizard warns on Qwen3 model names at
-  pick time and recommends Gemma 3 or Qwen 2.5 Coder instead. The wizard no
-  longer auto-builds a `-cclocal` Ollama variant as a workaround (see
-  `docs/poc-architecture.md`).
 - **llama.cpp** detection works, but automatic server management is not.
   Users must start `llama-server` themselves.
 - **Disk-size estimation** is still a stub — the disk-gated download branch
@@ -106,7 +100,6 @@ execs `codex -m <tag> "$@"`.
 |---------|--------|---------------------|--------|
 | Claude  | Ollama | `gemma4:26b`        | ✅ verified end-to-end via `ollama launch claude` |
 | Codex   | Ollama | `gemma4:26b`        | ✅ verified via `ollama launch codex -- --oss --local-provider=ollama` |
-| Codex   | Ollama | `qwen2.5-coder:0.5b` | ✅ verified (from earlier POC) |
 | Claude  | LM Studio | Qwen3 family    | ⚠️ blocked by `400 thinking.type`; wizard warns and recommends alternatives |
 | Any     | llama.cpp | any              | ⚠️ inline-env code path exists, no live runtime proof |
 

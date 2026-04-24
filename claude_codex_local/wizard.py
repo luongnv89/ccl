@@ -1546,9 +1546,7 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
     """
     if _model_known_incompatible_with_claude_code(tag):
         warn(
-            f"Model '{tag}' is known to misbehave with Claude Code. Claude Code sends\n"
-            "a `thinking` payload that Qwen3 reasoning models interpret as an\n"
-            "unterminated <think> block, blowing the context budget. Recommended\n"
+            f"Model '{tag}' is known to misbehave with Claude Code. Recommended\n"
             "alternatives: gemma3:27b, qwen2.5-coder:32b."
         )
 
