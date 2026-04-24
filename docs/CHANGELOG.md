@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-04-24
+
+### Fixed
+- Retired the qwen2.5-coder 0.5b verified path and removed related claims from the README, docs, model mapping, and static site (#49)
+- Restored the bootstrap docs to point users to `ccl find-model` instead of a hardcoded tiny model download path (#49)
+
 ## [0.8.2] - 2026-04-20
 
 ### Fixed

@@ -1,3 +1,3 @@
 """claude-codex-local — wire up Claude Code and Codex to a local LLM engine."""
 
-__version__ = "0.8.2"
+__version__ = "0.8.3"
