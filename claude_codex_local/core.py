@@ -32,7 +32,6 @@ HF_TO_OLLAMA: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"Qwen2\.5-Coder-7B", re.IGNORECASE), "qwen2.5-coder:7b"),
     (re.compile(r"Qwen2\.5-Coder-3B", re.IGNORECASE), "qwen2.5-coder:3b"),
     (re.compile(r"Qwen2\.5-Coder-1\.5B", re.IGNORECASE), "qwen2.5-coder:1.5b"),
-    (re.compile(r"Qwen2\.5-Coder-0\.5B", re.IGNORECASE), "qwen2.5-coder:0.5b"),
     (re.compile(r"DeepSeek-Coder-V2-Lite", re.IGNORECASE), "deepseek-coder-v2:16b"),
     (re.compile(r"DeepSeek-Coder-V2", re.IGNORECASE), "deepseek-coder-v2"),
     (re.compile(r"deepseek-coder.*33b", re.IGNORECASE), "deepseek-coder:33b"),

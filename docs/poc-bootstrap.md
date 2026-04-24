@@ -60,11 +60,11 @@ llmfit --version
 
 1. ensure `ollama`, `claude`, `codex` exist
 2. install `llmfit`
-3. pull the tiny local coder model if needed
+3. run the wizard so it can recommend and download a working model if needed
 4. run the repo doctor
 
 ```bash
-ollama pull qwen2.5-coder:0.5b
+ccl setup --harness codex --engine ollama
 ccl doctor
 ```
 

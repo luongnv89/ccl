@@ -164,7 +164,6 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 |---|---|---|---|
 | Claude Code | Ollama | `gemma4:26b` | Verified end-to-end |
 | Codex CLI | Ollama | `gemma4:26b` | Verified |
-| Codex CLI | Ollama | `qwen2.5-coder:0.5b` | Verified |
 | Claude Code | LM Studio | Qwen3 family | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
 | Any | llama.cpp | any | Inline-env code path exists, no live proof yet |
 | Any | vLLM | any | New in 0.8.0 — adapter shipped with tests |
@@ -221,11 +220,6 @@ ollama launch codex --model <tag> -- --oss --local-provider=ollama
 ```
 
 The `--oss --local-provider=ollama` flags are required after `--` because Codex otherwise tries to route through the ChatGPT account and rejects non-OpenAI model names.
-
-### Qwen3 + Claude Code
-
-Claude Code sends a `thinking` payload that Qwen3 reasoning models interpret as an unterminated `<think>` block. The wizard detects Qwen3 model names at pick time and recommends Gemma 3 or Qwen 2.5 Coder instead.
-
 </details>
 
 <details>
