@@ -20,6 +20,7 @@ The wizard is idempotent and resumable: state is checkpointed to
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform
@@ -1637,7 +1638,8 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
         "raw_env": result.raw_env,
     }
     state.engine_model_tag = result.effective_tag
-    alias_short = "cc" if harness == "claude" else "cx"
+    fence_tag = _fence_tag_for(harness, engine)
+    alias_short = _alias_names_for(fence_tag)[0]
     state.launch_command = [alias_short]
     ok(f"Harness wired. argv: [bold]{' '.join(shlex.quote(x) for x in result.argv)}[/bold]")
     state.mark("6")
@@ -1847,6 +1849,21 @@ def _migrate_legacy_alias_block(existing: str) -> str:
     return existing[: match.start()] + migrated + existing[match.end() :]
 
 
+def _fence_tag_for(harness: str, engine: str) -> str:
+    """
+    Derive the per-install fence-tag from semantic state.
+
+    `state.primary_harness` stays "claude" / "codex" (semantic). The fence
+    tag — used as the helper-script filename, the alias short name, and
+    the ~/.zshrc fence label — is `claude` / `codex` for the local engines
+    and `claude9` / `codex9` for 9router. This keeps step 6/7/8 and the
+    codex-limitation guard branching on `state.primary_harness` unchanged.
+    """
+    if engine == "9router":
+        return f"{harness}9"
+    return harness
+
+
 def _helper_script_basename(harness: str) -> str:
     """
     Map a fence tag to the helper-script filename.
@@ -2002,12 +2019,15 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
         effective_tag=state.wire_result.get("effective_tag", ""),
         raw_env=dict(state.wire_result.get("raw_env", {})),
     )
-    harness = state.primary_harness
-    script_path = _write_helper_script(harness, result)
+    # state.primary_harness stays "claude"/"codex"; the fence tag is a
+    # presentation concern derived from harness + engine. See
+    # _fence_tag_for for the rationale.
+    fence_tag = _fence_tag_for(state.primary_harness, state.primary_engine)
+    script_path = _write_helper_script(fence_tag, result)
     state.helper_script_path = str(script_path)
     ok(f"Wrote helper script: [bold]{script_path}[/bold]")
 
-    rc_path, names = _install_shell_aliases(script_path, harness, non_interactive)
+    rc_path, names = _install_shell_aliases(script_path, fence_tag, non_interactive)
     state.alias_names = names
     state.shell_rc_path = str(rc_path) if rc_path else ""
     state.mark("6.5")
@@ -2188,20 +2208,20 @@ Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
 
 ## Rollback
 
-Each harness (claude / codex) has its own fenced block, so you can remove
-just this one without touching any other harness you may have set up.
+Each install (claude / codex / claude9 / codex9) has its own fenced block,
+so you can remove just this one without touching any other install.
 
-To wipe only this harness:
+To wipe only this install:
 
-1. Delete the fenced block for `{harness}` from `{shell_rc}` (between the
-   `# >>> claude-codex-local:{harness} >>>` and
-   `# <<< claude-codex-local:{harness} <<<` markers).
+1. Delete the fenced block for `{fence_tag}` from `{shell_rc}` (between the
+   `# >>> claude-codex-local:{fence_tag} >>>` and
+   `# <<< claude-codex-local:{fence_tag} <<<` markers).
 2. `rm -f {helper_script}`
 3. `rm -f {guide_path}`
 
-To wipe the local ccl setup entirely (both harnesses, if installed):
+To wipe every ccl install (all fence-tagged blocks):
 
-1. Delete every `# >>> claude-codex-local:<harness> >>>` block from
+1. Delete every `# >>> claude-codex-local:<fence-tag> >>>` block from
    `{shell_rc}`.
 2. `rm -rf {state_dir}`
 3. `rm -f {guide_path}`
@@ -2210,10 +2230,10 @@ To wipe the local ccl setup entirely (both harnesses, if installed):
 
 def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 8 — Generate personalized guide.md")
-    alias_names = state.alias_names or (
-        ["cc", "claude-local"] if state.primary_harness == "claude" else ["cx", "codex-local"]
-    )
+    fence_tag = _fence_tag_for(state.primary_harness, state.primary_engine)
+    alias_names = state.alias_names or _alias_names_for(fence_tag)
     alias_short = alias_names[0]
+    # claude9 / codex9 only have the short alias; reuse it as the long form.
     alias_long = alias_names[1] if len(alias_names) > 1 else alias_names[0]
     codex_limitation = ""
     if state.primary_harness == "codex" and state.primary_engine == "ollama":
@@ -2241,6 +2261,7 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
         state_dir=pb.STATE_DIR,
         guide_path=GUIDE_PATH,
         codex_limitation=codex_limitation,
+        fence_tag=fence_tag,
     )
     GUIDE_PATH.write_text(content)
     ok(f"Wrote [bold]{GUIDE_PATH}[/bold]")
@@ -2301,11 +2322,14 @@ def run_wizard(
             fail(f"Step {step_id} ({title}) did not complete. Re-run with --resume to continue.")
             return 1
 
-    alias_short = (
-        state.alias_names[0]
-        if state.alias_names
-        else ("cc" if state.primary_harness == "claude" else "cx")
-    )
+    if state.alias_names:
+        alias_short = state.alias_names[0]
+    elif state.primary_harness:
+        alias_short = _alias_names_for(_fence_tag_for(state.primary_harness, state.primary_engine))[
+            0
+        ]
+    else:
+        alias_short = "cc"
     console.print()
     console.print(
         Panel.fit(
@@ -2413,7 +2437,7 @@ def run_doctor() -> int:
             "installed" if installed else "missing — re-run wizard to re-create/pull",
         )
 
-    # Helper script (cc / cx)
+    # Helper script (cc / cx / cc9 / cx9)
     if state.helper_script_path:
         script_path = Path(state.helper_script_path)
         add_row(
@@ -2422,6 +2446,48 @@ def run_doctor() -> int:
             script_path.exists(),
             "present" if script_path.exists() else "missing — re-run step 6.5",
         )
+
+    # 9router-specific checks: key-file mode, key non-empty, model name regex.
+    if state.primary_engine == "9router":
+        key_file = pb.ROUTER9_KEY_FILE
+        if key_file.exists():
+            try:
+                mode = key_file.stat().st_mode & 0o777
+            except OSError:
+                mode = -1
+            mode_ok = mode != -1 and (mode & 0o077) == 0
+            add_row(
+                "9router key file mode",
+                "owner-only (0600)",
+                mode_ok,
+                f"{mode:04o}" if mode != -1 else "stat failed",
+            )
+            content = ""
+            with contextlib.suppress(OSError):
+                content = key_file.read_text().strip()
+            add_row(
+                "9router key file content",
+                "non-empty",
+                bool(content),
+                "ok" if content else "empty — re-run step 4 to set the key",
+            )
+        else:
+            add_row(
+                "9router key file",
+                str(key_file),
+                False,
+                "missing — re-run step 4 to set the key",
+            )
+        if state.engine_model_tag:
+            valid_model = len(state.engine_model_tag) <= 256 and bool(
+                _ROUTER9_MODEL_RE.match(state.engine_model_tag)
+            )
+            add_row(
+                "9router model name",
+                "<provider>/<model-id>",
+                valid_model,
+                state.engine_model_tag if valid_model else "invalid — re-run step 4",
+            )
 
     # guide.md
     add_row(

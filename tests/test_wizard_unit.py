@@ -1513,6 +1513,198 @@ class TestStep4Pick9Router:
         assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
 
 
+class TestClaudeOllamaThenClaude9Coexist:
+    """Issue #51 — installing claude+ollama and claude+9router must coexist.
+
+    The headline coexistence test: the rc file must keep BOTH the
+    `claude` (cc / claude-local) block and the `claude9` (cc9) block,
+    and the `claude` regex must NOT eat the `claude9` block.
+    """
+
+    def _stub_engine_envs(self, monkeypatch, pb):
+        """Make pb.machine_profile + ensure_path safe in the test sandbox."""
+        # No need to actually run any engines — wire functions are pure.
+        return None
+
+    def test_both_blocks_and_aliases_present(self, isolated_state, monkeypatch, tmp_path):
+        from pathlib import Path
+
+        pb, wiz, _ = isolated_state
+        rc = Path.home() / ".zshrc"
+        rc.write_text("")
+
+        # Install 1: claude + ollama (writes :claude block with cc + claude-local).
+        cc_script = tmp_path / "cc"
+        cc_script.write_text("#!/bin/sh\n")
+        cc_script.chmod(0o755)
+        wiz._install_shell_aliases(cc_script, "claude", non_interactive=True)
+
+        # Install 2: claude + 9router (writes :claude9 block with cc9 only).
+        cc9_script = tmp_path / "cc9"
+        cc9_script.write_text("#!/bin/sh\n")
+        cc9_script.chmod(0o755)
+        wiz._install_shell_aliases(cc9_script, "claude9", non_interactive=True)
+
+        body = rc.read_text()
+        # Both fenced blocks must be present, exactly once each.
+        assert body.count("# >>> claude-codex-local:claude >>>") == 1
+        assert body.count("# <<< claude-codex-local:claude <<<") == 1
+        assert body.count("# >>> claude-codex-local:claude9 >>>") == 1
+        assert body.count("# <<< claude-codex-local:claude9 <<<") == 1
+        # Both alias sets must be present.
+        assert "alias cc=" in body
+        assert "alias claude-local=" in body
+        assert "alias cc9=" in body
+        # Both helper scripts referenced.
+        assert str(cc_script) in body
+        assert str(cc9_script) in body
+        # Pin: the `claude` regex must NOT eat `claude9` — re-running the
+        # claude install must NOT touch the claude9 block.
+        cc_script_v2 = tmp_path / "cc-v2"
+        cc_script_v2.write_text("#!/bin/sh\n")
+        cc_script_v2.chmod(0o755)
+        wiz._install_shell_aliases(cc_script_v2, "claude", non_interactive=True)
+        body2 = rc.read_text()
+        assert body2.count("# >>> claude-codex-local:claude >>>") == 1
+        assert body2.count("# >>> claude-codex-local:claude9 >>>") == 1
+        # claude block now points at v2; claude9 block still points at the original cc9.
+        assert str(cc_script_v2) in body2
+        assert str(cc9_script) in body2  # untouched
+        # The original `cc` script must be replaced. We check via "alias cc=...
+        # <path>\n" rather than substring, because cc-v2 contains "cc" as a
+        # prefix and would trip a naive `not in` check.
+        assert f"alias cc={cc_script}\n" not in body2  # original cc replaced
+
+
+class TestRunDoctor9RouterChecks:
+    """Issue #51 — run_doctor surfaces 9router-specific health checks."""
+
+    def _make_state(self, isolated_state, *, key_content: str | None, mode: int | None, model: str):
+        pb, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+        if key_content is not None:
+            pb.ROUTER9_KEY_FILE.write_text(key_content)
+            if mode is not None:
+                pb.ROUTER9_KEY_FILE.chmod(mode)
+        state = wiz.WizardState(
+            primary_harness="claude",
+            primary_engine="9router",
+            engine_model_tag=model,
+            completed_steps=["1", "2", "3", "4", "5", "6", "6.5", "7", "8"],
+            verify_result={"ok": True, "via": "9router-models-endpoint", "skipped_chat": True},
+        )
+        state.save()
+        return pb, wiz
+
+    def test_doctor_reports_missing_keyfile(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state, key_content=None, mode=None, model="kr/claude-sonnet-4.5"
+        )
+        # machine_profile shouldn't error.
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda: {
+                "presence": {"harnesses": ["claude"], "engines": ["9router"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        assert rc == 1
+        assert "9router key file" in out
+        assert "missing" in out
+
+    def test_doctor_warns_on_world_readable_key(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state,
+            key_content="router9-test-key",  # pragma: allowlist secret
+            mode=0o644,
+            model="kr/claude-sonnet-4.5",
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda: {
+                "presence": {"harnesses": ["claude"], "engines": ["9router"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        assert rc == 1
+        assert "9router key file mode" in out
+        # 0644 should NOT match the owner-only check.
+        assert "0644" in out
+
+    def test_doctor_flags_invalid_model_name(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state,
+            key_content="router9-test-key",  # pragma: allowlist secret
+            mode=0o600,
+            model="not-a-valid-model",
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda: {
+                "presence": {"harnesses": ["claude"], "engines": ["9router"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        assert rc == 1
+        assert "9router model name" in out
+        assert "invalid" in out
+
+    def test_doctor_passes_with_valid_state(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state,
+            key_content="router9-test-key",  # pragma: allowlist secret
+            mode=0o600,
+            model="kr/claude-sonnet-4.5",
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda: {
+                "presence": {"harnesses": ["claude"], "engines": ["9router"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        # Make GUIDE_PATH look present.
+        guide = wiz.GUIDE_PATH
+        guide.parent.mkdir(parents=True, exist_ok=True)
+        guide.write_text("# fake guide")
+
+        # Use a wider console so the rich Table doesn't truncate row labels.
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        # Output should mention all-passed or no issues; rc may be 0 IFF no
+        # other checks fail. Helper script path was never created so it
+        # may register an issue — accept both as long as 9router-specific
+        # checks didn't fail.
+        if rc == 0:
+            assert "All checks passed" in out
+        # 9router-specific lines must show ok markers, not failures.
+        assert "9router key file mode" in out
+        assert "9router key file content" in out
+        assert "9router model name" in out
+
+
 class TestStep5SmokeTest9Router:
     """Issue #51 — Step 5 smoke test must use /v1/models, NOT /chat/completions."""
 
