@@ -341,6 +341,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
         _show_install_hint("ollama")
         _show_install_hint("lmstudio")
         _show_install_hint("llamacpp")
+        _show_install_hint("9router")
 
     if non_interactive:
         fail("Cannot install missing components in --non-interactive mode.")
