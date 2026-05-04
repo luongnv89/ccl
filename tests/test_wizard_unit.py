@@ -1513,6 +1513,124 @@ class TestStep4Pick9Router:
         assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
 
 
+class TestStep5SmokeTest9Router:
+    """Issue #51 — Step 5 smoke test must use /v1/models, NOT /chat/completions."""
+
+    def test_step5_calls_smoke_test_router9_models(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        seen: dict[str, bool] = {"called": False}
+
+        def fake_models(*a, **kw):
+            seen["called"] = True
+            return {"ok": True, "models": ["kr/claude-sonnet-4.5"], "response": "1 models"}
+
+        monkeypatch.setattr(pb, "smoke_test_router9_models", fake_models)
+        # Hard-fail if any other smoke test is called for 9router.
+        for forbidden in (
+            "smoke_test_ollama_model",
+            "smoke_test_lmstudio_model",
+            "smoke_test_llamacpp_model",
+            "smoke_test_vllm_model",
+        ):
+            monkeypatch.setattr(
+                pb,
+                forbidden,
+                lambda *a, **kw: (_ for _ in ()).throw(
+                    AssertionError(f"{forbidden} must not be called for 9router")
+                ),
+            )
+
+        state = wiz.WizardState(
+            primary_engine="9router",
+            primary_harness="claude",
+            engine_model_tag="kr/claude-sonnet-4.5",
+        )
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert seen["called"] is True
+        assert state.smoke_test_result["ok"] is True
+
+
+class TestStep7Verify9Router:
+    """Issue #51 — Step 7 verify for 9router NEVER calls subprocess.run (no chat call)."""
+
+    def test_verify_uses_models_endpoint_and_does_not_run_subprocess(
+        self, isolated_state, monkeypatch
+    ):
+        import subprocess
+
+        pb, wiz, _ = isolated_state
+
+        # Pre-populate a wire result so step 7 thinks step 6 has run.
+        state = wiz.WizardState(
+            primary_engine="9router",
+            primary_harness="claude",
+            engine_model_tag="kr/claude-sonnet-4.5",
+            wire_result={
+                "argv": ["claude", "--model", "kr/claude-sonnet-4.5"],
+                "env": {"ANTHROPIC_BASE_URL": "http://localhost:20128/v1"},
+                "effective_tag": "kr/claude-sonnet-4.5",
+                "raw_env": {"ANTHROPIC_AUTH_TOKEN": '"$(cat /tmp/k)"'},
+            },
+        )
+
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_router9_models",
+            lambda *a, **kw: {"ok": True, "models": [], "response": "0 models"},
+        )
+
+        # subprocess.run must NOT be called for the 9router branch.
+        def fail_run(*a, **kw):
+            raise AssertionError("step_2_7_verify must NOT call subprocess.run for 9router")
+
+        monkeypatch.setattr(subprocess, "run", fail_run)
+        # Also patch the wizard module's subprocess reference.
+        monkeypatch.setattr(wiz.subprocess, "run", fail_run)
+
+        assert wiz.step_2_7_verify(state, non_interactive=True) is True
+        assert state.verify_result["skipped_chat"] is True
+        assert state.verify_result["via"] == "9router-models-endpoint"
+        assert state.verify_result["ok"] is True
+
+    def test_verify_fails_when_models_unreachable(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="9router",
+            primary_harness="claude",
+            engine_model_tag="kr/claude-sonnet-4.5",
+            wire_result={
+                "argv": ["claude"],
+                "env": {},
+                "effective_tag": "x",
+                "raw_env": {},
+            },
+        )
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_router9_models",
+            lambda *a, **kw: {"ok": False, "error": "refused"},
+        )
+        # subprocess.run must still NOT be called even on failure.
+        import subprocess
+
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not run subprocess on 9router failure path")
+            ),
+        )
+        monkeypatch.setattr(
+            wiz.subprocess,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not run subprocess on 9router failure path")
+            ),
+        )
+        assert wiz.step_2_7_verify(state, non_interactive=True) is False
+        assert state.verify_result["skipped_chat"] is True
+
+
 class TestEnsureTool9Router:
     """Issue #51 — _ensure_tool must NOT auto-install 9router; it lives on user's machine."""
 
