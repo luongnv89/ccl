@@ -1614,6 +1614,32 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
         return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
+    if engine == "9router":
+        # 9router exposes an OpenAI-compatible API and requires a paid
+        # cloud API key. We deliberately keep the key OUT of the helper
+        # script and out of the wizard state file: the script reads it
+        # at exec-time from a chmod-600 file in STATE_DIR. See
+        # WireResult.raw_env for the security boundary.
+        base_url = pb.ROUTER9_BASE_URL
+        key_file = pb.ROUTER9_KEY_FILE
+        key_expr = f'"$(cat {shlex.quote(str(key_file))})"'
+        raw_env = {
+            "ANTHROPIC_AUTH_TOKEN": key_expr,
+            "ANTHROPIC_API_KEY": key_expr,
+        }
+        env = {
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"9router {tag}",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                f"Cloud-routed via 9router at {base_url}"
+            ),
+            "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+        return WireResult(
+            argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
+        )
     fail(f"Unknown engine for Claude wire-up: {engine}")
     return None
 
@@ -1655,6 +1681,16 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
             "OPENAI_API_KEY": "sk-local",  # pragma: allowlist secret
         }
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
+    if engine == "9router":
+        # See _wire_claude(engine="9router") for the rationale: the API
+        # key is read at exec-time from a chmod-600 file, never embedded
+        # in the helper script body.
+        base_url = pb.ROUTER9_BASE_URL
+        key_file = pb.ROUTER9_KEY_FILE
+        key_expr = f'"$(cat {shlex.quote(str(key_file))})"'
+        raw_env = {"OPENAI_API_KEY": key_expr}
+        env = {"OPENAI_BASE_URL": base_url}
+        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
     fail(f"Unknown engine for Codex wire-up: {engine}")
     return None
 
