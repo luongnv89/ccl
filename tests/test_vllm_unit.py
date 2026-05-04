@@ -587,11 +587,11 @@ class TestAllAdaptersRegistry:
 
     def test_vllm_adapter_count(self):
         """Test that we have the expected number of adapters."""
-        assert len(pb.ALL_ADAPTERS) == 4
+        assert len(pb.ALL_ADAPTERS) == 5
 
     def test_adapter_order(self):
         """Test that adapters are in the expected order."""
-        expected_order = ["lmstudio", "ollama", "llamacpp", "vllm"]
+        expected_order = ["lmstudio", "ollama", "llamacpp", "vllm", "9router"]
         adapter_names = [a.name for a in pb.ALL_ADAPTERS]
         assert adapter_names == expected_order
 
