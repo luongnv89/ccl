@@ -153,7 +153,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 - macOS or Linux with zsh or bash
 - Python 3.10+
 - At least one harness: [Claude Code](https://claude.ai/code) or [Codex CLI](https://github.com/openai/codex)
-- At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or llama.cpp
+- At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), llama.cpp, or [9router](https://github.com/9router/9router) (cloud-routing proxy)
 - [`llmfit`](https://github.com/luongnv89/llmfit) on `PATH` (optional — for automatic model selection)
 
 ---
@@ -167,6 +167,46 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 | Claude Code | LM Studio | Qwen3 family | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
 | Any | llama.cpp | any | Inline-env code path exists, no live proof yet |
 | Any | vLLM | any | New in 0.8.0 — adapter shipped with tests |
+| Claude Code | 9router | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cc9` alias; existing `cc` is untouched |
+| Codex CLI | 9router | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cx9` alias; existing `cx` is untouched |
+
+---
+
+## 9router quick-start
+
+[9router](https://github.com/9router/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude) or `cx9` (Codex) alias and leaves your existing `cc` / `cx` aliases untouched.
+
+```bash
+# 1. Install + start 9router locally (see https://github.com/9router/9router)
+# 2. Copy your API key from the 9router dashboard, then run:
+ccl setup --engine 9router
+
+# Non-interactive (CI / scripted):
+CCL_9ROUTER_API_KEY=<paste-here> CCL_9ROUTER_MODEL=kr/claude-sonnet-4.5 \
+  ccl setup --engine 9router --harness claude --non-interactive
+```
+
+The wizard:
+
+1. Asks for the 9router API key and writes it to `~/.claude-codex-local/9router-api-key` with `chmod 0600`. The helper script reads this file at exec time via `$(cat …)` — the key is never embedded in the script body or wizard state file.
+2. Verifies reachability via `GET /v1/models` only. **It deliberately does not call `/chat/completions`** during smoke-test or verify, because 9router routes to paid cloud models. The verification record is `{"ok": true, "via": "9router-models-endpoint", "skipped_chat": true}`.
+3. Installs `cc9` (or `cx9`) into your shell rc as a new fenced block (`# >>> claude-codex-local:claude9 >>>`), leaving any existing `cc` / `cx` block alone.
+
+**Tip:** `cc9` and `cc` can coexist on the same machine — pick `cc9` when you want to burn cloud quota for a tough prompt, and `cc` (Ollama / LM Studio / llama.cpp) for everyday work.
+
+### Claude Code → 9router env vars
+
+| Env var | 9router |
+|---|---|
+| `ANTHROPIC_BASE_URL` | `http://localhost:20128/v1` |
+| `ANTHROPIC_AUTH_TOKEN` | `$(cat ~/.claude-codex-local/9router-api-key)` (read at exec) |
+| `ANTHROPIC_API_KEY` | `$(cat ~/.claude-codex-local/9router-api-key)` (read at exec) |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION` | `<tag>` (e.g. `kr/claude-sonnet-4.5`) |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION_NAME` | `9router <tag>` |
+| `CLAUDE_CODE_ATTRIBUTION_HEADER` | `"0"` |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `"1"` |
+
+For Codex: `OPENAI_BASE_URL=http://localhost:20128/v1`, `OPENAI_API_KEY=$(cat …)`.
 
 ---
 
@@ -177,7 +217,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 rm -rf .claude-codex-local
 ```
 
-That's it. Your `~/.claude` and `~/.codex` are unchanged.
+Each fence block (`claude` / `codex` / `claude9` / `codex9`) is independent — you can remove just one without touching the others. Your `~/.claude` and `~/.codex` are unchanged.
 
 ---
 

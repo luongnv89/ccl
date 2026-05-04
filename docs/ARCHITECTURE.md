@@ -37,7 +37,7 @@ This document describes the system design of `claude-codex-local`.
 - `profile` — dumps a JSON snapshot of installed harnesses, engines, `llmfit`, and free disk
 - `recommend` — picks the best-fit installed coding model for the hardware
 - `doctor` — pretty-prints the current wizard state and re-runs presence checks
-- `adapters` — lists the registered `RuntimeAdapter` implementations (ollama, lmstudio, llamacpp)
+- `adapters` — lists the registered `RuntimeAdapter` implementations (ollama, lmstudio, llamacpp, vllm, 9router)
 
 These are reachable for debugging via `python -m claude_codex_local.core <cmd>`. There is no user-facing binary for them — they return JSON for scripting and introspection.
 
@@ -65,8 +65,15 @@ State is persisted to `.claude-codex-local/wizard-state.json` so a failed run ca
 
 The user-facing surface after setup:
 
-- `.claude-codex-local/bin/cc` (or `cx`) — a short bash wrapper that invokes the configured launch command
-- `~/.zshrc` / `~/.bashrc` — one fenced block per harness (`# >>> claude-codex-local:claude >>>` … `# <<< claude-codex-local:claude <<<` for the Claude harness, `# >>> claude-codex-local:codex >>>` … `# <<< claude-codex-local:codex <<<` for Codex); each block is idempotently replaced on re-run of its own harness, and the two blocks coexist so `cc` and `cx` can both be installed at once. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
+- `.claude-codex-local/bin/cc` / `cx` / `cc9` / `cx9` — a short bash wrapper that invokes the configured launch command. The `cc9` / `cx9` helpers are installed when the user picks the 9router engine (issue #51); they coexist with the local-engine `cc` / `cx` so a single machine can run both backends.
+- `~/.zshrc` / `~/.bashrc` — one fenced block per **install** (`# >>> claude-codex-local:claude >>>` for Claude+local-engine, `# >>> claude-codex-local:claude9 >>>` for Claude+9router, etc.). Fence tags are derived at the alias-emission site as `f"{harness}9"` for 9router and `harness` otherwise, so `state.primary_harness` stays semantic ("claude" / "codex") while the fence-tag stays presentational. Each block is idempotently replaced on re-run of its own install, and all four blocks coexist. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
+
+### `WireResult.raw_env` — deferred-secret pattern
+
+`WireResult` carries two env dicts:
+
+- `env: dict[str, str]` — emitted into the helper script with `shlex.quote(value)`. Use for plain values like base URLs.
+- `raw_env: dict[str, str]` — emitted **verbatim** into the helper script (no `shlex.quote`). Use ONLY for shell expressions originating in this codebase, never user input. The 9router wiring uses `raw_env={"ANTHROPIC_AUTH_TOKEN": '"$(cat /path/to/key)"'}` so the API key stays in a chmod-600 file and is read at exec time, never embedded in the script body or in `wizard-state.json`.
 
 ## Engine Strategies
 
@@ -81,6 +88,15 @@ Uses `ollama launch claude --model <tag>`, an official Ollama subcommand that:
 ### LM Studio / llama.cpp (secondary)
 
 Uses an inline-env approach: the helper script exports `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and related vars, then execs the harness. This works because both Claude Code and Codex CLI support OpenAI-compatible endpoints.
+
+### 9router (cloud-routing proxy, optional)
+
+[9router](https://github.com/9router/9router) is a local server that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and forwards calls to paid cloud models (e.g. `kr/claude-sonnet-4.5`). The CCL adapter:
+
+- **Detects via `GET /v1/models`** with a 5-second timeout — never `/chat/completions`, since each chat call burns paid quota.
+- **Uses the deferred-secret pattern** (see `WireResult.raw_env` above): the API key is stored in `~/.claude-codex-local/9router-api-key` (chmod 0600) and the helper script reads it at exec time via `$(cat …)`.
+- **Skips Step 7 chat-verification.** The standard verify step runs `claude --model <tag> -p "Reply with exactly READY"`. For 9router this would issue a real paid `/chat/completions` call, so the wizard short-circuits with a `/v1/models` reachability check and records `state.verify_result = {"ok": ..., "via": "9router-models-endpoint", "skipped_chat": True}`.
+- **Does not download or score models.** Step 4 has a dedicated `_step_4_pick_model_9router` branch that prompts for an API key + model name (default `kr/claude-sonnet-4.5`) and skips llmfit / disk / download paths entirely.
 
 ## Isolation Rule
 
