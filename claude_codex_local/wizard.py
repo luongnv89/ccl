@@ -1705,13 +1705,57 @@ def _migrate_legacy_alias_block(existing: str) -> str:
     return existing[: match.start()] + migrated + existing[match.end() :]
 
 
+def _helper_script_basename(harness: str) -> str:
+    """
+    Map a fence tag to the helper-script filename.
+
+    Valid harness values are the four fence tags supported by the
+    install: "claude" / "codex" (existing harnesses) and "claude9" /
+    "codex9" (their 9router variants from issue #51). The script names
+    must stay distinct so the cc/cx (local) and cc9/cx9 (9router)
+    install paths can coexist on the same machine.
+    """
+    mapping = {
+        "claude": "cc",
+        "codex": "cx",
+        "claude9": "cc9",
+        "codex9": "cx9",
+    }
+    if harness not in mapping:
+        raise ValueError(f"Unknown harness fence tag: {harness!r}")
+    return mapping[harness]
+
+
+def _alias_names_for(harness: str) -> list[str]:
+    """
+    Map a fence tag to the alias names installed in the user's shell rc.
+
+    The 9router variants intentionally expose ONLY the short alias
+    (cc9 / cx9). The long forms (claude-local / codex-local) are reserved
+    for the original local-only paths so existing shell aliases keep
+    pointing where users expect.
+    """
+    mapping = {
+        "claude": ["cc", "claude-local"],
+        "codex": ["cx", "codex-local"],
+        "claude9": ["cc9"],
+        "codex9": ["cx9"],
+    }
+    if harness not in mapping:
+        raise ValueError(f"Unknown harness fence tag: {harness!r}")
+    return list(mapping[harness])
+
+
 def _write_helper_script(harness: str, result: WireResult) -> Path:
     """
     Write a small bash helper that exports any inline env and execs the
     wire-result argv. Returns the absolute path to the helper.
+
+    `harness` is a fence tag — one of "claude", "codex", "claude9",
+    "codex9" — and selects the helper-script filename.
     """
     pb.ensure_state_dirs()
-    name = "cc" if harness == "claude" else "cx"
+    name = _helper_script_basename(harness)
     path = pb.STATE_DIR / "bin" / name
 
     lines = [
@@ -1737,8 +1781,9 @@ def _write_helper_script(harness: str, result: WireResult) -> Path:
 
 
 def _alias_block(script_path: Path, harness: str) -> tuple[str, list[str]]:
+    """Build the fenced rc-block for `harness` (a 4-way fence tag)."""
     quoted_path = shlex.quote(str(script_path))
-    names = ["cc", "claude-local"] if harness == "claude" else ["cx", "codex-local"]
+    names = _alias_names_for(harness)
     body_lines = [
         f"# >>> claude-codex-local:{harness} >>>",
         "# Managed by claude-codex-local wizard. Re-run the wizard to update,",

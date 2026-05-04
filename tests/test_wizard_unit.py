@@ -342,6 +342,60 @@ class TestHelperScriptWriter:
         assert "export ANTHROPIC_BASE_URL='http://example.com/with spaces'" in body
         assert 'export FOO="$(cat /tmp/k)"' in body
 
+    def test_claude9_dispatches_to_cc9_filename(self, isolated_state):
+        """The 9router fence tag claude9 maps to a `cc9` helper script."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude", "--model", "kr/claude-sonnet-4.5"],
+            env={"ANTHROPIC_BASE_URL": "http://localhost:20128/v1"},
+            effective_tag="kr/claude-sonnet-4.5",
+        )
+        path = wiz._write_helper_script("claude9", result)
+        assert path.name == "cc9"
+        assert path.exists()
+
+    def test_codex9_dispatches_to_cx9_filename(self, isolated_state):
+        """The 9router fence tag codex9 maps to a `cx9` helper script."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["codex", "-m", "kr/claude-sonnet-4.5"],
+            env={"OPENAI_BASE_URL": "http://localhost:20128/v1"},
+            effective_tag="kr/claude-sonnet-4.5",
+        )
+        path = wiz._write_helper_script("codex9", result)
+        assert path.name == "cx9"
+
+    def test_unknown_fence_tag_raises_value_error(self, isolated_state):
+        """Defensive: unknown fence tags must fail loudly, not silently fall back."""
+        import pytest
+
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(argv=["claude"], env={}, effective_tag="x")
+        with pytest.raises(ValueError):
+            wiz._write_helper_script("bogus", result)
+
+    def test_alias_block_claude9_short_form_only(self, isolated_state, tmp_path):
+        """claude9 emits ONLY the short `cc9` alias, not a long form."""
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cc9"
+        script.write_text("#!/bin/sh\n")
+        block, names = wiz._alias_block(script, "claude9")
+        assert names == ["cc9"]
+        assert "alias cc9=" in block
+        assert "alias claude-local=" not in block
+        assert "# >>> claude-codex-local:claude9 >>>" in block
+
+    def test_alias_block_codex9_short_form_only(self, isolated_state, tmp_path):
+        """codex9 emits ONLY the short `cx9` alias, not a long form."""
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cx9"
+        script.write_text("#!/bin/sh\n")
+        block, names = wiz._alias_block(script, "codex9")
+        assert names == ["cx9"]
+        assert "alias cx9=" in block
+        assert "alias codex-local=" not in block
+        assert "# >>> claude-codex-local:codex9 >>>" in block
+
 
 # ---------------------------------------------------------------------------
 # Shell alias installer — fenced block, idempotent overwrite.
