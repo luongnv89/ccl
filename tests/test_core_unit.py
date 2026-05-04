@@ -627,9 +627,9 @@ class TestAdapters:
         assert result["ok"] is True
         assert "2" in result["detail"]
 
-    def test_all_adapters_registry_contains_all_four(self):
+    def test_all_adapters_registry_contains_all_five(self):
         names = {a.name for a in pb.ALL_ADAPTERS}
-        assert names == {"ollama", "lmstudio", "llamacpp", "vllm"}
+        assert names == {"ollama", "lmstudio", "llamacpp", "vllm", "9router"}
 
 
 # ---------------------------------------------------------------------------
@@ -974,3 +974,186 @@ class TestLlamaCppAdapter:
         adapter = pb.LlamaCppAdapter()
         result = adapter.run_test("qwen.gguf")
         assert result["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Router9Adapter — 9router runtime adapter (issue #51).
+# ---------------------------------------------------------------------------
+
+
+class _FakeModelsResp:
+    """Minimal fake OpenAI-compatible /v1/models response for urllib mocking."""
+
+    def __init__(self, model_ids: list[str], status: int = 200):
+        self._body = json.dumps({"data": [{"id": mid} for mid in model_ids]}).encode()
+        self.status = status
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+
+class TestRouter9Adapter:
+    def test_name_and_recommend_params(self):
+        adapter = pb.Router9Adapter()
+        assert adapter.name == "9router"
+        assert adapter.recommend_params("balanced") == {"provider": "9router", "extra_flags": []}
+        assert adapter.recommend_params("fast") == {"provider": "9router", "extra_flags": []}
+
+    def test_detect_present_when_models_endpoint_responds(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request, "urlopen", lambda *a, **kw: _FakeModelsResp(["kr/claude-sonnet-4.5"])
+        )
+        adapter = pb.Router9Adapter()
+        result = adapter.detect()
+        assert result["present"] is True
+        assert result["base_url"] == pb.ROUTER9_BASE_URL
+
+    def test_detect_returns_not_present_on_url_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        adapter = pb.Router9Adapter()
+        result = adapter.detect()
+        assert result["present"] is False
+
+    def test_healthcheck_ok_when_models_listed(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["kr/claude-sonnet-4.5", "kr/gpt-4o"]),
+        )
+        adapter = pb.Router9Adapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is True
+        assert "2" in result["detail"]
+
+    def test_healthcheck_fails_when_unreachable(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        adapter = pb.Router9Adapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is False
+
+    def test_list_models_returns_cloud_routed_entries(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["kr/claude-sonnet-4.5"]),
+        )
+        adapter = pb.Router9Adapter()
+        models = adapter.list_models()
+        assert len(models) == 1
+        assert models[0]["name"] == "kr/claude-sonnet-4.5"
+        assert models[0]["local"] is False
+        assert models[0]["format"] == "cloud-routed"
+
+    def test_list_models_empty_on_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        adapter = pb.Router9Adapter()
+        assert adapter.list_models() == []
+
+    def test_run_test_delegates_to_smoke_test_models(self, monkeypatch):
+        sentinel = {"ok": True, "models": ["kr/claude-sonnet-4.5"], "response": "1 models"}
+        monkeypatch.setattr(pb, "smoke_test_router9_models", lambda *a, **kw: sentinel)
+        adapter = pb.Router9Adapter()
+        # run_test deliberately ignores the model arg; it only probes /v1/models.
+        assert adapter.run_test("kr/anything") == sentinel
+
+
+class TestSmokeTestRouter9Models:
+    def test_returns_ok_with_model_ids(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["kr/claude-sonnet-4.5", "or/gpt-5"]),
+        )
+        result = pb.smoke_test_router9_models()
+        assert result["ok"] is True
+        assert "kr/claude-sonnet-4.5" in result["models"]
+        assert "or/gpt-5" in result["models"]
+
+    def test_returns_ok_false_on_connection_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        result = pb.smoke_test_router9_models()
+        assert result["ok"] is False
+        assert "error" in result
+
+    def test_uses_custom_base_url(self, monkeypatch):
+        import urllib.request
+
+        seen: dict[str, str] = {}
+
+        def fake_urlopen(req, *a, **kw):
+            seen["url"] = req.full_url
+            return _FakeModelsResp([])
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        pb.smoke_test_router9_models("http://other-host:9999/v1")
+        assert seen["url"] == "http://other-host:9999/v1/models"
+
+    def test_source_does_not_call_chat_completions(self):
+        """Mechanical pin: smoke_test_router9_models source must NOT reference chat/completions.
+
+        Routes to paid cloud models — we can never call a chat endpoint
+        as part of detection or smoke testing, even by mistake. We strip
+        the docstring (which mentions /chat/completions for the explicit
+        warning) and inspect only the executable code lines.
+        """
+        from pathlib import Path
+
+        source = Path(pb.__file__).read_text()
+        marker = "def smoke_test_router9_models("
+        start = source.index(marker)
+        # Slice until the next top-level def; \n at column 0.
+        rest = source[start + len(marker) :]
+        end_idx = rest.find("\ndef ")
+        body = rest[:end_idx] if end_idx != -1 else rest
+        # Strip the triple-quoted docstring before the assertion so the
+        # warning text in the docstring doesn't trip the pin.
+        if '"""' in body:
+            first = body.index('"""')
+            second = body.index('"""', first + 3)
+            body = body[:first] + body[second + 3 :]
+        assert "chat/completions" not in body, (
+            "smoke_test_router9_models must never call /chat/completions — "
+            "that would burn paid quota."
+        )
