@@ -78,7 +78,7 @@ class WizardState:
     # user's primary + secondary selections
     primary_harness: str = ""  # "claude" | "codex"
     secondary_harnesses: list[str] = field(default_factory=list)
-    primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp"
+    primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp" | "9router"
     secondary_engines: list[str] = field(default_factory=list)
     # model pick
     model_name: str = ""  # raw user input or find-model selection
