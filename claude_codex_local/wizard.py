@@ -59,6 +59,13 @@ class WireResult:
     argv: list[str]
     env: dict[str, str]
     effective_tag: str
+    raw_env: dict[str, str] = field(default_factory=dict)
+    """
+    Env-var entries whose VALUES are shell expressions to be expanded at
+    exec-time (e.g. `"$(cat /path/to/key)"`). Use ONLY for shell expressions
+    originating in this codebase, NEVER user input. Emitted unquoted by
+    `_write_helper_script` so the shell can evaluate them at exec time.
+    """
 
 
 @dataclass
@@ -1521,6 +1528,7 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
         "argv": result.argv,
         "env": result.env,
         "effective_tag": result.effective_tag,
+        "raw_env": result.raw_env,
     }
     state.engine_model_tag = result.effective_tag
     alias_short = "cc" if harness == "claude" else "cx"
@@ -1714,6 +1722,12 @@ def _write_helper_script(harness: str, result: WireResult) -> Path:
     if result.env:
         for key, value in result.env.items():
             lines.append(f"export {key}={shlex.quote(value)}")
+    if result.raw_env:
+        for key, value in result.raw_env.items():
+            # raw_env values are shell expressions evaluated at exec-time;
+            # do NOT shlex.quote them, or they become literal strings.
+            # See WireResult.raw_env docstring for the security boundary.
+            lines.append(f"export {key}={value}")
     quoted_argv = " ".join(shlex.quote(part) for part in result.argv)
     lines.append(f'exec {quoted_argv} "$@"')
     body = "\n".join(lines) + "\n"
@@ -1799,6 +1813,7 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
         argv=list(state.wire_result.get("argv", [])),
         env=dict(state.wire_result.get("env", {})),
         effective_tag=state.wire_result.get("effective_tag", ""),
+        raw_env=dict(state.wire_result.get("raw_env", {})),
     )
     harness = state.primary_harness
     script_path = _write_helper_script(harness, result)

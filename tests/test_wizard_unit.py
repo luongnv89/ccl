@@ -302,6 +302,46 @@ class TestHelperScriptWriter:
         assert "exec claude --model" in body and '"$@"' in body
         assert os.access(path, os.X_OK)
 
+    def test_raw_env_is_emitted_unquoted(self, isolated_state):
+        """raw_env values must be emitted verbatim so the shell expands them."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude", "--model", "kr/claude-sonnet-4.5"],
+            env={"ANTHROPIC_BASE_URL": "http://localhost:20128/v1"},
+            effective_tag="kr/claude-sonnet-4.5",
+            raw_env={
+                "ANTHROPIC_AUTH_TOKEN": '"$(cat /tmp/key)"',
+                "ANTHROPIC_API_KEY": '"$(cat /tmp/key)"',
+            },
+        )
+        path = wiz._write_helper_script("claude", result)
+        body = path.read_text()
+        # The literal $(cat ...) must be in the script, NOT shlex-quoted as
+        # a single-quoted string literal (which would make it a literal value).
+        assert 'export ANTHROPIC_AUTH_TOKEN="$(cat /tmp/key)"' in body
+        assert 'export ANTHROPIC_API_KEY="$(cat /tmp/key)"' in body
+        # Make sure the literal $(cat is not wrapped in single quotes (which
+        # would defeat shell expansion).
+        assert "'$(cat" not in body
+        # Quoted env still emitted with shlex.quote.
+        assert "export ANTHROPIC_BASE_URL=" in body
+
+    def test_env_remains_quoted_when_raw_env_also_present(self, isolated_state):
+        """Adding raw_env must NOT turn off shlex-quoting on the env field."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude"],
+            env={"ANTHROPIC_BASE_URL": "http://example.com/with spaces"},
+            effective_tag="x",
+            raw_env={"FOO": '"$(cat /tmp/k)"'},
+        )
+        path = wiz._write_helper_script("claude", result)
+        body = path.read_text()
+        # Spaces in the value mean ruff will surround the value in single
+        # quotes. The literal $(cat is still un-quoted.
+        assert "export ANTHROPIC_BASE_URL='http://example.com/with spaces'" in body
+        assert 'export FOO="$(cat /tmp/k)"' in body
+
 
 # ---------------------------------------------------------------------------
 # Shell alias installer — fenced block, idempotent overwrite.
