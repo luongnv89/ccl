@@ -1522,6 +1522,10 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
             result = {"ok": False, "error": "llama.cpp server not running"}
         else:
             result = pb.smoke_test_llamacpp_model(tag)
+    elif engine == "9router":
+        # CRITICAL: never call /chat/completions for 9router — that's paid
+        # cloud quota. We verify reachability by re-checking /v1/models.
+        result = pb.smoke_test_router9_models()
     else:
         warn(f"Smoke test for engine '{engine}' not implemented — skipping.")
         result = {"ok": True, "response": "(skipped)"}
@@ -2023,6 +2027,29 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
     if not state.wire_result:
         fail("No wire result on state — run step 6 first.")
         return False
+
+    # CRITICAL 9router branch — never call /chat/completions for 9router,
+    # that would burn paid cloud quota. We verify reachability via
+    # /v1/models instead and skip the chat test entirely. The launch
+    # command would otherwise issue a paid `claude --model … -p READY`
+    # call against kr/claude-sonnet-4.5 (or whichever paid model the user
+    # picked).
+    if engine == "9router":
+        result = pb.smoke_test_router9_models()
+        state.verify_result = {
+            "ok": bool(result.get("ok")),
+            "via": "9router-models-endpoint",
+            "skipped_chat": True,
+            "detail": result.get("response") or result.get("error", ""),
+        }
+        state.save()
+        if not result.get("ok"):
+            fail(f"9router not reachable: {result.get('error')}")
+            return False
+        ok("Verify (9router): /v1/models reachable, skipping chat call to avoid quota burn.")
+        state.mark("7")
+        return True
+
     wire_env: dict[str, str] = dict(state.wire_result.get("env", {}))
 
     if harness == "claude":
