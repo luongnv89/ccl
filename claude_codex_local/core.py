@@ -19,6 +19,11 @@ STATE_DIR = Path(os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", ORIG_HOME / ".cl
 LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
 LLAMACPP_SERVER_PORT = int(os.environ.get("LLAMACPP_SERVER_PORT", "8001"))
 
+# 9router exposes an OpenAI-compatible API; the dashboard issues an API key
+# the user pastes into ~/.claude-codex-local/9router-api-key (chmod 600).
+ROUTER9_BASE_URL = os.environ.get("CCL_9ROUTER_BASE_URL", "http://localhost:20128/v1")
+ROUTER9_KEY_FILE = STATE_DIR / "9router-api-key"
+
 # Mapping from HuggingFace model name patterns → Ollama registry tags.
 # Ordered from newest/best to older fallbacks; first match wins.
 HF_TO_OLLAMA: list[tuple[re.Pattern[str], str]] = [
@@ -359,12 +364,74 @@ class VLLMAdapter:
         return {"provider": "vllm", "extra_flags": []}
 
 
+@dataclass
+class Router9Adapter:
+    """RuntimeAdapter implementation for 9router.
+
+    9router is a local proxy that exposes an OpenAI-compatible API on
+    http://localhost:20128/v1 and forwards calls to cloud models like
+    `kr/claude-sonnet-4.5`. Because every chat call costs paid quota, this
+    adapter NEVER calls /chat/completions for detection or smoke tests; we
+    use /v1/models reachability instead.
+    """
+
+    name: str = "9router"
+
+    def detect(self) -> dict[str, Any]:
+        import urllib.error
+        import urllib.request
+
+        url = f"{ROUTER9_BASE_URL.rstrip('/')}/models"
+        req = urllib.request.Request(
+            url, headers={"Content-Type": "application/json"}, method="GET"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if 200 <= resp.status < 300:
+                    return {"present": True, "version": "", "base_url": ROUTER9_BASE_URL}
+        except urllib.error.URLError:
+            pass
+        except Exception:
+            pass
+        return {"present": False, "version": ""}
+
+    def healthcheck(self) -> dict[str, Any]:
+        result = smoke_test_router9_models()
+        if result.get("ok"):
+            count = len(result.get("models", []))
+            return {
+                "ok": True,
+                "detail": f"server up at {ROUTER9_BASE_URL}, {count} model(s) available",
+            }
+        return {"ok": False, "detail": result.get("error", "unreachable")}
+
+    def list_models(self) -> list[dict[str, Any]]:
+        result = smoke_test_router9_models()
+        if not result.get("ok"):
+            return []
+        return [
+            {"name": m, "format": "cloud-routed", "local": False} for m in result.get("models", [])
+        ]
+
+    def run_test(self, model: str) -> dict[str, Any]:
+        # CRITICAL: this routes to paid cloud models. We deliberately do
+        # NOT call /chat/completions; we only verify the endpoint is
+        # reachable. See smoke_test_router9_models for the rationale.
+        return smoke_test_router9_models()
+
+    def recommend_params(self, mode: str) -> dict[str, Any]:
+        return {"provider": "9router", "extra_flags": []}
+
+
 # Registry of adapters in preference order (LM Studio MLX first on Apple Silicon).
-ALL_ADAPTERS: list[OllamaAdapter | LMStudioAdapter | LlamaCppAdapter | VLLMAdapter] = [
+ALL_ADAPTERS: list[
+    OllamaAdapter | LMStudioAdapter | LlamaCppAdapter | VLLMAdapter | Router9Adapter
+] = [
     LMStudioAdapter(),
     OllamaAdapter(),
     LlamaCppAdapter(),
     VLLMAdapter(),
+    Router9Adapter(),
 ]
 
 
@@ -777,6 +844,38 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
         }
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# 9router helpers
+# ---------------------------------------------------------------------------
+
+
+def smoke_test_router9_models(base_url: str | None = None) -> dict[str, Any]:
+    """
+    Reachability + presence check for the 9router endpoint.
+
+    Issues GET {base_url}/models (where {base_url} ends in /v1).
+    NEVER calls /chat/completions — that would burn paid quota since 9router
+    routes to cloud models like kr/claude-sonnet-4.5.
+
+    Returns: {"ok": bool, "models": list[str], "response"?: str, "error"?: str}
+    """
+    import urllib.error
+    import urllib.request
+
+    base = (base_url or ROUTER9_BASE_URL).rstrip("/")
+    url = f"{base}/models"
+    req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read())
+        models = [m.get("id", "") for m in body.get("data", [])]
+        return {"ok": True, "models": models, "response": f"{len(models)} models"}
+    except urllib.error.URLError as exc:
+        return {"ok": False, "error": f"9router unreachable at {url}: {exc}"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -1491,6 +1590,17 @@ def machine_profile() -> dict[str, Any]:
         engines_present.append("lmstudio")
     if llamacpp.get("present"):
         engines_present.append("llamacpp")
+    router9_info = Router9Adapter().detect()
+    router9_health = (
+        Router9Adapter().healthcheck()
+        if router9_info.get("present")
+        else {
+            "ok": False,
+            "detail": "9router endpoint not reachable",
+        }
+    )
+    if router9_info.get("present"):
+        engines_present.append("9router")
 
     profile: dict[str, Any] = {
         "host": {
@@ -1510,6 +1620,11 @@ def machine_profile() -> dict[str, Any]:
             "claude": claude_info,
             "codex": codex_info,
             "llmfit": llmfit_info,
+            "9router": {
+                "present": bool(router9_info.get("present")),
+                "version": router9_info.get("version", ""),
+                "base_url": ROUTER9_BASE_URL,
+            },
         },
         "presence": {
             "harnesses": harnesses_present,
@@ -1520,6 +1635,11 @@ def machine_profile() -> dict[str, Any]:
         "ollama": {"models": parse_ollama_list()},
         "lmstudio": lms,
         "llamacpp": llamacpp,
+        "9router": {
+            "present": bool(router9_info.get("present")),
+            "base_url": ROUTER9_BASE_URL,
+            "healthcheck": router9_health,
+        },
         "disk": disk_usage_for(STATE_DIR),
         "state_dir": str(STATE_DIR),
     }
