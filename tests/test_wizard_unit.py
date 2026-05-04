@@ -233,6 +233,43 @@ class TestWireClaude:
         _, wiz, _ = isolated_state
         assert wiz._wire_claude("bogus", "tag") is None
 
+    def test_9router_returns_raw_env_with_keyfile_expr(self, isolated_state):
+        """9router routes to paid cloud models; key MUST stay in a keyfile."""
+        pb, wiz, _ = isolated_state
+        result = wiz._wire_claude("9router", "kr/claude-sonnet-4.5")
+        assert result.argv == ["claude", "--model", "kr/claude-sonnet-4.5"]
+        # Plain env: base URL, model option, attribution header.
+        assert result.env["ANTHROPIC_BASE_URL"] == pb.ROUTER9_BASE_URL
+        assert result.env["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "kr/claude-sonnet-4.5"
+        assert result.env["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
+        # raw_env: API key as $(cat ...) expression — NOT embedded literally.
+        assert "ANTHROPIC_AUTH_TOKEN" in result.raw_env
+        assert "ANTHROPIC_API_KEY" in result.raw_env
+        assert "$(cat" in result.raw_env["ANTHROPIC_AUTH_TOKEN"]
+        assert str(pb.ROUTER9_KEY_FILE) in result.raw_env["ANTHROPIC_AUTH_TOKEN"]
+
+    def test_9router_helper_script_does_not_embed_key_value(self, isolated_state):
+        """Pin: the helper script must contain $(cat ...) and NOT a real-looking key.
+
+        The fake test key 'router9-test-key' (allowlisted for detect-secrets)
+        must NEVER appear in the script body, because the wiring path does
+        not read the keyfile — it only generates a $(cat ...) expression.
+        """
+        pb, wiz, _ = isolated_state
+        # Create a key file with a sentinel value to verify the script
+        # body does not capture it at install time.
+        pb.ensure_state_dirs()
+        pb.ROUTER9_KEY_FILE.write_text("router9-test-key\n")  # pragma: allowlist secret
+        pb.ROUTER9_KEY_FILE.chmod(0o600)
+        result = wiz._wire_claude("9router", "kr/claude-sonnet-4.5")
+        path = wiz._write_helper_script("claude9", result)
+        body = path.read_text()
+        # Sentinel key value MUST NOT be embedded — the script reads it at exec.
+        assert "router9-test-key" not in body  # pragma: allowlist secret
+        # And the script must reference the keyfile via $(cat ...).
+        assert "$(cat" in body
+        assert str(pb.ROUTER9_KEY_FILE) in body
+
 
 # ---------------------------------------------------------------------------
 # _wire_codex — returns WireResult with engine-specific argv/env.
@@ -263,6 +300,18 @@ class TestWireCodex:
     def test_unknown_engine(self, isolated_state):
         _, wiz, _ = isolated_state
         assert wiz._wire_codex("bogus", "x") is None
+
+    def test_9router_returns_raw_env_with_keyfile_expr(self, isolated_state):
+        """9router for codex: only OPENAI_API_KEY needs deferred-cat."""
+        pb, wiz, _ = isolated_state
+        result = wiz._wire_codex("9router", "kr/claude-sonnet-4.5")
+        assert result.argv == ["codex", "-m", "kr/claude-sonnet-4.5"]
+        assert result.env["OPENAI_BASE_URL"] == pb.ROUTER9_BASE_URL
+        assert "OPENAI_API_KEY" in result.raw_env
+        assert "$(cat" in result.raw_env["OPENAI_API_KEY"]
+        assert str(pb.ROUTER9_KEY_FILE) in result.raw_env["OPENAI_API_KEY"]
+        # Plain env must NOT carry a literal API key; only the URL.
+        assert "OPENAI_API_KEY" not in result.env
 
 
 # ---------------------------------------------------------------------------
