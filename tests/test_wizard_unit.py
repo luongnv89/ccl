@@ -1449,6 +1449,70 @@ class TestEnginesList9Router:
             parser.parse_args(["setup", "--engine", "totally-bogus"])
 
 
+class TestStep4Pick9Router:
+    """Issue #51 — Step 4 has a dedicated 9router branch that skips llmfit/download."""
+
+    def test_non_interactive_uses_env_key_and_default_model(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.delenv("CCL_9ROUTER_MODEL", raising=False)
+
+        # Hard-fail if the wizard tries any of the local-model paths.
+        for forbidden in (
+            "_find_model_auto",
+            "installed_models_for_engine",
+            "_estimate_model_size",
+            "_download_model",
+        ):
+            if hasattr(wiz, forbidden):
+                monkeypatch.setattr(
+                    wiz,
+                    forbidden,
+                    lambda *a, **kw: (_ for _ in ()).throw(
+                        AssertionError(f"{forbidden} must not run for 9router")
+                    ),
+                )
+            if hasattr(pb, forbidden):
+                monkeypatch.setattr(
+                    pb,
+                    forbidden,
+                    lambda *a, **kw: (_ for _ in ()).throw(
+                        AssertionError(f"{forbidden} must not run for 9router")
+                    ),
+                )
+
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "kr/claude-sonnet-4.5"
+        assert state.model_source == "9router-direct"
+        # Key file: chmod 0600.
+        assert pb.ROUTER9_KEY_FILE.exists()
+        mode = pb.ROUTER9_KEY_FILE.stat().st_mode & 0o777
+        assert mode == 0o600
+        assert "router9-test-key" in pb.ROUTER9_KEY_FILE.read_text()  # pragma: allowlist secret
+
+    def test_non_interactive_respects_env_model_override(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.setenv("CCL_9ROUTER_MODEL", "or/gpt-5-pro")
+        state = wiz.WizardState(primary_engine="9router", primary_harness="codex")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "or/gpt-5-pro"
+
+    def test_non_interactive_fails_without_key(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.delenv("CCL_9ROUTER_API_KEY", raising=False)
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+    def test_invalid_model_name_rejected(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.setenv("CCL_9ROUTER_MODEL", "no-slash-model")
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+
 class TestEnsureTool9Router:
     """Issue #51 — _ensure_tool must NOT auto-install 9router; it lives on user's machine."""
 

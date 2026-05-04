@@ -653,9 +653,94 @@ def _default_engine(engines: list[str], profile: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+_ROUTER9_DEFAULT_MODEL = "kr/claude-sonnet-4.5"
+# Lenient model name regex: allows provider-prefixed names like
+# "kr/claude-sonnet-4.5", "or/gpt-5", "kr/gpt-4o-mini" etc. The leading
+# segment must match a 9router-style provider id; the suffix is free
+# enough to admit dotted version numbers.
+_ROUTER9_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9._-]+$")
+
+
+def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False) -> bool:
+    """Step 4 specialisation for engine=9router.
+
+    Skips llmfit/disk/download entirely — 9router routes to cloud models
+    that aren't downloaded locally. Asks the user for an API key (or reads
+    CCL_9ROUTER_API_KEY from env) and writes it to ROUTER9_KEY_FILE with
+    chmod 0o600. Then asks for a model name with default kr/claude-sonnet-4.5.
+    """
+    pb.ensure_state_dirs()
+
+    # --- API key ---
+    env_key = os.environ.get("CCL_9ROUTER_API_KEY", "").strip()
+    if non_interactive:
+        api_key = env_key
+        if not api_key and pb.ROUTER9_KEY_FILE.exists():
+            # In non-interactive mode, accept a previously written key file.
+            api_key = pb.ROUTER9_KEY_FILE.read_text().strip()
+        if not api_key:
+            fail(
+                "9router API key required. Set CCL_9ROUTER_API_KEY or write "
+                f"the key to {pb.ROUTER9_KEY_FILE} (chmod 600) before running "
+                "non-interactively."
+            )
+            return False
+    else:
+        if env_key:
+            api_key = env_key
+            ok("Using 9router API key from CCL_9ROUTER_API_KEY env var.")
+        else:
+            api_key_input = questionary.password(
+                "Paste your 9router API key (kept locally, chmod-600):",
+            ).ask()
+            if not api_key_input:
+                fail("No API key provided. Cannot continue.")
+                return False
+            api_key = api_key_input.strip()
+
+    pb.ROUTER9_KEY_FILE.write_text(api_key + "\n")
+    pb.ROUTER9_KEY_FILE.chmod(0o600)
+    ok(f"Wrote 9router API key to [bold]{pb.ROUTER9_KEY_FILE}[/bold] (chmod 0600).")
+
+    # --- Model name ---
+    env_model = os.environ.get("CCL_9ROUTER_MODEL", "").strip()
+    if non_interactive:
+        model_name = env_model or _ROUTER9_DEFAULT_MODEL
+    else:
+        prompt_default = env_model or _ROUTER9_DEFAULT_MODEL
+        model_input = questionary.text(
+            "9router model name:",
+            default=prompt_default,
+        ).ask()
+        if not model_input:
+            fail("No model name provided.")
+            return False
+        model_name = model_input.strip()
+
+    if len(model_name) > 256 or not _ROUTER9_MODEL_RE.match(model_name):
+        fail(
+            f"Invalid 9router model name: {model_name!r}. Expected "
+            "<provider>/<model-id> (e.g. kr/claude-sonnet-4.5)."
+        )
+        return False
+
+    state.engine_model_tag = model_name
+    state.model_name = model_name
+    state.model_source = "9router-direct"
+    state.model_candidate = {}
+    ok(f"Picked 9router model: [bold]{model_name}[/bold]")
+    state.mark("4")
+    return True
+
+
 def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 4 — Pick a model")
     engine = state.primary_engine
+
+    # 9router is a cloud-routing engine — no local models, no llmfit, no
+    # disk-based size checks. Branch to a dedicated picker.
+    if engine == "9router":
+        return _step_4_pick_model_9router(state, non_interactive)
 
     # If llamacpp is primary and a server is already running with a model loaded,
     # offer to use that model directly — the user clearly already has it set up.
