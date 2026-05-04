@@ -297,6 +297,11 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
         "cmd": "brew install llama.cpp   # or build from https://github.com/ggml-org/llama.cpp",
         "url": "https://github.com/ggml-org/llama.cpp",
     },
+    "9router": {
+        "name": "9router",
+        "cmd": "# Install 9router locally and start it. It exposes an OpenAI-compatible API on http://localhost:20128/v1",
+        "url": "https://github.com/9router/9router",
+    },
     "huggingface-cli": {
         "name": "Hugging Face CLI",
         "cmd": "pip install 'huggingface_hub[cli]'",
@@ -318,7 +323,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
     if not presence.get("harnesses"):
         missing.append("HARNESS (claude or codex)")
     if not presence.get("engines"):
-        missing.append("ENGINE (ollama, lmstudio, or llamacpp)")
+        missing.append("ENGINE (ollama, lmstudio, llamacpp, or 9router)")
 
     if not missing:
         info("Nothing missing.")
@@ -405,10 +410,22 @@ def _ensure_tool(key: str) -> bool:
     Offer to install a tool by key (matching INSTALL_HINTS).
     For tools with a runnable install command (ollama, llamacpp, claude, codex,
     huggingface-cli) the command is executed directly.
-    For tools requiring manual steps (lmstudio) the hint is shown and the user
-    is asked to confirm when done, then the profile is re-probed.
+    For tools requiring manual steps (lmstudio, 9router) the hint is shown
+    and the user is asked to confirm when done, then the profile is re-probed.
     Returns True when the tool is detected as present after the attempt.
     """
+    # 9router is a stand-alone server we cannot auto-install; we detect
+    # it over HTTP and ask the user to start it manually.
+    if key == "9router":
+        if pb.Router9Adapter().detect().get("present"):
+            return True
+        _show_install_hint(key)
+        warn(
+            f"9router not reachable at {pb.ROUTER9_BASE_URL}. "
+            "Start 9router locally then re-run the wizard."
+        )
+        return False
+
     detect_cmd = {
         "claude": "claude",
         "codex": "codex",
@@ -504,7 +521,7 @@ def _ensure_llmfit() -> bool:
 
 
 _ALL_HARNESSES = ["claude", "codex"]
-_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp"]
+_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "9router"]
 
 
 def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
@@ -2351,7 +2368,7 @@ def _build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--harness", choices=("claude", "codex"), help="Force the primary harness")
     setup.add_argument(
         "--engine",
-        choices=("ollama", "lmstudio", "llamacpp"),
+        choices=("ollama", "lmstudio", "llamacpp", "9router"),
         help="Force the primary engine",
     )
 

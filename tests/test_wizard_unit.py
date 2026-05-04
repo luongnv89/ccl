@@ -1374,3 +1374,71 @@ class TestCLIArgumentParsing:
 
         assert "--non-interactive" in help_text
         assert "Auto-pick defaults" in help_text
+
+
+class TestEnginesList9Router:
+    """Issue #51 — `9router` is a 4th supported engine alongside the local trio."""
+
+    def test_all_engines_constant_includes_9router(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert "9router" in wiz._ALL_ENGINES
+
+    def test_argparse_engine_choice_accepts_9router(self, isolated_state):
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["setup", "--engine", "9router"])
+        assert args.engine == "9router"
+
+    def test_argparse_rejects_unknown_engine(self, isolated_state):
+        import pytest
+
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["setup", "--engine", "totally-bogus"])
+
+
+class TestEnsureTool9Router:
+    """Issue #51 — _ensure_tool must NOT auto-install 9router; it lives on user's machine."""
+
+    def test_returns_true_when_router9_endpoint_reachable(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb.Router9Adapter, "detect", lambda self: {"present": True, "version": ""}
+        )
+        assert wiz._ensure_tool("9router") is True
+
+    def test_returns_false_when_router9_unreachable_no_install_attempted(
+        self, isolated_state, monkeypatch
+    ):
+        """When 9router is not reachable, _ensure_tool prints help and returns False
+        WITHOUT trying to subprocess.run an install command. This is critical:
+        9router is a long-running server the user must start manually."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb.Router9Adapter, "detect", lambda self: {"present": False, "version": ""}
+        )
+
+        called: dict[str, bool] = {"subprocess_run": False}
+
+        def fake_run(*a, **kw):
+            called["subprocess_run"] = True
+            raise AssertionError("must not subprocess.run for 9router")
+
+        import subprocess as sp
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        # Also block questionary so we'd notice an interactive confirm.
+        import questionary
+
+        monkeypatch.setattr(
+            questionary,
+            "confirm",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not prompt confirm for 9router")
+            ),
+        )
+        assert wiz._ensure_tool("9router") is False
+        assert called["subprocess_run"] is False
