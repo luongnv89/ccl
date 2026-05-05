@@ -442,9 +442,9 @@ class TestCliSubprocesses:
             },
         )
         # Should succeed even with minimal output
-        assert result.returncode == 0 or result.returncode == 1, (
-            f"find-model failed: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0 or result.returncode == 1
+        ), f"find-model failed: {result.stderr}"
 
     # ----- Edge cases for ccl doctor command -----
 
