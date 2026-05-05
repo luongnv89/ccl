@@ -2220,6 +2220,8 @@ def scan_huggingface_gguf_cache() -> list[dict[str, Any]]:
 
     try:
         if not cache_dir.exists():
+            cache["timestamp"] = now
+            cache["models"] = []
             return []
 
         # Scan for GGUF files in models--org--repo/snapshots/*/
@@ -2262,7 +2264,12 @@ def scan_huggingface_gguf_cache() -> list[dict[str, Any]]:
                         stem = gguf_file.stem
                         quant = ""
                         if "-" in stem:
-                            quant = stem.split("-")[-1]
+                            potential_quant = stem.split("-")[-1]
+                            # Validate it looks like a quantization (Q4_K_M, Q5_K_S, Q8_0, etc.)
+                            if potential_quant.startswith("Q") and any(
+                                c.isdigit() for c in potential_quant
+                            ):
+                                quant = potential_quant
 
                         # Build display name
                         if quant:
@@ -2281,9 +2288,6 @@ def scan_huggingface_gguf_cache() -> list[dict[str, Any]]:
                         logging.debug(f"Skipping {gguf_file}: {exc}")
                         continue
 
-    except FileNotFoundError:
-        # Cache directory doesn't exist
-        pass
     except PermissionError:
         # Cache isn't readable
         logging.debug(f"Permission denied reading HF cache: {cache_dir}")
