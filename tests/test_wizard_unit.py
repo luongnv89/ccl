@@ -1123,9 +1123,9 @@ class TestStep24PickerIntegration:
         for _mode, rec in recs.items():
             if rec is None:
                 continue
-            assert (
-                ":" not in rec["engine_tag"]
-            ), f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            assert ":" not in rec["engine_tag"], (
+                f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            )
 
         wiz.step_2_4_pick_model(state, non_interactive=False)
 
