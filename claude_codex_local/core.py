@@ -2188,6 +2188,115 @@ def _candidate_tag_for_engine(c: dict[str, Any], engine: str) -> str | None:
     return None
 
 
+def scan_huggingface_gguf_cache() -> list[dict[str, Any]]:
+    """
+    Scan the HuggingFace cache for downloaded GGUF model files.
+
+    Returns a list of dicts with:
+      - path:    absolute path to the GGUF file
+      - display: human-readable name with size (e.g. "org/repo-Q4_K_M (7.2 GB)")
+      - size_gb: file size in gigabytes
+
+    Respects HF_HOME environment variable. Returns empty list on errors.
+    """
+    import logging
+    import time
+
+    # Check cache (5-minute TTL)
+    cache_key = "_gguf_cache"
+    if not hasattr(scan_huggingface_gguf_cache, cache_key):
+        setattr(scan_huggingface_gguf_cache, cache_key, {"timestamp": 0, "models": []})
+
+    cache = getattr(scan_huggingface_gguf_cache, cache_key)
+    now = time.time()
+    if now - cache["timestamp"] < 300:  # 5 minutes
+        return cache["models"]
+
+    # Determine HF cache directory
+    hf_home = os.getenv("HF_HOME")
+    cache_dir = Path(hf_home) / "hub" if hf_home else Path.home() / ".cache" / "huggingface" / "hub"
+
+    models: list[dict[str, Any]] = []
+
+    try:
+        if not cache_dir.exists():
+            return []
+
+        # Scan for GGUF files in models--org--repo/snapshots/*/
+        for model_dir in cache_dir.glob("models--*"):
+            if not model_dir.is_dir():
+                continue
+
+            # Extract model name from directory: models--org--repo → org/repo
+            dir_name = model_dir.name
+            if not dir_name.startswith("models--"):
+                continue
+
+            parts = dir_name[8:].split("--", 1)
+            if len(parts) != 2:
+                continue
+
+            org, repo = parts
+            base_name = f"{org}/{repo}"
+
+            # Look for GGUF files in snapshots
+            snapshots_dir = model_dir / "snapshots"
+            if not snapshots_dir.exists():
+                continue
+
+            for snapshot_dir in snapshots_dir.iterdir():
+                if not snapshot_dir.is_dir():
+                    continue
+
+                for gguf_file in snapshot_dir.glob("*.gguf"):
+                    try:
+                        # Resolve symlinks to get actual file
+                        resolved = gguf_file.resolve()
+                        if not resolved.exists():
+                            continue
+
+                        size_bytes = resolved.stat().st_size
+                        size_gb = size_bytes / (1024**3)
+
+                        # Extract quantization from filename (e.g., Q4_K_M from model-Q4_K_M.gguf)
+                        stem = gguf_file.stem
+                        quant = ""
+                        if "-" in stem:
+                            quant = stem.split("-")[-1]
+
+                        # Build display name
+                        if quant:
+                            display_name = f"{base_name}-{quant} ({size_gb:.1f} GB)"
+                        else:
+                            display_name = f"{base_name} ({size_gb:.1f} GB)"
+
+                        models.append(
+                            {
+                                "path": str(resolved),
+                                "display": display_name,
+                                "size_gb": size_gb,
+                            }
+                        )
+                    except (OSError, ValueError) as exc:
+                        logging.debug(f"Skipping {gguf_file}: {exc}")
+                        continue
+
+    except FileNotFoundError:
+        # Cache directory doesn't exist
+        pass
+    except PermissionError:
+        # Cache isn't readable
+        logging.debug(f"Permission denied reading HF cache: {cache_dir}")
+    except Exception as exc:
+        logging.debug(f"Error scanning HF cache: {exc}")
+
+    # Update cache
+    cache["timestamp"] = now
+    cache["models"] = models
+
+    return models
+
+
 def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[dict[str, Any]]:
     """
     Return locally-installed models for the chosen engine, cached in `profile`.
@@ -2263,18 +2372,32 @@ def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[di
                 }
             )
     elif engine == "llamacpp":
-        # llama.cpp does not ship a "model registry" — the only thing we can
-        # surface is the model already loaded in a running llama-server.
-        status = profile.get("llamacpp") or {}
-        if status.get("server_running") and status.get("model"):
+        # Scan HuggingFace cache for downloaded GGUF models
+        gguf_models = scan_huggingface_gguf_cache()
+        for m in gguf_models:
             entries.append(
                 {
-                    "tag": status["model"],
-                    "display": f"{status['model']} (running on port {status.get('server_port')})",
+                    "tag": m["path"],
+                    "display": m["display"],
                     "source": "llamacpp",
-                    "running": True,
+                    "size_gb": m["size_gb"],
                 }
             )
+
+        # Also include the currently running model if server is up
+        status = profile.get("llamacpp") or {}
+        if status.get("server_running") and status.get("model"):
+            # Check if it's not already in the list
+            running_model = status["model"]
+            if not any(e["tag"] == running_model for e in entries):
+                entries.append(
+                    {
+                        "tag": running_model,
+                        "display": f"{running_model} (running on port {status.get('server_port')})",
+                        "source": "llamacpp",
+                        "running": True,
+                    }
+                )
 
     # Stable sort: coder-likely models first, then alphabetic by display.
     entries.sort(key=lambda e: (0 if _is_coder(e["display"]) else 1, e["display"]))
