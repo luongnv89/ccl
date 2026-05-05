@@ -1688,6 +1688,24 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
 
 _MIN_MODEL_MATCH_LEN = 12
 
+# Mutually-exclusive variant tokens: a 'base' GGUF is not interchangeable with
+# an 'instruct'/'chat' GGUF even when the rest of the family/size matches.
+_VARIANT_TOKENS = ("instruct", "chat", "base", "it")
+
+
+def _variant_token(normalized: str) -> str | None:
+    """Return the variant token present in ``normalized`` (already lowercased), if any."""
+    for tok in _VARIANT_TOKENS:
+        # Match as a hyphen-delimited token so 'baseline' doesn't read as 'base'.
+        if (
+            normalized == tok
+            or normalized.startswith(f"{tok}-")
+            or normalized.endswith(f"-{tok}")
+            or f"-{tok}-" in normalized
+        ):
+            return tok
+    return None
+
 
 def _llamacpp_models_match(running: str, wanted: str) -> bool:
     """
@@ -1697,6 +1715,10 @@ def _llamacpp_models_match(running: str, wanted: str) -> bool:
     ``org/repo``. We require a substring overlap of at least
     ``_MIN_MODEL_MATCH_LEN`` characters so different sizes/quants of the same
     family (e.g. ``...-1.5B`` vs ``...-7B``) do not collapse to a match.
+
+    Additionally, if both sides carry a variant token (``base``/``instruct``/
+    ``chat``/``it``) and the tokens differ, refuse the match — a base model
+    is not a drop-in replacement for an instruct/chat model.
     """
     if not running or not wanted:
         return False
@@ -1706,7 +1728,11 @@ def _llamacpp_models_match(running: str, wanted: str) -> bool:
         return True
     short = a if len(a) <= len(b) else b
     long_ = b if short is a else a
-    return len(short) >= _MIN_MODEL_MATCH_LEN and short in long_
+    if len(short) < _MIN_MODEL_MATCH_LEN or short not in long_:
+        return False
+    a_variant = _variant_token(a)
+    b_variant = _variant_token(b)
+    return not (a_variant and b_variant and a_variant != b_variant)
 
 
 def _normalize_model_id(value: str) -> str:

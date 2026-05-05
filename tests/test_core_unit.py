@@ -1504,6 +1504,86 @@ class TestLlamaCppStopServer:
             monkeypatch.setattr(pb_mod.os, "killpg", _raise_lookup)
         assert pb_mod.llamacpp_stop_server(handle, grace_seconds=0.1) is True
 
+    def test_uses_popen_wait_when_proc_attached(self, isolated_state, monkeypatch):
+        """When handle.proc is set, stop_server prefers Popen.wait over raw pid
+        polling — that closes the pid-recycle race window."""
+        pb_mod, _wiz, _ = isolated_state
+
+        wait_calls: list[float | None] = []
+
+        class _FakeProc:
+            pid = 99999999
+            returncode = 0
+
+            def terminate(self) -> None:
+                pass
+
+            def kill(self) -> None:
+                pass
+
+            def wait(self, timeout: float | None = None) -> int:
+                wait_calls.append(timeout)
+                return 0
+
+        # Stub _signal_process so it doesn't actually fire on the host.
+        monkeypatch.setattr(pb_mod, "_signal_process", lambda pid, sig: None)
+
+        fake = _FakeProc()
+        handle = pb_mod.LlamaServerHandle(
+            pid=fake.pid,
+            port=8001,
+            host="127.0.0.1",
+            model_path="/tmp/x.gguf",
+            argv=[],
+            log_path="",
+            pid_file=str(_wiz_temp_pid_path(isolated_state)),
+            we_started_it=True,
+            proc=fake,  # type: ignore[arg-type]
+        )
+        assert pb_mod.llamacpp_stop_server(handle, grace_seconds=0.5) is True
+        # First wait should use the grace window; SIGKILL-fallback wait is not
+        # expected because the first wait returned cleanly.
+        assert wait_calls == [0.5]
+
+    def test_escalates_to_kill_when_terminate_times_out(self, isolated_state, monkeypatch):
+        pb_mod, _wiz, _ = isolated_state
+        wait_calls: list[float | None] = []
+        kill_called = []
+
+        class _StuckProc:
+            pid = 99999998
+            returncode = -9
+
+            def terminate(self) -> None:
+                pass
+
+            def kill(self) -> None:
+                kill_called.append(True)
+
+            def wait(self, timeout: float | None = None) -> int:
+                wait_calls.append(timeout)
+                # First call (after SIGTERM) times out; second call (after
+                # SIGKILL) returns cleanly.
+                if len(wait_calls) == 1:
+                    raise pb_mod.subprocess.TimeoutExpired(cmd="x", timeout=timeout or 0)
+                return -9
+
+        monkeypatch.setattr(pb_mod, "_signal_process", lambda pid, sig: None)
+        proc = _StuckProc()
+        handle = pb_mod.LlamaServerHandle(
+            pid=proc.pid,
+            port=8001,
+            host="127.0.0.1",
+            model_path="/tmp/x.gguf",
+            argv=[],
+            log_path="",
+            pid_file=str(_wiz_temp_pid_path(isolated_state)),
+            we_started_it=True,
+            proc=proc,  # type: ignore[arg-type]
+        )
+        assert pb_mod.llamacpp_stop_server(handle, grace_seconds=0.1) is True
+        assert len(wait_calls) == 2  # one for SIGTERM, one after SIGKILL
+
 
 def _wiz_temp_pid_path(isolated_state):
     """Return a writable pid-file path inside the isolated state dir."""

@@ -10,7 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -1542,6 +1542,11 @@ class LlamaServerHandle:
     ``we_started_it`` is True only when this process owns the lifecycle of the
     spawned server — Step 5 uses it to decide whether ``stop_server`` is allowed
     to terminate the underlying process.
+
+    ``proc`` is the original ``Popen`` from the spawn site, when available.
+    ``llamacpp_stop_server`` prefers it over raw pid signalling because
+    ``Popen.terminate``/``kill``/``wait`` track the original child and cannot
+    misfire onto a recycled pid.
     """
 
     pid: int
@@ -1552,6 +1557,8 @@ class LlamaServerHandle:
     log_path: str
     pid_file: str
     we_started_it: bool = True
+    # field(repr=False) keeps the dataclass repr stable for tests/logs.
+    proc: subprocess.Popen[bytes] | None = field(default=None, repr=False, compare=False)
 
 
 def safe_repo_slug(repo_id: str) -> str:
@@ -1800,6 +1807,7 @@ def llamacpp_start_server(
         log_path=str(log_path),
         pid_file=str(pid_file),
         we_started_it=True,
+        proc=proc,
     )
 
     ready = llamacpp_wait_until_ready(port=port, host=host, timeout=timeout, proc=proc)
@@ -1845,11 +1853,59 @@ def llamacpp_start_server(
 
 
 def llamacpp_stop_server(handle: LlamaServerHandle, *, grace_seconds: float = 5.0) -> bool:
-    """Terminate a server we started. Returns True if the pid is gone afterwards."""
+    """Terminate a server we started.
+
+    Returns True if (and only if) the underlying process is gone afterwards.
+    Returns False in two distinct cases:
+
+    1. We refused to act because ``handle.we_started_it`` is False (the wizard
+       never owned this server's lifecycle).
+    2. SIGTERM + SIGKILL both failed to clear the pid within their grace
+       windows.
+
+    Callers that need to distinguish the two should check
+    ``handle.we_started_it`` before calling.
+
+    When ``handle.proc`` is set (the common path — set by
+    ``llamacpp_start_server``), the function uses ``Popen.terminate`` /
+    ``Popen.kill`` / ``Popen.wait`` to act on the original child. That avoids
+    the pid-recycle race where ``os.kill(pid, sig)`` could land on an
+    unrelated process if the kernel reused the spawned child's pid between
+    the exit and the signal.
+    """
     if not handle.we_started_it:
         return False
+
+    proc = handle.proc
+    if proc is not None:
+        # Fast path: act on the actual child object. terminate() == SIGTERM on
+        # POSIX. We still target the process group on POSIX so any helpers
+        # llama-server forked (CUDA workers, etc.) get signalled too.
+        if os.name == "posix":
+            _signal_process(handle.pid, 15)
+        else:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                proc.terminate()
+        try:
+            proc.wait(timeout=max(grace_seconds, 0.0))
+        except subprocess.TimeoutExpired:
+            if os.name == "posix":
+                _signal_process(handle.pid, 9)
+            else:
+                with contextlib.suppress(ProcessLookupError, OSError):
+                    proc.kill()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                return False
+        _cleanup_pid_file(handle.pid_file)
+        return True
+
+    # Fallback: handle was reconstructed without a Popen (e.g. loaded from
+    # disk in some hypothetical future code path). Use raw pid signalling and
+    # accept the small pid-recycle risk.
     pid = handle.pid
-    _signal_process(pid, 15)  # SIGTERM (best-effort)
+    _signal_process(pid, 15)
 
     import time
 
@@ -1860,7 +1916,6 @@ def llamacpp_stop_server(handle: LlamaServerHandle, *, grace_seconds: float = 5.
             return True
         time.sleep(0.1)
 
-    # Escalate to SIGKILL.
     _signal_process(pid, 9)
 
     deadline2 = time.monotonic() + 2.0

@@ -1576,6 +1576,51 @@ class TestLlamaCppModelMatch:
         assert wiz._llamacpp_models_match("", "anything") is False
         assert wiz._llamacpp_models_match("anything", "") is False
 
+    def test_does_not_match_base_vs_instruct_same_family(self, isolated_state):
+        """A 'base' GGUF must not be reused for a wizard wanting an 'instruct'."""
+        _pb, wiz, _ = isolated_state
+        assert (
+            wiz._llamacpp_models_match(
+                "deepseek-coder-7b-base-Q4_K_M.gguf",
+                "deepseek-ai/deepseek-coder-7b-instruct",
+            )
+            is False
+        )
+
+    def test_does_not_match_instruct_vs_chat(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        assert (
+            wiz._llamacpp_models_match(
+                "qwen2.5-coder-7b-instruct.gguf",
+                "qwen/qwen2.5-coder-7b-chat-GGUF",
+            )
+            is False
+        )
+
+    def test_matches_when_only_one_side_has_variant_token(self, isolated_state):
+        """If only one side carries a variant token, fall through to the
+        substring rule (the other side is ambiguous, so we can't refute)."""
+        _pb, wiz, _ = isolated_state
+        assert (
+            wiz._llamacpp_models_match(
+                "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+                "bartowski/Qwen2.5-Coder-7B-GGUF",
+            )
+            is True
+        )
+
+    def test_baseline_in_name_does_not_read_as_base(self, isolated_state):
+        """'baseline' should not be parsed as the 'base' variant token."""
+        _pb, wiz, _ = isolated_state
+        # Both sides carry no variant token; the substring rule should match.
+        assert (
+            wiz._llamacpp_models_match(
+                "some-baseline-model-7b-q4.gguf",
+                "vendor/some-baseline-model-7b",
+            )
+            is True
+        )
+
 
 class TestStep2_5LlamaCppPreservesEngineModelTag:
     """When the user opts in to a mismatched running model, the wizard must
