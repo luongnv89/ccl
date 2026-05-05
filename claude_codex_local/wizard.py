@@ -1231,6 +1231,27 @@ def _estimate_model_size(state: WizardState) -> int | None:
     return None
 
 
+def _largest_gguf_in(directory: Path) -> str | None:
+    """Return the absolute path of the largest .gguf under ``directory``, or None."""
+    if not directory.is_dir():
+        return None
+    candidates: list[tuple[int, Path]] = []
+    for path in directory.rglob("*.gguf"):
+        try:
+            candidates.append((path.stat().st_size, path))
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return str(candidates[0][1])
+
+
+def _render_llama_server_command(argv: list[str]) -> str:
+    """Render an argv as a shell-paste-ready command line."""
+    return " ".join(shlex.quote(part) for part in argv)
+
+
 def _download_gguf_via_hf_cli(repo_id: str) -> dict:
     """
     Download a GGUF model from Hugging Face Hub using the HuggingFace CLI.
@@ -1291,8 +1312,18 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
         hf_repo = parts[0]
         filename = parts[1] if len(parts) > 1 else None
 
+        # Route every download under STATE_DIR/models/<slug> so we can recover
+        # the resolved .gguf path after the streaming HF CLI finishes (issue #53).
+        local_dir = STATE_DIR / "models" / pb.safe_repo_slug(hf_repo)
+        local_dir.mkdir(parents=True, exist_ok=True)
+
         console.print(f"\n[cyan]Downloading {current} from Hugging Face Hub...[/cyan]")
-        result = pb.huggingface_download_gguf(hf_repo, filename=filename, stream=True)
+        result = pb.huggingface_download_gguf(
+            hf_repo,
+            filename=filename,
+            local_dir=str(local_dir),
+            stream=True,
+        )
         if result.get("ok"):
             summary_bits: list[str] = []
             size = result.get("bytes_downloaded")
@@ -1303,11 +1334,17 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
                 summary_bits.append(f"in {_human_duration(float(elapsed))}")
             summary = f" ({' '.join(summary_bits)})" if summary_bits else ""
             ok(f"Downloaded {current}{summary}")
-            if result.get("path"):
-                info(f"Path: {result['path']}")
+            # When the streaming HF CLI couldn't return a precise path (no
+            # filename pinned, only local_dir set), scan the local dir for
+            # the largest .gguf we just pulled so Step 5 has a concrete path.
+            resolved_path = result.get("path")
+            if not resolved_path:
+                resolved_path = _largest_gguf_in(local_dir)
+            if resolved_path:
+                info(f"Path: {resolved_path}")
             return {
                 "ok": True,
-                "path": result.get("path"),
+                "path": resolved_path,
                 "repo_id": current,
                 "bytes_downloaded": size,
                 "elapsed_seconds": elapsed,
@@ -1530,6 +1567,188 @@ def _lms_model_size_hint(tag: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[str, Any]:
+    """
+    Auto-start llama-server with the just-downloaded GGUF (issue #53), wait
+    for the /health endpoint, then run the actual smoke test against
+    /v1/chat/completions.
+
+    Returns the standard ``{"ok": bool, ...}`` dict that
+    ``step_2_5_smoke_test`` already understands. On failure, the dict carries
+    a ``manual_command`` field so the caller can echo it.
+    """
+    tag = state.engine_model_tag
+    model_path = state.profile.get("llamacpp_model_path") or ""
+
+    # Phase 1 — handle a server that is already running on our port.
+    info_dict = pb.llamacpp_info()
+    if info_dict.get("server_running"):
+        running_model = (info_dict.get("model") or "").strip()
+        if _llamacpp_models_match(running_model, tag):
+            ok(
+                f"Reusing running llama-server on "
+                f"{pb.LLAMACPP_SERVER_HOST}:{info_dict['server_port']} "
+                f"(model: {running_model or tag})"
+            )
+            return pb.smoke_test_llamacpp_model(tag)
+
+        # Different model on our port — refuse to kill it. Ask interactively.
+        warn(
+            f"A different llama.cpp model is already loaded on port "
+            f"{info_dict['server_port']}: '{running_model or 'unknown'}'.\n"
+            f"  Wanted: '{tag}'."
+        )
+        if non_interactive:
+            return {
+                "ok": False,
+                "error": (
+                    f"port {info_dict['server_port']} is serving a different model "
+                    f"('{running_model or 'unknown'}'); aborting in non-interactive mode"
+                ),
+            }
+        try:
+            use_running = questionary.confirm(
+                f"Use the already-running model ({running_model or 'unknown'}) for the smoke test?",
+                default=True,
+            ).ask()
+        except KeyboardInterrupt:
+            return {"ok": False, "error": "user cancelled at server-conflict prompt"}
+        if not use_running:
+            return {
+                "ok": False,
+                "error": (
+                    f"port {info_dict['server_port']} is busy with another model; "
+                    f"stop it (kill the running llama-server) and re-run with --resume"
+                ),
+            }
+        # User opted in: run the smoke test against whatever is loaded.
+        # Do NOT mutate state.engine_model_tag here — Step 6 wires the
+        # harness from the persisted HF repo id; clobbering it with the
+        # running server's basename would break that downstream config.
+        # llama-server ignores the `model` field and uses whatever is
+        # loaded, so passing ``running_model`` only affects this request.
+        smoke_target = running_model or tag
+        return pb.smoke_test_llamacpp_model(smoke_target)
+
+    # Phase 2 — no server running. We need a real GGUF path to spawn one.
+    if not model_path or not Path(model_path).is_file():
+        warn(
+            "No GGUF model path is recorded in the wizard state — re-run "
+            "Step 4 (model download) so the file path is captured."
+        )
+        return {
+            "ok": False,
+            "error": (f"no resolved GGUF path for model '{tag}'; re-run wizard step 4"),
+        }
+
+    # Phase 3 — auto-start llama-server with sensible defaults.
+    info(
+        f"Auto-starting llama-server on "
+        f"{pb.LLAMACPP_SERVER_HOST}:{pb.LLAMACPP_SERVER_PORT} "
+        f"with model {Path(model_path).name}..."
+    )
+    start_result = pb.llamacpp_start_server(
+        model_path=model_path,
+        profile=state.profile,
+        port=pb.LLAMACPP_SERVER_PORT,
+        host=pb.LLAMACPP_SERVER_HOST,
+    )
+    argv = start_result.get("argv") or []
+    manual_cmd = _render_llama_server_command(argv) if argv else ""
+    if not start_result.get("ok"):
+        err = start_result.get("error") or "unknown error"
+        log_path = start_result.get("log_path") or ""
+        fail(f"Auto-start failed: {err}")
+        if manual_cmd:
+            warn("To start llama-server manually, run:")
+            console.print(f"  [bold]{manual_cmd}[/bold]")
+        if log_path:
+            info(f"Server log: {log_path}")
+        return {
+            "ok": False,
+            "error": err,
+            "manual_command": manual_cmd,
+            "log_path": log_path,
+        }
+
+    handle = start_result["handle"]
+    ok(
+        f"llama-server is ready (pid {handle.pid}, port {handle.port}). "
+        f"args: {' '.join(handle.argv[1:])}"
+    )
+    info(f"Server log: {handle.log_path}")
+
+    smoke = pb.smoke_test_llamacpp_model(tag)
+    if not smoke.get("ok"):
+        smoke = dict(smoke)
+        smoke.setdefault("manual_command", manual_cmd)
+        smoke.setdefault("log_path", handle.log_path)
+    return smoke
+
+
+_MIN_MODEL_MATCH_LEN = 12
+
+# Mutually-exclusive variant tokens: a 'base' GGUF is not interchangeable with
+# an 'instruct'/'chat' GGUF even when the rest of the family/size matches.
+_VARIANT_TOKENS = ("instruct", "chat", "base", "it")
+
+
+def _variant_token(normalized: str) -> str | None:
+    """Return the variant token present in ``normalized`` (already lowercased), if any."""
+    for tok in _VARIANT_TOKENS:
+        # Match as a hyphen-delimited token so 'baseline' doesn't read as 'base'.
+        if (
+            normalized == tok
+            or normalized.startswith(f"{tok}-")
+            or normalized.endswith(f"-{tok}")
+            or f"-{tok}-" in normalized
+        ):
+            return tok
+    return None
+
+
+def _llamacpp_models_match(running: str, wanted: str) -> bool:
+    """
+    Loose match between the model llama-server reports on /v1/models and the
+    HF repo id / file path the wizard wants. ``running`` is often the GGUF
+    file basename, while ``wanted`` is typically an HF repo id like
+    ``org/repo``. We require a substring overlap of at least
+    ``_MIN_MODEL_MATCH_LEN`` characters so different sizes/quants of the same
+    family (e.g. ``...-1.5B`` vs ``...-7B``) do not collapse to a match.
+
+    Additionally, if both sides carry a variant token (``base``/``instruct``/
+    ``chat``/``it``) and the tokens differ, refuse the match — a base model
+    is not a drop-in replacement for an instruct/chat model.
+    """
+    if not running or not wanted:
+        return False
+    a = _normalize_model_id(running)
+    b = _normalize_model_id(wanted)
+    if a == b:
+        return True
+    short = a if len(a) <= len(b) else b
+    long_ = b if short is a else a
+    if len(short) < _MIN_MODEL_MATCH_LEN or short not in long_:
+        return False
+    a_variant = _variant_token(a)
+    b_variant = _variant_token(b)
+    return not (a_variant and b_variant and a_variant != b_variant)
+
+
+def _normalize_model_id(value: str) -> str:
+    """Lowercase + strip extension, dir prefix, and `-gguf` suffix for matching."""
+    raw = value.strip().lower()
+    # Take the basename without the parent dir.
+    raw = raw.rsplit("/", 1)[-1]
+    # Strip a trailing `.gguf` (or any final extension) only when present.
+    if raw.endswith(".gguf"):
+        raw = raw[: -len(".gguf")]
+    # HF repos are commonly suffixed `-gguf` to mark the quantized variant.
+    if raw.endswith("-gguf"):
+        raw = raw[: -len("-gguf")]
+    return raw
+
+
 def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 5 — Smoke test engine + model")
     engine = state.primary_engine
@@ -1546,18 +1765,9 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
         pb.lms_load_model(tag)
         result = pb.smoke_test_lmstudio_model(tag)
     elif engine == "llamacpp":
-        # llama.cpp server must be started manually by the user with the GGUF model loaded.
-        llamacpp_status = pb.llamacpp_info()
-        if not llamacpp_status.get("server_running"):
-            model_path = state.profile.get("llamacpp_model_path", "<path/to/model.gguf>")
-            warn(
-                f"llama.cpp server is not running on port {llamacpp_status['server_port']}. "
-                f"Start it with: llama-server --port {llamacpp_status['server_port']} "
-                f"--model {model_path}"
-            )
-            result = {"ok": False, "error": "llama.cpp server not running"}
-        else:
-            result = pb.smoke_test_llamacpp_model(tag)
+        # Auto-start llama-server with the just-downloaded GGUF model so the
+        # user doesn't have to launch it by hand (issue #53).
+        result = _llamacpp_smoke_test(state, non_interactive=non_interactive)
     elif engine == "9router":
         # CRITICAL: never call /chat/completions for 9router — that's paid
         # cloud quota. We verify reachability by re-checking /v1/models.

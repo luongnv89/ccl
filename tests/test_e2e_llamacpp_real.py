@@ -148,9 +148,7 @@ def model_path() -> Path:
         pytest.skip(f"Model download failed: {(result.stderr or result.stdout).strip()}")
 
     if not expected.exists():
-        pytest.skip(
-            f"Download succeeded but {expected} not found — " "check huggingface-cli output"
-        )
+        pytest.skip(f"Download succeeded but {expected} not found — check huggingface-cli output")
 
     return expected
 
