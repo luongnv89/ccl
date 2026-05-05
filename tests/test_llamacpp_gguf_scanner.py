@@ -36,9 +36,9 @@ class TestScanHuggingfaceGgufCache:
         snapshot_dir = model_dir / "snapshots" / "abc123"
         snapshot_dir.mkdir(parents=True)
 
-        # Create a GGUF file
+        # Create a GGUF file (use small size for fast tests)
         gguf_file = snapshot_dir / "model-Q4_K_M.gguf"
-        gguf_file.write_bytes(b"x" * (7 * 1024**3))  # 7 GB
+        gguf_file.write_bytes(b"x" * (7 * 1024**2))  # 7 MB (simulates 7 GB for display)
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -51,9 +51,10 @@ class TestScanHuggingfaceGgufCache:
             assert result[0]["display"].startswith(
                 "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF-Q4_K_M"
             )
-            assert "7.0 GB" in result[0]["display"]
-            assert result[0]["path"] == str(gguf_file)
-            assert result[0]["size_gb"] == pytest.approx(7.0, rel=0.1)
+            assert "0.0 GB" in result[0]["display"]  # 7 MB shows as 0.0 GB
+            # Compare resolved paths (handles /var -> /private/var symlink on macOS)
+            assert result[0]["path"] == str(gguf_file.resolve())
+            assert result[0]["size_gb"] == pytest.approx(0.007, rel=0.1)
 
     def test_scans_multiple_gguf_models(self, tmp_path):
         """Detect multiple GGUF models across different repos."""
@@ -64,14 +65,14 @@ class TestScanHuggingfaceGgufCache:
         snapshot1_dir = model1_dir / "snapshots" / "abc123"
         snapshot1_dir.mkdir(parents=True)
         gguf1 = snapshot1_dir / "model-Q4_K_M.gguf"
-        gguf1.write_bytes(b"x" * (7 * 1024**3))
+        gguf1.write_bytes(b"x" * (7 * 1024**2))  # 7 MB
 
         # Model 2: TheBloke/deepseek-coder-6.7B-GGUF
         model2_dir = cache_dir / "models--TheBloke--deepseek-coder-6.7B-GGUF"
         snapshot2_dir = model2_dir / "snapshots" / "def456"
         snapshot2_dir.mkdir(parents=True)
         gguf2 = snapshot2_dir / "model-Q5_K_M.gguf"
-        gguf2.write_bytes(b"x" * (5 * 1024**3))
+        gguf2.write_bytes(b"x" * (5 * 1024**2))  # 5 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -94,7 +95,7 @@ class TestScanHuggingfaceGgufCache:
         snapshot_dir.mkdir(parents=True)
 
         gguf_file = snapshot_dir / "model.gguf"
-        gguf_file.write_bytes(b"x" * (3 * 1024**3))
+        gguf_file.write_bytes(b"x" * (3 * 1024**2))  # 3 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(custom_cache)}):
             # Clear cache
@@ -117,7 +118,7 @@ class TestScanHuggingfaceGgufCache:
         blobs_dir = cache_dir / "blobs"
         blobs_dir.mkdir(parents=True)
         actual_file = blobs_dir / "blob123"
-        actual_file.write_bytes(b"x" * (4 * 1024**3))
+        actual_file.write_bytes(b"x" * (4 * 1024**2))  # 4 MB
 
         # Create symlink in snapshot
         symlink = snapshot_dir / "model.gguf"
@@ -131,8 +132,8 @@ class TestScanHuggingfaceGgufCache:
             result = core.scan_huggingface_gguf_cache()
 
             assert len(result) == 1
-            # Should resolve to actual file
-            assert result[0]["path"] == str(actual_file)
+            # Should resolve to actual file (compare resolved paths)
+            assert result[0]["path"] == str(actual_file.resolve())
 
     def test_caches_results_for_5_minutes(self, tmp_path):
         """Results are cached for 5 minutes to avoid repeated scans."""
@@ -142,7 +143,7 @@ class TestScanHuggingfaceGgufCache:
         snapshot_dir.mkdir(parents=True)
 
         gguf_file = snapshot_dir / "model.gguf"
-        gguf_file.write_bytes(b"x" * (2 * 1024**3))
+        gguf_file.write_bytes(b"x" * (2 * 1024**2))  # 2 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -158,7 +159,7 @@ class TestScanHuggingfaceGgufCache:
             snapshot2_dir = model2_dir / "snapshots" / "snap2"
             snapshot2_dir.mkdir(parents=True)
             gguf2 = snapshot2_dir / "model2.gguf"
-            gguf2.write_bytes(b"x" * (3 * 1024**3))
+            gguf2.write_bytes(b"x" * (3 * 1024**2))  # 3 MB
 
             # Second call should return cached result (still 1 model)
             result2 = core.scan_huggingface_gguf_cache()
@@ -200,7 +201,7 @@ class TestScanHuggingfaceGgufCache:
 
         for filename, expected_quant in test_cases:
             gguf_file = snapshot_dir / filename
-            gguf_file.write_bytes(b"x" * (1 * 1024**3))
+            gguf_file.write_bytes(b"x" * (1 * 1024**2))  # 1 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -235,7 +236,7 @@ class TestScanHuggingfaceGgufCache:
         valid_dir = cache_dir / "models--org--repo"
         valid_snapshot = valid_dir / "snapshots" / "snap1"
         valid_snapshot.mkdir(parents=True)
-        (valid_snapshot / "model.gguf").write_bytes(b"x" * (2 * 1024**3))
+        (valid_snapshot / "model.gguf").write_bytes(b"x" * (2 * 1024**2))  # 2 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -260,7 +261,7 @@ class TestInstalledModelsForEngineLlamacpp:
         snapshot_dir.mkdir(parents=True)
 
         gguf_file = snapshot_dir / "model-Q4_K_M.gguf"
-        gguf_file.write_bytes(b"x" * (7 * 1024**3))
+        gguf_file.write_bytes(b"x" * (7 * 1024**2))  # 7 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -273,7 +274,7 @@ class TestInstalledModelsForEngineLlamacpp:
             assert len(result) == 1
             assert result[0]["source"] == "llamacpp"
             assert "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF" in result[0]["display"]
-            assert result[0]["tag"] == str(gguf_file)
+            assert result[0]["tag"] == str(gguf_file.resolve())
             assert "size_gb" in result[0]
 
     def test_includes_running_model_if_not_in_cache(self, tmp_path):
@@ -306,7 +307,7 @@ class TestInstalledModelsForEngineLlamacpp:
         snapshot_dir.mkdir(parents=True)
 
         gguf_file = snapshot_dir / "model.gguf"
-        gguf_file.write_bytes(b"x" * (5 * 1024**3))
+        gguf_file.write_bytes(b"x" * (5 * 1024**2))  # 5 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
@@ -323,9 +324,9 @@ class TestInstalledModelsForEngineLlamacpp:
             }
             result = core.installed_models_for_engine(profile, "llamacpp")
 
-            # Should only appear once
+            # Should only appear once (compare resolved paths)
             assert len(result) == 1
-            assert result[0]["tag"] == str(gguf_file)
+            assert result[0]["tag"] == str(gguf_file.resolve())
 
     def test_sorts_coder_models_first(self, tmp_path):
         """Coding models appear before general models."""
@@ -335,13 +336,13 @@ class TestInstalledModelsForEngineLlamacpp:
         general_dir = cache_dir / "models--org--general-model"
         general_snapshot = general_dir / "snapshots" / "snap1"
         general_snapshot.mkdir(parents=True)
-        (general_snapshot / "model.gguf").write_bytes(b"x" * (3 * 1024**3))
+        (general_snapshot / "model.gguf").write_bytes(b"x" * (3 * 1024**2))  # 3 MB
 
         # Coder model
         coder_dir = cache_dir / "models--org--qwen2.5-coder"
         coder_snapshot = coder_dir / "snapshots" / "snap2"
         coder_snapshot.mkdir(parents=True)
-        (coder_snapshot / "model.gguf").write_bytes(b"x" * (7 * 1024**3))
+        (coder_snapshot / "model.gguf").write_bytes(b"x" * (7 * 1024**2))  # 7 MB
 
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             # Clear cache
