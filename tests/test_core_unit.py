@@ -1157,3 +1157,297 @@ class TestSmokeTestRouter9Models:
             "smoke_test_router9_models must never call /chat/completions — "
             "that would burn paid quota."
         )
+
+
+# ---------------------------------------------------------------------------
+# llama.cpp server lifecycle helpers (issue #53).
+# ---------------------------------------------------------------------------
+
+
+class TestLlamaCppArgBuilders:
+    def test_safe_repo_slug_basic(self):
+        assert pb.safe_repo_slug("bartowski/Qwen2.5-Coder-7B") == "bartowski-Qwen2.5-Coder-7B"
+
+    def test_safe_repo_slug_strips_unsafe_chars(self):
+        assert pb.safe_repo_slug("a/b c?d&e") == "a-b-c-d-e"
+
+    def test_safe_repo_slug_falls_back_when_empty(self):
+        assert pb.safe_repo_slug("////") == "model"
+
+    def test_build_argv_shape(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="/usr/local/bin/llama-server",
+            model_path="/tmp/model.gguf",
+            port=8001,
+            host="127.0.0.1",
+            ctx_size=4096,
+            n_gpu_layers=-1,
+            threads=8,
+        )
+        assert argv[0] == "/usr/local/bin/llama-server"
+        assert "--model" in argv and argv[argv.index("--model") + 1] == "/tmp/model.gguf"
+        assert "--host" in argv and argv[argv.index("--host") + 1] == "127.0.0.1"
+        assert "--port" in argv and argv[argv.index("--port") + 1] == "8001"
+        assert "--ctx-size" in argv and argv[argv.index("--ctx-size") + 1] == "4096"
+        assert "--n-gpu-layers" in argv and argv[argv.index("--n-gpu-layers") + 1] == "-1"
+        assert "--threads" in argv and argv[argv.index("--threads") + 1] == "8"
+
+
+class TestLlamaCppGpuOffload:
+    def test_env_override_wins_over_profile(self, monkeypatch):
+        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", "33")
+        out = pb.detect_llamacpp_gpu_offload({"llmfit_system": {"system": {"has_gpu": False}}})
+        assert out["n_gpu_layers"] == 33
+        assert out["kind"] == "env-override"
+
+    def test_apple_silicon_profile_uses_metal(self, monkeypatch):
+        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", None)
+        profile = {
+            "llmfit_system": {"system": {"has_gpu": True, "gpu_name": "apple-m2"}},
+        }
+        out = pb.detect_llamacpp_gpu_offload(profile)
+        assert out["n_gpu_layers"] == -1
+        assert out["kind"] == "metal"
+
+    def test_cpu_only_when_no_signal(self, monkeypatch):
+        import platform as _platform
+
+        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", None)
+        monkeypatch.setattr(pb.shutil, "which", lambda name: None)
+        monkeypatch.setattr(_platform, "system", lambda: "Linux")
+        monkeypatch.setattr(_platform, "machine", lambda: "x86_64")
+        out = pb.detect_llamacpp_gpu_offload(None)
+        assert out["n_gpu_layers"] == 0
+        assert out["kind"] == "cpu"
+
+    def test_cuda_detected_when_nvidia_smi_present(self, monkeypatch):
+        import platform as _platform
+
+        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", None)
+        monkeypatch.setattr(
+            pb.shutil, "which", lambda name: "/usr/bin/nvidia-smi" if name == "nvidia-smi" else None
+        )
+        monkeypatch.setattr(_platform, "system", lambda: "Linux")
+        monkeypatch.setattr(_platform, "machine", lambda: "x86_64")
+        out = pb.detect_llamacpp_gpu_offload(None)
+        assert out["n_gpu_layers"] == -1
+        assert out["kind"] == "cuda"
+
+    def test_threads_uses_profile_cpu_cores(self, monkeypatch):
+        monkeypatch.setattr(pb, "LLAMACPP_THREADS", None)
+        profile = {"llmfit_system": {"system": {"cpu_cores": 12}}}
+        assert pb.detect_llamacpp_threads(profile) == 12
+
+    def test_threads_caps_at_16(self, monkeypatch):
+        monkeypatch.setattr(pb, "LLAMACPP_THREADS", None)
+        profile = {"llmfit_system": {"system": {"cpu_cores": 64}}}
+        assert pb.detect_llamacpp_threads(profile) == 16
+
+    def test_threads_env_override(self, monkeypatch):
+        monkeypatch.setattr(pb, "LLAMACPP_THREADS", "6")
+        assert pb.detect_llamacpp_threads(None) == 6
+
+
+class TestLlamaCppWaitUntilReady:
+    def test_returns_true_when_health_responds_200(self, monkeypatch):
+        class _Resp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_urlopen(url, timeout=2):
+            assert "/health" in url
+            return _Resp()
+
+        monkeypatch.setattr(pb, "LLAMACPP_SERVER_HOST", "127.0.0.1")
+        import urllib.request as _u
+
+        monkeypatch.setattr(_u, "urlopen", _fake_urlopen)
+        assert pb.llamacpp_wait_until_ready(port=18001, timeout=2.0, poll_interval=0.01) is True
+
+    def test_returns_false_on_persistent_connection_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request as _u
+
+        def _fake_urlopen(url, timeout=2):
+            raise urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr(_u, "urlopen", _fake_urlopen)
+        # Tiny timeout so the test is fast.
+        assert pb.llamacpp_wait_until_ready(port=18002, timeout=0.2, poll_interval=0.05) is False
+
+
+class TestLlamaCppStartServer:
+    def test_returns_error_when_binary_missing(self, monkeypatch, isolated_state):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(pb_mod, "llamacpp_detect", lambda: {"present": False})
+        out = pb_mod.llamacpp_start_server(model_path="/tmp/model.gguf")
+        assert out["ok"] is False
+        assert "binary not found" in out["error"]
+        assert out["argv"] == []
+
+    def test_returns_error_when_model_path_missing(self, monkeypatch, isolated_state, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        missing = tmp_path / "ghost.gguf"
+        out = pb_mod.llamacpp_start_server(model_path=str(missing))
+        assert out["ok"] is False
+        assert "not found" in out["error"]
+
+    def test_spawn_succeeds_when_health_responds(self, monkeypatch, isolated_state, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        # Pretend the binary is present.
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        # Pretend the model file exists.
+        model_file = tmp_path / "fake.gguf"
+        model_file.write_bytes(b"\x00")
+
+        spawned: dict = {}
+
+        class _FakeProc:
+            pid = 424242
+
+            def poll(self):
+                return None  # still running
+
+        def _fake_popen(argv, **kwargs):
+            spawned["argv"] = argv
+            spawned["kwargs"] = kwargs
+            return _FakeProc()
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", _fake_popen)
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+
+        out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18003)
+        assert out["ok"] is True
+        handle = out["handle"]
+        assert handle is not None
+        assert handle.pid == 424242
+        assert handle.port == 18003
+        assert handle.model_path == str(model_file)
+        # argv shape sanity-check
+        assert "--model" in handle.argv
+        assert str(model_file) in handle.argv
+        assert "--port" in handle.argv
+        # Pid file written under STATE_DIR/run
+        assert (pb_mod.LLAMACPP_PID_DIR / "llama-server-18003.pid").exists()
+
+    def test_spawn_failure_returns_argv_for_manual_run(self, monkeypatch, isolated_state, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "fake.gguf"
+        model_file.write_bytes(b"\x00")
+
+        def _fail_popen(argv, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory: 'llama-server'")
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", _fail_popen)
+        out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18004)
+        assert out["ok"] is False
+        assert "failed to spawn" in out["error"]
+        # Caller can echo argv to the user even on spawn failure.
+        assert any("--model" in a for a in out["argv"])
+        assert any(str(model_file) == a for a in out["argv"])
+
+    def test_readiness_timeout_terminates_child(self, monkeypatch, isolated_state, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "fake.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 99999
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: False)
+        stop_calls: list = []
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_stop_server", lambda h, **kw: stop_calls.append(h) or True
+        )
+
+        out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18005)
+        assert out["ok"] is False
+        assert "did not become ready" in out["error"]
+        assert len(stop_calls) == 1
+
+
+class TestLlamaCppStopServer:
+    def test_refuses_to_stop_servers_we_did_not_start(self, isolated_state):
+        pb_mod, _wiz, _ = isolated_state
+        handle = pb_mod.LlamaServerHandle(
+            pid=12345,
+            port=8001,
+            host="127.0.0.1",
+            model_path="/tmp/x.gguf",
+            argv=[],
+            log_path="",
+            pid_file="",
+            we_started_it=False,
+        )
+        assert pb_mod.llamacpp_stop_server(handle) is False
+
+    def test_returns_true_when_pid_already_gone(self, monkeypatch, isolated_state):
+        pb_mod, _wiz, _ = isolated_state
+        handle = pb_mod.LlamaServerHandle(
+            pid=99999999,
+            port=8001,
+            host="127.0.0.1",
+            model_path="/tmp/x.gguf",
+            argv=[],
+            log_path="",
+            pid_file=str(_wiz_temp_pid_path(isolated_state)),
+            we_started_it=True,
+        )
+
+        def _raise_lookup(*a, **kw):
+            raise ProcessLookupError()
+
+        monkeypatch.setattr(pb_mod.os, "kill", _raise_lookup)
+        if hasattr(pb_mod.os, "killpg"):
+            monkeypatch.setattr(pb_mod.os, "killpg", _raise_lookup)
+        assert pb_mod.llamacpp_stop_server(handle, grace_seconds=0.1) is True
+
+
+def _wiz_temp_pid_path(isolated_state):
+    """Return a writable pid-file path inside the isolated state dir."""
+    _pb, _wiz, state_dir = isolated_state
+    pid_dir = state_dir / "run"
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = pid_dir / "test.pid"
+    pid_file.write_text("99999999")
+    return pid_file

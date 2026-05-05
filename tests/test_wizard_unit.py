@@ -1328,6 +1328,253 @@ class TestStep2_5SmokeTest:
 
 
 # ---------------------------------------------------------------------------
+# Step 5 — llama.cpp auto-start branch (issue #53).
+# ---------------------------------------------------------------------------
+
+
+class TestStep2_5LlamaCppAutostart:
+    """Cover the new auto-start orchestration in `_llamacpp_smoke_test`."""
+
+    def _llamacpp_state(self, wiz, model_path: str | None = None):
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            engine_model_tag="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+        )
+        state.profile = {"llmfit_system": {"system": {"has_gpu": False, "cpu_cores": 4}}}
+        if model_path:
+            state.profile["llamacpp_model_path"] = model_path
+        return state
+
+    def test_reuses_running_server_with_matching_model(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "server_running": True,
+                "server_port": 8001,
+                "model": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+            },
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_start_server",
+            lambda **kw: (spawn_calls.append(kw), {"ok": True})[1],
+        )
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_llamacpp_model",
+            lambda tag: {
+                "ok": True,
+                "response": "READY",
+                "tokens_per_second": 30.0,
+                "completion_tokens": 6,
+                "duration_seconds": 0.2,
+            },
+        )
+        state = self._llamacpp_state(wiz)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert "5" in state.completed_steps
+        # Did NOT spawn a new server because one was already running.
+        assert spawn_calls == []
+
+    def test_running_server_with_other_model_aborts_in_non_interactive(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "server_running": True,
+                "server_port": 8001,
+                "model": "deepseek-coder-v2.gguf",
+            },
+        )
+        spawn_calls = []
+        monkeypatch.setattr(pb, "llamacpp_start_server", lambda **kw: spawn_calls.append(kw))
+        state = self._llamacpp_state(wiz)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
+        assert "5" not in state.completed_steps
+        assert spawn_calls == []
+        assert "different model" in (state.smoke_test_result.get("error") or "")
+
+    def test_no_path_recorded_aborts_with_actionable_error(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+        spawn_calls = []
+        monkeypatch.setattr(pb, "llamacpp_start_server", lambda **kw: spawn_calls.append(kw))
+        state = self._llamacpp_state(wiz, model_path=None)
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
+        assert spawn_calls == []
+        assert "re-run wizard step 4" in (state.smoke_test_result.get("error") or "")
+
+    def test_spawns_server_when_missing_then_runs_smoke_test(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        pb, wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+        spawned: dict = {}
+
+        def _fake_start(**kw):
+            spawned.update(kw)
+            return {
+                "ok": True,
+                "argv": [
+                    "llama-server",
+                    "--model",
+                    kw["model_path"],
+                    "--port",
+                    str(kw.get("port", 8001)),
+                ],
+                "handle": pb.LlamaServerHandle(
+                    pid=42424,
+                    port=kw.get("port", 8001),
+                    host=kw.get("host", "127.0.0.1"),
+                    model_path=kw["model_path"],
+                    argv=["llama-server", "--model", kw["model_path"]],
+                    log_path=str(tmp_path / "log.txt"),
+                    pid_file=str(tmp_path / "pid"),
+                    we_started_it=True,
+                ),
+                "error": None,
+                "log_path": str(tmp_path / "log.txt"),
+            }
+
+        monkeypatch.setattr(pb, "llamacpp_start_server", _fake_start)
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_llamacpp_model",
+            lambda tag: {
+                "ok": True,
+                "response": "READY",
+                "tokens_per_second": 25.0,
+                "completion_tokens": 6,
+                "duration_seconds": 0.24,
+            },
+        )
+        state = self._llamacpp_state(wiz, model_path=str(gguf))
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert "5" in state.completed_steps
+        assert spawned["model_path"] == str(gguf)
+
+    def test_spawn_failure_surfaces_command_in_result(self, isolated_state, monkeypatch, tmp_path):
+        pb, wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "server_running": False,
+                "server_port": 8001,
+                "model": None,
+            },
+        )
+
+        def _fail_start(**kw):
+            return {
+                "ok": False,
+                "argv": [
+                    "/usr/local/bin/llama-server",
+                    "--model",
+                    kw["model_path"],
+                    "--port",
+                    "8001",
+                ],
+                "handle": None,
+                "error": "server did not become ready within 30s",
+                "log_path": str(tmp_path / "log.txt"),
+            }
+
+        monkeypatch.setattr(pb, "llamacpp_start_server", _fail_start)
+        state = self._llamacpp_state(wiz, model_path=str(gguf))
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
+        assert "5" not in state.completed_steps
+        # Manual command was captured in the result so the wizard prints it.
+        assert state.smoke_test_result.get("manual_command")
+        assert str(gguf) in state.smoke_test_result["manual_command"]
+        assert "--model" in state.smoke_test_result["manual_command"]
+
+
+class TestLlamaCppDownloadCapturesPath:
+    """Regression: the wizard must record the resolved GGUF path so Step 5 can spawn the server."""
+
+    def test_download_passes_local_dir_and_persists_path(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        pb, wiz, state_dir = isolated_state
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf"})
+
+        captured: dict = {}
+
+        def _fake_download(repo_id, filename=None, local_dir=None, *, stream=True):
+            captured["repo_id"] = repo_id
+            captured["filename"] = filename
+            captured["local_dir"] = local_dir
+            # Simulate the streaming HF CLI dropping a file in local_dir.
+            target_dir = wiz.Path(local_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            gguf = target_dir / "model-Q4_K_M.gguf"
+            gguf.write_bytes(b"\x00" * 1024)
+            return {
+                "ok": True,
+                "path": str(gguf),
+                "error": None,
+                "bytes_downloaded": 1024,
+                "elapsed_seconds": 1.0,
+                "not_found": False,
+            }
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", _fake_download)
+        out = wiz._download_gguf_via_hf_cli("bartowski/Qwen2.5-Coder-7B-Instruct-GGUF")
+        assert out["ok"] is True
+        assert out["path"] is not None
+        assert out["path"].endswith(".gguf")
+        # Crucially, local_dir was passed so HF will populate a recoverable path.
+        assert captured["local_dir"] is not None
+        assert "models" in captured["local_dir"]
+
+    def test_largest_gguf_helper_picks_biggest_file(self, isolated_state, tmp_path):
+        _pb, wiz, _ = isolated_state
+        small = tmp_path / "a.gguf"
+        small.write_bytes(b"\x00" * 10)
+        big = tmp_path / "b.gguf"
+        big.write_bytes(b"\x00" * 10_000)
+        result = wiz._largest_gguf_in(tmp_path)
+        assert result == str(big)
+
+    def test_largest_gguf_helper_returns_none_when_empty(self, isolated_state, tmp_path):
+        _pb, wiz, _ = isolated_state
+        result = wiz._largest_gguf_in(tmp_path)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
 # Welcome banner — print_welcome_banner and run_wizard startup display.
 # ---------------------------------------------------------------------------
 

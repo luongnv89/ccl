@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform
@@ -18,6 +19,15 @@ STATE_DIR = Path(os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", ORIG_HOME / ".cl
 
 LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
 LLAMACPP_SERVER_PORT = int(os.environ.get("LLAMACPP_SERVER_PORT", "8001"))
+LLAMACPP_SERVER_HOST = os.environ.get("LLAMACPP_SERVER_HOST", "127.0.0.1")
+LLAMACPP_CTX_SIZE = int(os.environ.get("LLAMACPP_CTX_SIZE", "4096"))
+# When set explicitly, overrides GPU-offload auto-detection (e.g. "0" forces CPU,
+# "-1" offloads everything to GPU, "33" offloads N layers).
+LLAMACPP_N_GPU_LAYERS = os.environ.get("LLAMACPP_N_GPU_LAYERS")
+LLAMACPP_THREADS = os.environ.get("LLAMACPP_THREADS")
+# Per-port pid + log files live under STATE_DIR; we never assume /tmp.
+LLAMACPP_LOG_DIR = STATE_DIR / "logs"
+LLAMACPP_PID_DIR = STATE_DIR / "run"
 
 # 9router exposes an OpenAI-compatible API; the dashboard issues an API key
 # the user pastes into ~/.claude-codex-local/9router-api-key (chmod 600).
@@ -221,7 +231,8 @@ class LlamaCppAdapter:
             return {
                 "ok": False,
                 "detail": f"llama.cpp server not running on port {info['server_port']}. "
-                f"Run: llama-server --port {info['server_port']} --model <path/to/model.gguf>",
+                f"The wizard's Step 5 will auto-start it after a model download; "
+                f"run `ccl --resume` to continue.",
             }
         return {
             "ok": True,
@@ -1505,7 +1516,7 @@ def llamacpp_info() -> dict[str, Any]:
         return base
 
     # Probe /v1/models — llama-server exposes this endpoint when running.
-    url = f"http://localhost:{LLAMACPP_SERVER_PORT}/v1/models"
+    url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/v1/models"
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:
             body = json.loads(resp.read())
@@ -1517,6 +1528,362 @@ def llamacpp_info() -> dict[str, Any]:
     except Exception:
         pass
     return base
+
+
+# ---------------------------------------------------------------------------
+# llama.cpp server lifecycle (start / wait / stop)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LlamaServerHandle:
+    """Minimal handle returned when we spawn a llama-server process.
+
+    ``we_started_it`` is True only when this process owns the lifecycle of the
+    spawned server — Step 5 uses it to decide whether ``stop_server`` is allowed
+    to terminate the underlying process.
+    """
+
+    pid: int
+    port: int
+    host: str
+    model_path: str
+    argv: list[str]
+    log_path: str
+    pid_file: str
+    we_started_it: bool = True
+
+
+def safe_repo_slug(repo_id: str) -> str:
+    """Filesystem-safe slug for a HuggingFace repo id like ``org/repo``."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", repo_id.strip())
+    return cleaned.strip("-") or "model"
+
+
+def detect_llamacpp_gpu_offload(profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    Decide a sensible ``--n-gpu-layers`` for llama-server on this host.
+
+    Returns ``{"n_gpu_layers": int, "kind": str, "reason": str}``.
+    Order: explicit env override → llmfit-detected GPU → Apple Silicon (Metal) →
+    nvidia-smi (CUDA) → CPU only.
+    """
+    if LLAMACPP_N_GPU_LAYERS is not None:
+        try:
+            n = int(LLAMACPP_N_GPU_LAYERS)
+            return {"n_gpu_layers": n, "kind": "env-override", "reason": "LLAMACPP_N_GPU_LAYERS"}
+        except ValueError:
+            pass
+
+    if profile:
+        sys_info = profile.get("llmfit_system") or {}
+        sys_info = sys_info.get("system", sys_info) if isinstance(sys_info, dict) else {}
+        if isinstance(sys_info, dict) and sys_info.get("has_gpu"):
+            gpu_name = str(sys_info.get("gpu_name") or "").lower()
+            if "apple" in gpu_name or "metal" in gpu_name or gpu_name.startswith("m"):
+                return {
+                    "n_gpu_layers": -1,
+                    "kind": "metal",
+                    "reason": f"llmfit detected {gpu_name}",
+                }
+            return {"n_gpu_layers": -1, "kind": "gpu", "reason": f"llmfit detected {gpu_name}"}
+
+    machine = platform.machine().lower()
+    if platform.system() == "Darwin" and machine in ("arm64", "aarch64"):
+        return {"n_gpu_layers": -1, "kind": "metal", "reason": "Apple Silicon detected"}
+
+    if shutil.which("nvidia-smi"):
+        return {"n_gpu_layers": -1, "kind": "cuda", "reason": "nvidia-smi found on PATH"}
+
+    return {"n_gpu_layers": 0, "kind": "cpu", "reason": "no GPU detected"}
+
+
+def detect_llamacpp_threads(profile: dict[str, Any] | None = None) -> int:
+    """Pick a reasonable ``--threads`` value, honoring LLAMACPP_THREADS."""
+    if LLAMACPP_THREADS is not None:
+        try:
+            n = int(LLAMACPP_THREADS)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    if profile:
+        sys_info = profile.get("llmfit_system") or {}
+        sys_info = sys_info.get("system", sys_info) if isinstance(sys_info, dict) else {}
+        if isinstance(sys_info, dict):
+            cores = sys_info.get("cpu_cores")
+            if isinstance(cores, int) and cores > 0:
+                # Use physical cores; oversubscribing slows llama-server.
+                return min(cores, 16)
+    cpu = os.cpu_count() or 4
+    return min(cpu, 16)
+
+
+def build_llamacpp_server_args(
+    *,
+    binary: str,
+    model_path: str,
+    port: int = LLAMACPP_SERVER_PORT,
+    host: str = LLAMACPP_SERVER_HOST,
+    ctx_size: int = LLAMACPP_CTX_SIZE,
+    n_gpu_layers: int = 0,
+    threads: int = 4,
+) -> list[str]:
+    """Compose the argv list for llama-server with the wizard's defaults."""
+    return [
+        binary,
+        "--model",
+        model_path,
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--ctx-size",
+        str(ctx_size),
+        "--n-gpu-layers",
+        str(n_gpu_layers),
+        "--threads",
+        str(threads),
+    ]
+
+
+def llamacpp_wait_until_ready(
+    *,
+    port: int = LLAMACPP_SERVER_PORT,
+    host: str = LLAMACPP_SERVER_HOST,
+    timeout: float = 120.0,
+    poll_interval: float = 1.0,
+) -> bool:
+    """Poll ``/health`` until the server responds 200 or the deadline passes."""
+    import time
+    import urllib.error
+    import urllib.request
+
+    url = f"http://{host}:{port}/health"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                if resp.status == 200:
+                    return True
+        except (urllib.error.URLError, OSError):
+            pass
+        except Exception:
+            pass
+        time.sleep(poll_interval)
+    return False
+
+
+def llamacpp_start_server(
+    *,
+    model_path: str,
+    profile: dict[str, Any] | None = None,
+    port: int = LLAMACPP_SERVER_PORT,
+    host: str = LLAMACPP_SERVER_HOST,
+    ctx_size: int = LLAMACPP_CTX_SIZE,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """
+    Spawn ``llama-server`` with the just-downloaded model and the wizard's
+    default parameter set, then poll ``/health`` until it is ready.
+
+    Returns ``{"ok": bool, "handle": LlamaServerHandle | None, "argv": list[str],
+    "error": str | None, "log_path": str}``. Always returns the argv that was
+    attempted (or would have been attempted) so callers can echo it on failure.
+    """
+    detect = llamacpp_detect()
+    if not detect.get("present"):
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": [],
+            "error": "llama-server binary not found on PATH",
+            "log_path": "",
+        }
+    binary = shutil.which(detect["binary"]) or detect["binary"]
+
+    if not Path(model_path).exists():
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": [],
+            "error": f"model file not found: {model_path}",
+            "log_path": "",
+        }
+
+    gpu = detect_llamacpp_gpu_offload(profile)
+    threads = detect_llamacpp_threads(profile)
+    argv = build_llamacpp_server_args(
+        binary=binary,
+        model_path=model_path,
+        port=port,
+        host=host,
+        ctx_size=ctx_size,
+        n_gpu_layers=int(gpu["n_gpu_layers"]),
+        threads=threads,
+    )
+
+    LLAMACPP_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    LLAMACPP_PID_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LLAMACPP_LOG_DIR / f"llama-server-{port}.log"
+    pid_file = LLAMACPP_PID_DIR / f"llama-server-{port}.pid"
+
+    popen_kwargs: dict[str, Any] = {
+        "env": ensure_path(None),
+    }
+    # POSIX: detach into a new session so SIGINT in the wizard doesn't
+    # propagate to the long-lived child, and cleanup can target the group.
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+
+    try:
+        # Subprocess inherits this fd; we close our copy after Popen returns,
+        # so a `with` block is not appropriate here.
+        log_handle = open(log_path, "ab", buffering=0)  # noqa: SIM115
+    except OSError as exc:
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": argv,
+            "error": f"could not open log file {log_path}: {exc}",
+            "log_path": str(log_path),
+        }
+
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            **popen_kwargs,
+        )
+    except FileNotFoundError as exc:
+        log_handle.close()
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": argv,
+            "error": f"failed to spawn llama-server: {exc}",
+            "log_path": str(log_path),
+        }
+    except OSError as exc:
+        log_handle.close()
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": argv,
+            "error": f"failed to spawn llama-server: {exc}",
+            "log_path": str(log_path),
+        }
+    finally:
+        # The child inherits the file descriptor; we don't need our copy.
+        with contextlib.suppress(Exception):
+            log_handle.close()
+
+    with contextlib.suppress(OSError):
+        pid_file.write_text(str(proc.pid))
+
+    handle = LlamaServerHandle(
+        pid=proc.pid,
+        port=port,
+        host=host,
+        model_path=model_path,
+        argv=argv,
+        log_path=str(log_path),
+        pid_file=str(pid_file),
+        we_started_it=True,
+    )
+
+    ready = llamacpp_wait_until_ready(port=port, host=host, timeout=timeout)
+    if not ready:
+        # Process never came up — best-effort terminate so we don't leak it.
+        llamacpp_stop_server(handle, grace_seconds=3.0)
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": argv,
+            "error": f"server did not become ready within {timeout:.0f}s",
+            "log_path": str(log_path),
+        }
+
+    # Confirm the process is still running after the readiness probe; some
+    # error paths (model load failure, bind error) make /health flap before
+    # the process exits.
+    if proc.poll() is not None:
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": argv,
+            "error": f"llama-server exited with status {proc.returncode} after readiness probe",
+            "log_path": str(log_path),
+        }
+
+    return {
+        "ok": True,
+        "handle": handle,
+        "argv": argv,
+        "error": None,
+        "log_path": str(log_path),
+    }
+
+
+def llamacpp_stop_server(handle: LlamaServerHandle, *, grace_seconds: float = 5.0) -> bool:
+    """Terminate a server we started. Returns True if the pid is gone afterwards."""
+    if not handle.we_started_it:
+        return False
+    pid = handle.pid
+    _signal_process(pid, 15)  # SIGTERM (best-effort)
+
+    import time
+
+    deadline = time.monotonic() + max(grace_seconds, 0.0)
+    while time.monotonic() < deadline:
+        if _pid_gone(pid):
+            _cleanup_pid_file(handle.pid_file)
+            return True
+        time.sleep(0.1)
+
+    # Escalate to SIGKILL.
+    _signal_process(pid, 9)
+
+    deadline2 = time.monotonic() + 2.0
+    while time.monotonic() < deadline2:
+        if _pid_gone(pid):
+            _cleanup_pid_file(handle.pid_file)
+            return True
+        time.sleep(0.1)
+    return _pid_gone(pid)
+
+
+def _pid_gone(pid: int) -> bool:
+    """Best-effort check that ``pid`` is no longer alive."""
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        # Different user owns it — we can't tell, but it's not ours to wait on.
+        return True
+    except OSError:
+        return True
+
+
+def _signal_process(pid: int, sig: int) -> None:
+    """Best-effort SIGTERM/SIGKILL to a process; targets the session group on POSIX."""
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(pid), sig)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.kill(pid, sig)
+
+
+def _cleanup_pid_file(pid_file: str) -> None:
+    with contextlib.suppress(OSError):
+        Path(pid_file).unlink(missing_ok=True)
 
 
 def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
@@ -1531,7 +1898,7 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
     import urllib.error
     import urllib.request
 
-    url = f"http://localhost:{LLAMACPP_SERVER_PORT}/v1/chat/completions"
+    url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/v1/chat/completions"
     payload = json.dumps(
         {
             "model": model,
