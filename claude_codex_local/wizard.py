@@ -1622,10 +1622,13 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
                 ),
             }
         # User opted in: run the smoke test against whatever is loaded.
-        if running_model:
-            state.engine_model_tag = running_model
-            tag = running_model
-        return pb.smoke_test_llamacpp_model(tag)
+        # Do NOT mutate state.engine_model_tag here — Step 6 wires the
+        # harness from the persisted HF repo id; clobbering it with the
+        # running server's basename would break that downstream config.
+        # llama-server ignores the `model` field and uses whatever is
+        # loaded, so passing ``running_model`` only affects this request.
+        smoke_target = running_model or tag
+        return pb.smoke_test_llamacpp_model(smoke_target)
 
     # Phase 2 — no server running. We need a real GGUF path to spawn one.
     if not model_path or not Path(model_path).is_file():
@@ -1683,22 +1686,41 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
     return smoke
 
 
+_MIN_MODEL_MATCH_LEN = 12
+
+
 def _llamacpp_models_match(running: str, wanted: str) -> bool:
     """
     Loose match between the model llama-server reports on /v1/models and the
-    HF repo id / file path the wizard wants. ``running`` is often the file
-    basename, while ``wanted`` is an HF repo id like ``org/repo``; treat any
-    non-empty substring overlap as a match.
+    HF repo id / file path the wizard wants. ``running`` is often the GGUF
+    file basename, while ``wanted`` is typically an HF repo id like
+    ``org/repo``. We require a substring overlap of at least
+    ``_MIN_MODEL_MATCH_LEN`` characters so different sizes/quants of the same
+    family (e.g. ``...-1.5B`` vs ``...-7B``) do not collapse to a match.
     """
     if not running or not wanted:
         return False
-    a = running.lower()
-    b = wanted.lower()
+    a = _normalize_model_id(running)
+    b = _normalize_model_id(wanted)
     if a == b:
         return True
-    a_base = Path(a).stem
-    b_base = Path(b).stem.split("/")[-1]
-    return a_base in b or b_base in a or a in b or b in a
+    short = a if len(a) <= len(b) else b
+    long_ = b if short is a else a
+    return len(short) >= _MIN_MODEL_MATCH_LEN and short in long_
+
+
+def _normalize_model_id(value: str) -> str:
+    """Lowercase + strip extension, dir prefix, and `-gguf` suffix for matching."""
+    raw = value.strip().lower()
+    # Take the basename without the parent dir.
+    raw = raw.rsplit("/", 1)[-1]
+    # Strip a trailing `.gguf` (or any final extension) only when present.
+    if raw.endswith(".gguf"):
+        raw = raw[: -len(".gguf")]
+    # HF repos are commonly suffixed `-gguf` to mark the quantized variant.
+    if raw.endswith("-gguf"):
+        raw = raw[: -len("-gguf")]
+    return raw
 
 
 def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bool:

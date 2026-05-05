@@ -1280,6 +1280,32 @@ class TestLlamaCppWaitUntilReady:
         # Tiny timeout so the test is fast.
         assert pb.llamacpp_wait_until_ready(port=18002, timeout=0.2, poll_interval=0.05) is False
 
+    def test_short_circuits_when_proc_already_exited(self, monkeypatch):
+        import urllib.error
+        import urllib.request as _u
+
+        called = {"hits": 0}
+
+        def _fake_urlopen(url, timeout=2):
+            called["hits"] += 1
+            raise urllib.error.URLError("should not be called")
+
+        monkeypatch.setattr(_u, "urlopen", _fake_urlopen)
+
+        class _DeadProc:
+            def poll(self):
+                return 1
+
+        # The dead-proc short-circuit must bail out without burning the timeout.
+        assert (
+            pb.llamacpp_wait_until_ready(
+                port=18099, timeout=30.0, poll_interval=5.0, proc=_DeadProc()
+            )
+            is False
+        )
+        # And without ever attempting the HTTP probe.
+        assert called["hits"] == 0
+
 
 class TestLlamaCppStartServer:
     def test_returns_error_when_binary_missing(self, monkeypatch, isolated_state):
@@ -1404,6 +1430,42 @@ class TestLlamaCppStartServer:
         assert out["ok"] is False
         assert "did not become ready" in out["error"]
         assert len(stop_calls) == 1
+
+    def test_post_readiness_exit_cleans_up_pid_file(self, monkeypatch, isolated_state, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "fake.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FlappingProc:
+            """Returns None during wait_until_ready, then exited afterwards.
+
+            The wait_until_ready monkeypatch swallows the proc kwarg so this
+            class only needs to report the exit status when the post-readiness
+            assertion calls poll().
+            """
+
+            pid = 88888
+            returncode = 13
+
+            def poll(self):
+                return 13
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FlappingProc())
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+
+        out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18006)
+        assert out["ok"] is False
+        assert "after readiness probe" in out["error"]
+        # Pid file must NOT remain on disk pointing at a dead process.
+        assert not (pb_mod.LLAMACPP_PID_DIR / "llama-server-18006.pid").exists()
 
 
 class TestLlamaCppStopServer:

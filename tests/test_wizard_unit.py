@@ -1521,6 +1521,110 @@ class TestStep2_5LlamaCppAutostart:
         assert "--model" in state.smoke_test_result["manual_command"]
 
 
+class TestLlamaCppModelMatch:
+    """Regression: the reuse heuristic must not collapse different sizes/variants."""
+
+    def test_basename_matches_repo_id_for_same_family(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        assert (
+            wiz._llamacpp_models_match(
+                "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+                "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+            )
+            is True
+        )
+
+    def test_does_not_match_different_sizes(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        assert (
+            wiz._llamacpp_models_match(
+                "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf",
+                "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+            )
+            is False
+        )
+
+    def test_does_not_match_different_variants(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        assert (
+            wiz._llamacpp_models_match(
+                "Qwen2.5-VL-7B-Instruct.gguf",
+                "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
+            )
+            is False
+        )
+
+    def test_does_not_match_different_minor_version(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        # The historical bug: Path('Llama-3.1-8B').stem -> 'Llama-3' which
+        # silently matched any `Llama-3*` repo id.
+        assert (
+            wiz._llamacpp_models_match(
+                "Meta-Llama-3.1-8B-Instruct.gguf",
+                "meta-llama/Meta-Llama-3-8B-Instruct",
+            )
+            is False
+        )
+
+    def test_short_overlap_does_not_match(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        # Both contain "qwen" but nothing more — must not match.
+        assert wiz._llamacpp_models_match("qwen2.gguf", "qwen3-coder") is False
+
+    def test_empty_strings_return_false(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        assert wiz._llamacpp_models_match("", "anything") is False
+        assert wiz._llamacpp_models_match("anything", "") is False
+
+
+class TestStep2_5LlamaCppPreservesEngineModelTag:
+    """When the user opts in to a mismatched running model, the wizard must
+    not overwrite the persisted HF repo id (Step 6 wires the harness from it)."""
+
+    def test_engine_model_tag_is_preserved_on_opt_in(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "present": True,
+                "server_running": True,
+                "server_port": 8001,
+                "model": "deepseek-coder-v2-lite-instruct.gguf",
+            },
+        )
+
+        class _Yes:
+            def ask(self):
+                return True
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _Yes())
+        captured: dict = {}
+
+        def _fake_smoke(tag):
+            captured["tag"] = tag
+            return {
+                "ok": True,
+                "response": "READY",
+                "tokens_per_second": 12.0,
+                "completion_tokens": 6,
+                "duration_seconds": 0.5,
+            }
+
+        monkeypatch.setattr(pb, "smoke_test_llamacpp_model", _fake_smoke)
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            engine_model_tag="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+        )
+        state.profile = {"llmfit_system": {"system": {"has_gpu": False, "cpu_cores": 4}}}
+        assert wiz.step_2_5_smoke_test(state, non_interactive=False) is True
+        # Smoke test ran against whatever the running server has loaded.
+        assert captured["tag"] == "deepseek-coder-v2-lite-instruct.gguf"
+        # Persisted state must still be the user's HF repo id, NOT the basename
+        # of the running server (otherwise Step 6 would wire a broken harness).
+        assert state.engine_model_tag == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+
+
 class TestLlamaCppDownloadCapturesPath:
     """Regression: the wizard must record the resolved GGUF path so Step 5 can spawn the server."""
 

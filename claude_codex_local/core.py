@@ -1653,8 +1653,14 @@ def llamacpp_wait_until_ready(
     host: str = LLAMACPP_SERVER_HOST,
     timeout: float = 120.0,
     poll_interval: float = 1.0,
+    proc: subprocess.Popen[bytes] | None = None,
 ) -> bool:
-    """Poll ``/health`` until the server responds 200 or the deadline passes."""
+    """Poll ``/health`` until the server responds 200 or the deadline passes.
+
+    When ``proc`` is supplied, the loop also bails out the moment the
+    underlying process has exited — avoids waiting the full timeout for a
+    crashed server (e.g. bad GGUF, port already bound).
+    """
     import time
     import urllib.error
     import urllib.request
@@ -1662,6 +1668,8 @@ def llamacpp_wait_until_ready(
     url = f"http://{host}:{port}/health"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if proc is not None and proc.poll() is not None:
+            return False
         try:
             with urllib.request.urlopen(url, timeout=2) as resp:
                 if resp.status == 200:
@@ -1702,7 +1710,7 @@ def llamacpp_start_server(
         }
     binary = shutil.which(detect["binary"]) or detect["binary"]
 
-    if not Path(model_path).exists():
+    if not Path(model_path).is_file():
         return {
             "ok": False,
             "handle": None,
@@ -1794,15 +1802,23 @@ def llamacpp_start_server(
         we_started_it=True,
     )
 
-    ready = llamacpp_wait_until_ready(port=port, host=host, timeout=timeout)
+    ready = llamacpp_wait_until_ready(port=port, host=host, timeout=timeout, proc=proc)
     if not ready:
-        # Process never came up — best-effort terminate so we don't leak it.
+        # Process never came up (or already exited) — best-effort terminate so
+        # we don't leak it, and ensure the pid file is gone.
         llamacpp_stop_server(handle, grace_seconds=3.0)
+        _cleanup_pid_file(str(pid_file))
+        if proc.poll() is not None:
+            err = (
+                f"llama-server exited with status {proc.returncode} during startup; see {log_path}"
+            )
+        else:
+            err = f"server did not become ready within {timeout:.0f}s"
         return {
             "ok": False,
             "handle": None,
             "argv": argv,
-            "error": f"server did not become ready within {timeout:.0f}s",
+            "error": err,
             "log_path": str(log_path),
         }
 
@@ -1810,6 +1826,7 @@ def llamacpp_start_server(
     # error paths (model load failure, bind error) make /health flap before
     # the process exits.
     if proc.poll() is not None:
+        _cleanup_pid_file(str(pid_file))
         return {
             "ok": False,
             "handle": None,
