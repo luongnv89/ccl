@@ -9,6 +9,7 @@ fixture defined in conftest.py.
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import claude_codex_local.core as pb
 
@@ -564,29 +565,31 @@ class TestInstalledModelsForEngine:
         assert tags[0] == "qwen/qwen3-coder-30b"
 
     def test_llamacpp_surfaces_running_server_model(self):
-        profile = {
-            "llamacpp": {
-                "present": True,
-                "server_running": True,
-                "server_port": 8001,
-                "model": "local/qwen3-coder-30b.gguf",
+        with patch("claude_codex_local.core.scan_huggingface_gguf_cache", return_value=[]):
+            profile = {
+                "llamacpp": {
+                    "present": True,
+                    "server_running": True,
+                    "server_port": 8001,
+                    "model": "local/qwen3-coder-30b.gguf",
+                }
             }
-        }
-        out = pb.installed_models_for_engine(profile, "llamacpp")
-        assert len(out) == 1
-        assert out[0]["tag"] == "local/qwen3-coder-30b.gguf"
-        assert out[0]["running"] is True
+            out = pb.installed_models_for_engine(profile, "llamacpp")
+            assert len(out) == 1
+            assert out[0]["tag"] == "local/qwen3-coder-30b.gguf"
+            assert out[0]["running"] is True
 
     def test_llamacpp_returns_empty_when_server_not_running(self):
-        profile = {
-            "llamacpp": {
-                "present": True,
-                "server_running": False,
-                "server_port": 8001,
-                "model": None,
+        with patch("claude_codex_local.core.scan_huggingface_gguf_cache", return_value=[]):
+            profile = {
+                "llamacpp": {
+                    "present": True,
+                    "server_running": False,
+                    "server_port": 8001,
+                    "model": None,
+                }
             }
-        }
-        assert pb.installed_models_for_engine(profile, "llamacpp") == []
+            assert pb.installed_models_for_engine(profile, "llamacpp") == []
 
     def test_empty_engine_section_returns_empty(self):
         assert pb.installed_models_for_engine({"ollama": {"models": []}}, "ollama") == []
