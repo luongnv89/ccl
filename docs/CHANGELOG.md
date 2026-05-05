@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.9.0 — 2026-05-05
+
+### Features
+
+- **9router Integration**: Add 9router as a cloud-routing backend provider (#51, #52)
+  - Add Router9Adapter with smoke test support (@luongnv89)
+  - Extend wizard with 9router setup flow and API key management (@luongnv89)
+  - Support cc9/cx9 aliases for 9router alongside existing cc/cx aliases (@luongnv89)
+  - Add fence-tag derivation and doctor checks for 9router (@luongnv89)
+  - Implement key-file deferral for Claude and Codex 9router branches (@luongnv89)
+  - Update wizard steps to handle 9router-specific configuration (@luongnv89)
+
+### Bug Fixes
+
+- Fix wizard to honor forced setup preferences (#51) (@luongnv89)
+- Update DeepSeek model hub paths (@luongnv89)
+- Fix step 2 install-hint loop to show 9router URL (#51) (@luongnv89)
+
+### Documentation
+
+- Document 9router engine and cc9/cx9 aliases in README and ARCHITECTURE.md (#51) (@luongnv89)
+- Add 9router to primary_engine inline comments (#51) (@luongnv89)
+
+### Tests
+
+- Update e2e and vllm adapter registry assertions for 9router (#51) (@luongnv89)
+
+### Refactoring
+
+- Refactor wizard _alias_block and _write_helper_script to use 4-way dispatch (#51) (@luongnv89)
+- Extend WireResult with raw_env field for deferred shell expressions (#51) (@luongnv89)
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.8.3...v0.9.0
+
 ## [0.8.3] - 2026-04-24
 
 ### Fixed

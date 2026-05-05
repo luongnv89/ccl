@@ -71,7 +71,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/
 Override defaults with env vars:
 
 ```bash
-CCL_REF=v0.8.3 CCL_INSTALL_DIR=~/tools/claude-codex-local \
+CCL_REF=v0.9.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
   bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 
@@ -176,15 +176,61 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 [9router](https://github.com/9router/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude) or `cx9` (Codex) alias and leaves your existing `cc` / `cx` aliases untouched.
 
+### Installing and running 9router
+
+**Step 1: Install 9router**
+
 ```bash
-# 1. Install + start 9router locally (see https://github.com/9router/9router)
-# 2. Copy your API key from the 9router dashboard, then run:
+# Using npm (recommended)
+npm install -g 9router
+
+# Or using yarn
+yarn global add 9router
+
+# Or using pnpm
+pnpm add -g 9router
+```
+
+**Step 2: Get your API key**
+
+1. Visit the [9router dashboard](https://9router.com/dashboard) and sign up or log in
+2. Navigate to API Keys section
+3. Create a new API key and copy it
+
+**Step 3: Start the 9router service**
+
+```bash
+# Start 9router with your API key
+9router start --api-key YOUR_API_KEY_HERE
+
+# Or set it as an environment variable
+export ROUTER9_API_KEY=YOUR_API_KEY_HERE
+9router start
+
+# The service will start on http://localhost:20128
+```
+
+**Step 4: Verify 9router is running**
+
+```bash
+# Check if the service is responding
+curl http://localhost:20128/v1/models
+
+# You should see a list of available models
+```
+
+**Step 5: Configure CCL to use 9router**
+
+```bash
+# Interactive setup (wizard will prompt for API key)
 ccl setup --engine 9router
 
 # Non-interactive (CI / scripted):
 CCL_9ROUTER_API_KEY=<paste-here> CCL_9ROUTER_MODEL=kr/claude-sonnet-4.5 \
   ccl setup --engine 9router --harness claude --non-interactive
 ```
+
+### How the wizard configures 9router
 
 The wizard:
 
