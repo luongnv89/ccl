@@ -872,6 +872,57 @@ class _StubAsk:
         return self._answer
 
 
+class TestForcedPreferenceSelection:
+    """CLI --harness/--engine values must be honored independently."""
+
+    def test_non_interactive_forced_engine_survives_default_picker(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_engine="9router")
+        state.profile = {
+            "presence": {
+                "harnesses": ["claude"],
+                "engines": ["ollama", "9router"],
+            },
+            "host": {"system": "Darwin", "machine": "arm64"},
+            "ollama": {"models": [{"name": "qwen2.5-coder:7b"}]},
+            "lmstudio": {"server_running": False, "models": []},
+        }
+
+        assert wiz.step_2_3_pick_preferences(state, non_interactive=True) is True
+
+        assert state.primary_harness == "claude"
+        assert state.primary_engine == "9router"
+        assert state.secondary_engines == ["ollama"]
+
+    def test_interactive_forced_engine_skips_engine_prompt(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_engine="9router")
+        state.profile = {
+            "presence": {
+                "harnesses": ["claude"],
+                "engines": ["ollama", "9router"],
+            },
+            "host": {"system": "Darwin", "machine": "arm64"},
+            "ollama": {"models": [{"name": "qwen2.5-coder:7b"}]},
+            "lmstudio": {"server_running": False, "models": []},
+        }
+
+        prompts: list[str] = []
+
+        def fake_select(message, choices, default=None):
+            prompts.append(message)
+            if "harness" in message:
+                return _StubAsk("claude")
+            raise AssertionError("--engine 9router should skip the engine picker")
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+
+        assert wiz.step_2_3_pick_preferences(state, non_interactive=False) is True
+
+        assert prompts == ["Which harness do you want as primary?"]
+        assert state.primary_engine == "9router"
+
+
 class TestStep24PickerIntegration:
     """
     Integration tests for the refactored step_2_4_pick_model picker that must

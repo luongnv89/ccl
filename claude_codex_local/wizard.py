@@ -533,7 +533,24 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
     engines = presence["engines"]
 
     # Harness pick
-    if non_interactive:
+    if state.primary_harness:
+        choice = state.primary_harness
+        if choice not in _ALL_HARNESSES:
+            fail(f"Unknown harness: {choice}")
+            return False
+        if choice not in harnesses:
+            if non_interactive:
+                fail(f"Forced harness {choice!r} is not installed.")
+                return False
+            if not _ensure_tool(choice):
+                fail(f"Forced harness {choice!r} is still not available.")
+                return False
+            state.profile = pb.machine_profile()
+            harnesses = state.profile["presence"]["harnesses"]
+        state.primary_harness = choice
+        state.secondary_harnesses = [h for h in harnesses if h != choice]
+        ok(f"Using forced primary harness: [bold]{state.primary_harness}[/bold]")
+    elif non_interactive:
         if not harnesses:
             fail("No harness installed. Cannot continue in non-interactive mode.")
             return False
@@ -571,7 +588,24 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             break
 
     # Engine pick
-    if non_interactive:
+    if state.primary_engine:
+        choice = state.primary_engine
+        if choice not in _ALL_ENGINES:
+            fail(f"Unknown engine: {choice}")
+            return False
+        if choice not in engines:
+            if non_interactive:
+                fail(f"Forced engine {choice!r} is not installed or reachable.")
+                return False
+            if not _ensure_tool(choice):
+                fail(f"Forced engine {choice!r} is still not available.")
+                return False
+            state.profile = pb.machine_profile()
+            engines = state.profile["presence"]["engines"]
+        state.primary_engine = choice
+        state.secondary_engines = [e for e in engines if e != choice]
+        ok(f"Using forced primary engine: [bold]{state.primary_engine}[/bold]")
+    elif non_interactive:
         if not engines:
             fail("No engine installed. Cannot continue in non-interactive mode.")
             return False
@@ -2307,13 +2341,6 @@ def run_wizard(
 
     for step_id, title, fn in STEPS:
         if resume and step_id in state.completed_steps and step_id != start_step:
-            continue
-        # Honor forced harness/engine by skipping the picker.
-        if step_id == "3" and state.primary_harness and state.primary_engine:
-            ok(
-                f"Using forced picks: harness=[bold]{state.primary_harness}[/bold] engine=[bold]{state.primary_engine}[/bold]"
-            )
-            state.mark("3")
             continue
         # Step 2 is conditional: only run if step 1 failed presence check.
         if step_id == "2" and state.profile.get("presence", {}).get("has_minimum"):
