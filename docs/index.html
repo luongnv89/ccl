@@ -886,16 +886,16 @@
       <div class="hero-left">
         <div class="hero-badge reveal">
           <span class="hero-badge-dot"></span>
-          v0.9.0 · Open Source
+          v0.9.0 · Open Source · <span id="star-count">⭐ Loading...</span>
         </div>
 
         <h1 class="hero-headline reveal">
           Hit your limit? Need privacy?<br>
-          <span class="accent-claude">Just swap the model.</span>
+          <span class="accent-claude">Just swap the backend.</span>
         </h1>
 
         <p class="hero-sub reveal">
-          One alias. <span class="accent-claude">Claude Code</span> or <span class="accent-codex">Codex</span> on a local model.
+          One alias. <span class="accent-claude">Claude Code</span> or <span class="accent-codex">Codex</span> on local models or cloud routing.
           Skills, agents, MCP servers — all intact.
         </p>
 
@@ -922,6 +922,10 @@
           <span>LM Studio</span>
           <span class="trust-sep">·</span>
           <span>llama.cpp</span>
+          <span class="trust-sep">·</span>
+          <span>vLLM</span>
+          <span class="trust-sep">·</span>
+          <span>9router</span>
         </div>
       </div>
 
@@ -1000,11 +1004,11 @@
       <div class="problem-card reveal reveal-delay-2">
         <div class="problem-icon">🔒</div>
         <h3>Your code can't leave your machine</h3>
-        <p>Consulting contracts. IP clauses. Air-gapped servers. You need local AI that's operationally viable — not a toy demo.</p>
+        <p>Consulting contracts. IP clauses. Air-gapped servers. You need a backend that respects your constraints — whether that's local-only or a different cloud provider.</p>
       </div>
       <div class="problem-card reveal reveal-delay-3">
         <div class="problem-icon">🔧</div>
-        <h3>Every local setup guide breaks your workflow</h3>
+        <h3>Every alternative setup breaks your workflow</h3>
         <p>New tool. New configs. New muscle memory. You don't want to learn something new. You just wanted a backend swap.</p>
       </div>
     </div>
@@ -1018,7 +1022,7 @@
   <div class="container">
     <div class="section-label reveal">Solution</div>
     <h2 class="section-title reveal">Meet claude-codex-local</h2>
-    <p class="section-sub reveal">Keep your tools. Swap the brain. Ship locally.</p>
+    <p class="section-sub reveal">Keep your tools. Swap the backend. Ship locally or route to cloud.</p>
 
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
@@ -1039,17 +1043,17 @@
       <div class="feature-card reveal reveal-delay-1">
         <div class="feature-icon">⚡</div>
         <h3>One Alias to Rule Them All</h3>
-        <p>After setup, type <code>cc</code> or <code>cx</code>. That's it. All your skills, agents, MCP servers, and statusline work exactly as before.</p>
+        <p>After setup, type <code>cc</code> or <code>cx</code> for local. Use <code>cc9</code> or <code>cx9</code> for 9router cloud routing. All your skills, agents, MCP servers work exactly as before.</p>
       </div>
       <div class="feature-card reveal reveal-delay-2">
         <div class="feature-icon">🔒</div>
-        <h3>Offline &amp; Private</h3>
-        <p>Code never leaves your machine. No telemetry. No phone-home. After model download, zero internet required. Perfect for air-gapped projects.</p>
+        <h3>Offline &amp; Private (Local Mode)</h3>
+        <p>Code never leaves your machine with local engines. No telemetry. No phone-home. After model download, zero internet required. Perfect for air-gapped projects.</p>
       </div>
       <div class="feature-card reveal reveal-delay-3">
-        <div class="feature-icon">✅</div>
-        <h3>Proven Paths</h3>
-        <p>Claude Code + Ollama + gemma4:26b verified end-to-end. llama.cpp with GGUF models from Hugging Face also supported. Real working combos, not hypothetical support.</p>
+        <div class="feature-icon">☁️</div>
+        <h3>Cloud Routing (9router)</h3>
+        <p>Need cloud power without Anthropic limits? 9router routes to alternative providers (OpenAI, DeepSeek, etc.) while keeping your Claude Code/Codex workflow intact.</p>
       </div>
     </div>
   </div>
@@ -1061,7 +1065,7 @@
 <section id="how-it-works">
   <div class="container">
     <div class="section-label reveal" style="text-align:center">How It Works</div>
-    <h2 class="section-title reveal" style="text-align:center">Three steps. Ten minutes.<br>Fully local.</h2>
+    <h2 class="section-title reveal" style="text-align:center">Three steps. Ten minutes.<br>Local or cloud routing.</h2>
 
     <div class="steps-grid" style="margin-top:56px">
       <div class="step reveal reveal-delay-1">
@@ -1077,7 +1081,7 @@
       <div class="step reveal reveal-delay-3">
         <div class="step-number">03</div>
         <h3>Run</h3>
-        <p>Type <code style="font-family:var(--mono);font-size:13px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--cyan)">cc</code> or <code style="font-family:var(--mono);font-size:13px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--cyan)">cx</code>. Your full Claude Code or Codex experience — locally. Every skill, every agent, every MCP server intact.</p>
+        <p>Type <code style="font-family:var(--mono);font-size:13px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--cyan)">cc</code> or <code style="font-family:var(--mono);font-size:13px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--cyan)">cx</code> for local. Use <code style="font-family:var(--mono);font-size:13px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--cyan)">cc9</code>/<code style="font-family:var(--mono);font-size:13px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;color:var(--cyan)">cx9</code> for 9router cloud routing. Your full Claude Code or Codex experience — every skill, every agent, every MCP server intact.</p>
       </div>
     </div>
   </div>
@@ -1140,7 +1144,7 @@
     <div class="proof-grid reveal">
       <div class="proof-pill"><span class="check">✓</span> Claude Code + Ollama + gemma4:26b</div>
       <div class="proof-pill"><span class="check">✓</span> Codex CLI + Ollama + gemma4:26b</div>
-
+      <div class="proof-pill"><span class="check">✓</span> Claude Code + 9router + OpenAI/DeepSeek</div>
       <div class="proof-pill"><span class="warn">⚠</span> Claude Code + LM Studio + Qwen3</div>
       <div class="proof-pill"><span class="check">✓</span> Any + llama.cpp + GGUF (from Hugging Face)</div>
     </div>
@@ -1170,12 +1174,13 @@
 
       <div class="faq-item reveal reveal-delay-1">
         <button class="faq-question">
-          Which local runtimes are supported?
+          Which backends are supported?
           <span class="faq-chevron"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></span>
         </button>
         <div class="faq-answer">
           <div class="faq-answer-inner">
-            <strong>Ollama</strong> (primary, with native <code>ollama launch</code> support), <strong>LM Studio</strong>, <strong>llama.cpp</strong>, <strong>vLLM</strong>, and <strong>9router</strong> (cloud-routing proxy) — all with auto-detection during setup. The wizard will find what you have installed. For llama.cpp, GGUF models can be downloaded directly from <strong>Hugging Face</strong> via the built-in <code>huggingface-cli</code> integration. For 9router, the wizard sets up <code>cc9</code>/<code>cx9</code> aliases that route to cloud models while keeping your existing <code>cc</code>/<code>cx</code> local aliases intact.
+            <strong>Local engines:</strong> <strong>Ollama</strong> (primary, with native <code>ollama launch</code> support), <strong>LM Studio</strong>, <strong>llama.cpp</strong>, <strong>vLLM</strong> — all with auto-detection during setup. For llama.cpp, GGUF models can be downloaded directly from <strong>Hugging Face</strong> via the built-in <code>huggingface-cli</code> integration.<br><br>
+            <strong>Cloud routing:</strong> <strong>9router</strong> — a cloud-routing proxy that lets you use alternative providers (OpenAI, DeepSeek, etc.) while keeping your Claude Code/Codex workflow. The wizard sets up <code>cc9</code>/<code>cx9</code> aliases that route to cloud models while keeping your existing <code>cc</code>/<code>cx</code> local aliases intact.
           </div>
         </div>
       </div>
@@ -1211,7 +1216,7 @@
         </button>
         <div class="faq-answer">
           <div class="faq-answer-inner">
-            Yes. After the initial model download (handled by your runtime like Ollama), no internet connection is required. There is no telemetry, no phone-home, and no license server. Fully air-gap capable.
+            Yes, for local engines. After the initial model download (handled by your runtime like Ollama), no internet connection is required. There is no telemetry, no phone-home, and no license server. Fully air-gap capable. Note: 9router is a cloud-routing option and requires internet connectivity.
           </div>
         </div>
       </div>
@@ -1242,12 +1247,37 @@
 
     <div style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:32px">
 
+      <!-- v0.9.0 -->
+      <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.9.0</span>
+          <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-05-05</span>
+          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
+        </div>
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);margin-bottom:8px">Added</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <strong>9router Integration</strong>: Cloud-routing backend provider for alternative cloud models (OpenAI, DeepSeek, etc.) (#51, #52)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">cc9</code>/<code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">cx9</code> aliases for 9router alongside existing <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">cc</code>/<code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:3px">cx</code> local aliases</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Wizard extended with 9router setup flow and API key management</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--green)">+</span> Fence-tag derivation and doctor checks for 9router coexistence</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--red);margin-bottom:8px">Fixed</div>
+          <ul style="list-style:none;display:flex;flex-direction:column;gap:6px">
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✓</span> Wizard now honors forced setup preferences (#51)</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✓</span> Updated DeepSeek model hub paths</li>
+            <li style="font-size:14px;color:var(--text-muted);padding-left:16px;position:relative"><span style="position:absolute;left:0;color:var(--red)">✓</span> Step 2 install-hint loop now shows 9router URL (#51)</li>
+          </ul>
+        </div>
+      </div>
+
       <!-- v0.8.1 -->
       <div class="reveal" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px 32px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green)">v0.8.1</span>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--cyan)">v0.8.1</span>
           <span style="font-size:12px;color:var(--text-dim);font-family:var(--mono)">2026-04-17</span>
-          <span style="margin-left:auto;font-size:11px;font-family:var(--mono);font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--green);background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:20px;padding:3px 10px">Latest</span>
         </div>
         <div>
           <div style="font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--red);margin-bottom:8px">Fixed</div>
@@ -1514,6 +1544,23 @@
 </footer>
 
 <script>
+  // ── Fetch GitHub stars ─────────────────────────────────────
+  fetch('https://api.github.com/repos/luongnv89/claude-codex-local')
+    .then(res => res.json())
+    .then(data => {
+      const starCount = data.stargazers_count || 0;
+      const starEl = document.getElementById('star-count');
+      if (starEl) {
+        starEl.textContent = `⭐ ${starCount} stars`;
+      }
+    })
+    .catch(() => {
+      const starEl = document.getElementById('star-count');
+      if (starEl) {
+        starEl.textContent = '⭐ Star on GitHub';
+      }
+    });
+
   // ── Scroll reveal ──────────────────────────────────────────
   const revealObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
