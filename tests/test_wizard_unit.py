@@ -187,6 +187,48 @@ class TestModelAlreadyInstalled:
         missing = tmp_path / "does-not-exist.gguf"
         assert wiz._model_already_installed("llamacpp", str(missing), {}) is False
 
+    def test_llamacpp_running_server_matches_hf_tag_against_gguf_basename(
+        self, isolated_state, monkeypatch
+    ):
+        # Server reports a GGUF file basename; saved tag is the HF repo id.
+        # Exact equality would falsely flag this as missing — use the loose
+        # matcher to keep `ccl doctor` honest.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "server_running": True,
+                "model": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+            },
+        )
+        assert (
+            wiz._model_already_installed("llamacpp", "unsloth/Qwen2.5-Coder-7B-Instruct-GGUF", {})
+            is True
+        )
+
+    def test_llamacpp_running_server_rejects_wrong_size(self, isolated_state, monkeypatch):
+        # Loose match must NOT accept a different size of the same family —
+        # this is the safeguard a naive `wanted in served` would lose.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "server_running": True,
+                "model": "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf",
+            },
+        )
+        assert (
+            wiz._model_already_installed("llamacpp", "unsloth/Qwen2.5-Coder-7B-Instruct-GGUF", {})
+            is False
+        )
+
+    def test_llamacpp_no_running_server_is_not_installed(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "llamacpp_info", lambda: {"server_running": False})
+        assert wiz._model_already_installed("llamacpp", "unsloth/whatever-GGUF", {}) is False
+
 
 # ---------------------------------------------------------------------------
 # _model_known_incompatible_with_claude_code — tag-pattern check.

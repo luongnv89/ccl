@@ -1210,11 +1210,16 @@ def _model_already_installed(engine: str, tag: str, profile: dict[str, Any]) -> 
         # and we must not re-prompt the user to download it.
         if tag and tag.startswith("/") and Path(tag).is_file():
             return True
-        # Otherwise fall back to the running-server check so an active
-        # llama-server serving a non-path alias (e.g. an HF repo id) is
-        # also treated as installed.
+        # Otherwise fall back to the running-server check. Use the same
+        # loose matcher the rest of the wizard uses for HF tag vs. served
+        # GGUF basename — exact equality is a false negative for almost
+        # every direct-typed tag (the server reports a file basename like
+        # `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` while the saved tag is the HF
+        # repo id `unsloth/Qwen3.6-35B-A3B-GGUF`).
         status = pb.llamacpp_info()
-        return bool(status.get("server_running") and status.get("model") == tag)
+        if not status.get("server_running"):
+            return False
+        return _llamacpp_models_match(status.get("model") or "", tag)
     return False
 
 
