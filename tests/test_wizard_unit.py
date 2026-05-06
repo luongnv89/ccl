@@ -169,9 +169,23 @@ class TestModelAlreadyInstalled:
         }
         assert wiz._model_already_installed("lmstudio", "qwen/qwen3-coder-30b", profile) is True
 
-    def test_llamacpp_always_false(self, isolated_state):
+    def test_llamacpp_no_match_for_unknown_tag(self, isolated_state):
         _, wiz, _ = isolated_state
         assert wiz._model_already_installed("llamacpp", "x", {}) is False
+
+    def test_llamacpp_existing_local_gguf_is_installed(self, isolated_state, tmp_path):
+        # A tag that points to an on-disk GGUF (as produced by the "installed
+        # llamacpp model" picker) must be recognised — otherwise the wizard
+        # would re-prompt to download a model that is already on disk.
+        _, wiz, _ = isolated_state
+        gguf = tmp_path / "model-Q4_K_M.gguf"
+        gguf.write_bytes(b"\x00")
+        assert wiz._model_already_installed("llamacpp", str(gguf), {}) is True
+
+    def test_llamacpp_missing_local_path_is_not_installed(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        missing = tmp_path / "does-not-exist.gguf"
+        assert wiz._model_already_installed("llamacpp", str(missing), {}) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1519,6 +1533,286 @@ class TestStep2_5LlamaCppAutostart:
         assert state.smoke_test_result.get("manual_command")
         assert str(gguf) in state.smoke_test_result["manual_command"]
         assert "--model" in state.smoke_test_result["manual_command"]
+
+
+class TestEnsureLlamacppServerRunning:
+    """Step 7's pre-flight guard: server may have died between Step 5 and 7."""
+
+    def _state(self, wiz, model_path=None):
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            engine_model_tag="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+        )
+        state.profile = {"llmfit_system": {"system": {"has_gpu": False, "cpu_cores": 4}}}
+        if model_path:
+            state.profile["llamacpp_model_path"] = model_path
+        return state
+
+    def test_reuses_running_server_when_model_matches(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "server_running": True,
+                "server_port": 8001,
+                "model": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+            },
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            pb, "llamacpp_start_server", lambda **kw: spawn_calls.append(kw) or {"ok": True}
+        )
+        state = self._state(wiz)
+        result = wiz._ensure_llamacpp_server_running(state)
+        assert result == {"ok": True, "reused": True}
+        assert spawn_calls == []
+
+    def test_restarts_server_when_not_running(self, isolated_state, monkeypatch, tmp_path):
+        # Step 5 succeeded earlier, but the server died (OOM, kill, sleep)
+        # before Step 7. The verify guard must restart it transparently
+        # rather than letting the harness fail with ConnectionRefused.
+        pb, wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {"server_running": False, "server_port": 8001, "model": None},
+        )
+        spawned = {}
+
+        def _fake_start(**kw):
+            spawned.update(kw)
+            return {
+                "ok": True,
+                "argv": ["llama-server", "--model", kw["model_path"]],
+                "handle": pb.LlamaServerHandle(
+                    pid=4242,
+                    port=kw.get("port", 8001),
+                    host=kw.get("host", "127.0.0.1"),
+                    model_path=kw["model_path"],
+                    argv=["llama-server", "--model", kw["model_path"]],
+                    log_path=str(tmp_path / "log.txt"),
+                    pid_file=str(tmp_path / "pid"),
+                    we_started_it=True,
+                ),
+                "error": None,
+                "log_path": str(tmp_path / "log.txt"),
+            }
+
+        monkeypatch.setattr(pb, "llamacpp_start_server", _fake_start)
+        state = self._state(wiz, model_path=str(gguf))
+        result = wiz._ensure_llamacpp_server_running(state)
+        assert result["ok"] is True
+        assert result["reused"] is False
+        assert spawned["model_path"] == str(gguf)
+
+    def test_refuses_when_other_model_is_loaded(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "server_running": True,
+                "server_port": 8001,
+                "model": "deepseek-coder-v2.gguf",
+            },
+        )
+        state = self._state(wiz)
+        result = wiz._ensure_llamacpp_server_running(state)
+        assert result["ok"] is False
+        assert "different model" in result["error"]
+
+    def test_actionable_error_when_no_path_recorded(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {"server_running": False, "server_port": 8001, "model": None},
+        )
+        state = self._state(wiz, model_path=None)
+        result = wiz._ensure_llamacpp_server_running(state)
+        assert result["ok"] is False
+        assert "re-run wizard step 4" in result["error"]
+
+
+class TestRunServe:
+    """`ccl serve` — pre-flight invoked from the cc/cx helper script."""
+
+    def _persist_state(self, wiz, engine="llamacpp", tag="bartowski/Foo-GGUF"):
+        state = wiz.WizardState(
+            primary_engine=engine,
+            engine_model_tag=tag,
+        )
+        state.profile = {"llmfit_system": {"system": {"has_gpu": False, "cpu_cores": 4}}}
+        state.save()
+        return state
+
+    def test_serve_returns_error_when_no_state_file(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        # No state file written — simulates "user hasn't run setup yet".
+        assert wiz.run_serve() == 1
+
+    def test_serve_is_noop_for_non_llamacpp_engines(self, isolated_state, monkeypatch):
+        # Ollama / LM Studio / 9router are managed outside ccl. The serve
+        # command must succeed silently rather than try to start a server.
+        pb, wiz, _ = isolated_state
+        self._persist_state(wiz, engine="ollama", tag="qwen3-coder:30b")
+        called = []
+        monkeypatch.setattr(pb, "llamacpp_info", lambda: called.append("info") or {})
+        monkeypatch.setattr(
+            pb, "llamacpp_start_server", lambda **kw: called.append("start")
+        )
+        assert wiz.run_serve() == 0
+        # Did NOT touch llama.cpp at all.
+        assert called == []
+
+    def test_serve_is_silent_when_server_already_running(
+        self, isolated_state, monkeypatch, capsys
+    ):
+        # Hot path — every `cc` invocation hits this. Must not print anything
+        # the user has to read past, and must not spawn a new server.
+        pb, wiz, _ = isolated_state
+        self._persist_state(wiz)
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {"server_running": True, "server_port": 8001, "model": "Foo.gguf"},
+        )
+        spawn_calls = []
+        monkeypatch.setattr(
+            pb, "llamacpp_start_server", lambda **kw: spawn_calls.append(kw)
+        )
+        assert wiz.run_serve() == 0
+        out = capsys.readouterr().out + capsys.readouterr().err
+        # No banner, no progress lines.
+        assert "Starting llama-server" not in out
+        assert spawn_calls == []
+
+    def test_serve_shows_loading_banner_on_cold_start(
+        self, isolated_state, monkeypatch, tmp_path, capsys
+    ):
+        # Cold path — user just rebooted, server is gone, model not in VRAM.
+        # The banner must appear BEFORE the model-load wait so users know
+        # the multi-second delay is expected, not a hang.
+        pb, wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        state = self._persist_state(wiz)
+        state.profile["llamacpp_model_path"] = str(gguf)
+        state.save()
+
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {"server_running": False, "server_port": 8001, "model": None},
+        )
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_start_server",
+            lambda **kw: {
+                "ok": True,
+                "argv": ["llama-server", "--model", kw["model_path"]],
+                "handle": pb.LlamaServerHandle(
+                    pid=999,
+                    port=8001,
+                    host="127.0.0.1",
+                    model_path=kw["model_path"],
+                    argv=["llama-server"],
+                    log_path=str(tmp_path / "log.txt"),
+                    pid_file=str(tmp_path / "pid"),
+                    we_started_it=True,
+                ),
+                "error": None,
+                "log_path": str(tmp_path / "log.txt"),
+            },
+        )
+        assert wiz.run_serve() == 0
+        captured = capsys.readouterr()
+        out = captured.out + captured.err
+        assert "30s+" in out  # the cold-start expectation is visible
+
+    def test_serve_returns_failure_when_start_fails(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        pb, wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        state = self._persist_state(wiz)
+        state.profile["llamacpp_model_path"] = str(gguf)
+        state.save()
+
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {"server_running": False, "server_port": 8001, "model": None},
+        )
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_start_server",
+            lambda **kw: {
+                "ok": False,
+                "error": "OOM at layer offload",
+                "argv": ["llama-server"],
+                "handle": None,
+                "log_path": None,
+            },
+        )
+        assert wiz.run_serve() == 1
+
+
+class TestHelperScriptLlamacppPreflight:
+    """The `cc`/`cx` script grows a /health probe + ccl-serve fallback when
+    engine == llamacpp, so harness invocations self-heal after the server
+    dies (reboot, OOM, manual kill)."""
+
+    def _result(self):
+        # Module-level WireResult is imported under the wiz alias.
+        return None  # placeholder; tests build their own
+
+    def test_llamacpp_engine_emits_preflight_block(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude", "--model", "qwen2.5-coder"],
+            env={"ANTHROPIC_BASE_URL": "http://127.0.0.1:8001/v1"},
+            effective_tag="qwen2.5-coder",
+        )
+        path = wiz._write_helper_script("claude", result, engine="llamacpp")
+        body = path.read_text()
+        assert "/health" in body
+        assert "curl -fsS --max-time 1" in body
+        assert "serve" in body
+        # Pre-flight must run BEFORE the env exports so a failed start
+        # short-circuits cleanly without leaking partial environment.
+        preflight_pos = body.index("/health")
+        export_pos = body.index("export ANTHROPIC_BASE_URL")
+        assert preflight_pos < export_pos
+        # The exec line is still present and untouched.
+        assert 'exec claude --model qwen2.5-coder "$@"' in body
+
+    def test_non_llamacpp_engines_do_not_get_preflight(self, isolated_state):
+        # Ollama / LM Studio / 9router don't need a pre-flight; their
+        # daemons are managed elsewhere. The script must stay unchanged
+        # so we don't pay a curl probe per invocation.
+        _pb, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["ollama", "launch", "claude", "--model", "qwen2.5-coder:7b", "--"],
+            env={},
+            effective_tag="qwen2.5-coder:7b",
+        )
+        path = wiz._write_helper_script("claude", result, engine="ollama")
+        body = path.read_text()
+        assert "/health" not in body
+        assert "ccl serve" not in body
+
+    def test_engine_default_omits_preflight(self, isolated_state):
+        # Backward-compat: callers that don't pass the engine keyword (older
+        # tests, manual invocations) must not get the new behavior.
+        _pb, wiz, _ = isolated_state
+        result = wiz.WireResult(argv=["claude"], env={}, effective_tag="x")
+        path = wiz._write_helper_script("claude", result)
+        assert "/health" not in path.read_text()
 
 
 class TestLlamaCppModelMatch:

@@ -15,6 +15,24 @@ import pytest
 import claude_codex_local.core as core
 
 
+@pytest.fixture(autouse=True)
+def _isolate_state_dir(tmp_path, monkeypatch):
+    """
+    Point STATE_DIR at an empty tmp dir for every test, and clear both GGUF
+    scanners' in-memory TTL caches so tests don't see each other's state.
+
+    Without this, `installed_models_for_engine("llamacpp", ...)` would also
+    walk the real `~/.claude-codex-local/models` directory once we wired
+    STATE_DIR scanning into it.
+    """
+    monkeypatch.setattr(core, "STATE_DIR", tmp_path / "state")
+    for fn in (core.scan_huggingface_gguf_cache, core.scan_state_dir_gguf_models):
+        for attr in ("_gguf_cache", "_state_dir_gguf_cache"):
+            if hasattr(fn, attr):
+                delattr(fn, attr)
+    yield
+
+
 class TestScanHuggingfaceGgufCache:
     """Unit tests for scan_huggingface_gguf_cache()."""
 
@@ -368,3 +386,133 @@ class TestInstalledModelsForEngineLlamacpp:
             result = core.installed_models_for_engine(profile, "llamacpp")
 
             assert result == []
+
+    def test_returns_state_dir_models(self, tmp_path, monkeypatch):
+        """Wizard-managed downloads under STATE_DIR/models are surfaced too."""
+        state_dir = tmp_path / "ccl-state"
+        slug_dir = state_dir / "models" / "unsloth-Qwen3-Coder-Next-GGUF"
+        slug_dir.mkdir(parents=True)
+        gguf_file = slug_dir / "Qwen3-Coder-Next-Q4_K_M.gguf"
+        gguf_file.write_bytes(b"x" * (4 * 1024**2))  # 4 MB
+
+        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        # Empty HF cache so only STATE_DIR contributes.
+        with patch.dict(os.environ, {"HF_HOME": str(tmp_path / "empty-hf")}):
+            profile = {"llamacpp": {"present": True, "server_running": False}}
+            result = core.installed_models_for_engine(profile, "llamacpp")
+
+            assert len(result) == 1
+            assert result[0]["source"] == "llamacpp"
+            assert result[0]["tag"] == str(gguf_file.resolve())
+            assert "unsloth-Qwen3-Coder-Next-GGUF" in result[0]["display"]
+            assert "Q4_K_M" in result[0]["display"]
+
+    def test_dedupes_between_hf_cache_and_state_dir(self, tmp_path, monkeypatch):
+        """If the same resolved path appears in both sources, list it once."""
+        # Real GGUF in HF cache
+        cache_dir = tmp_path / "hub"
+        snapshot_dir = cache_dir / "models--org--repo" / "snapshots" / "snap1"
+        snapshot_dir.mkdir(parents=True)
+        real_gguf = snapshot_dir / "model-Q4_K_M.gguf"
+        real_gguf.write_bytes(b"x" * (3 * 1024**2))
+
+        # STATE_DIR/models contains a symlink to the same file
+        state_dir = tmp_path / "ccl-state"
+        slug_dir = state_dir / "models" / "org-repo"
+        slug_dir.mkdir(parents=True)
+        link = slug_dir / "model-Q4_K_M.gguf"
+        link.symlink_to(real_gguf)
+
+        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
+            profile = {"llamacpp": {"present": True, "server_running": False}}
+            result = core.installed_models_for_engine(profile, "llamacpp")
+
+            paths = [e["tag"] for e in result]
+            assert paths == [str(real_gguf.resolve())]
+
+
+class TestScanStateDirGgufModels:
+    """Unit tests for scan_state_dir_gguf_models()."""
+
+    def test_missing_state_dir_returns_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(core, "STATE_DIR", tmp_path / "does-not-exist")
+        assert core.scan_state_dir_gguf_models() == []
+
+    def test_finds_wizard_layout(self, tmp_path, monkeypatch):
+        """STATE_DIR/models/<slug>/<file>.gguf — the wizard's layout."""
+        state_dir = tmp_path / "state"
+        slug_dir = state_dir / "models" / "unsloth-Qwen3-Coder-Next-GGUF"
+        slug_dir.mkdir(parents=True)
+        gguf = slug_dir / "Qwen3-Coder-Next-Q4_K_M.gguf"
+        gguf.write_bytes(b"x" * (2 * 1024**2))
+
+        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        result = core.scan_state_dir_gguf_models()
+        assert len(result) == 1
+        assert result[0]["path"] == str(gguf.resolve())
+        assert "unsloth-Qwen3-Coder-Next-GGUF-Q4_K_M" in result[0]["display"]
+        assert result[0]["size_gb"] == pytest.approx(0.002, rel=0.5)
+
+    def test_finds_nested_gguf(self, tmp_path, monkeypatch):
+        """rglob handles arbitrary nesting (e.g. include='BF16/*')."""
+        state_dir = tmp_path / "state"
+        nested = state_dir / "models" / "org-repo" / "BF16"
+        nested.mkdir(parents=True)
+        gguf = nested / "weights.gguf"
+        gguf.write_bytes(b"x" * (1024**2))
+
+        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        result = core.scan_state_dir_gguf_models()
+        assert len(result) == 1
+        assert result[0]["path"] == str(gguf.resolve())
+        # No quant tag in stem → display falls back to slug/filename form.
+        assert "org-repo" in result[0]["display"]
+        assert "weights.gguf" in result[0]["display"]
+
+
+class TestDiagnoseLlamaServerLog:
+    """Unit tests for diagnose_llama_server_log()."""
+
+    def test_missing_log_returns_none(self, tmp_path):
+        assert core.diagnose_llama_server_log(tmp_path / "nope.log") is None
+
+    def test_qwen3next_missing_ssm_tensor_emits_hint(self, tmp_path):
+        """Real failure mode: Qwen3-Next GGUF on a llama.cpp build that lacks SSM."""
+        log = tmp_path / "llama-server.log"
+        log.write_text(
+            "print_info: arch             = qwen3next\n"
+            "load_tensors: loading model tensors, this can take a while...\n"
+            "llama_model_load: error loading model: missing tensor 'blk.0.ssm_in.weight'\n"
+            "main: exiting due to model loading error\n"
+        )
+        hint = core.diagnose_llama_server_log(log)
+        assert hint is not None
+        assert "qwen3next" in hint
+        assert "Mamba" in hint or "SSM" in hint or "state-space" in hint
+        assert "rebuild" in hint.lower() or "git pull" in hint.lower()
+
+    def test_unknown_architecture_emits_hint(self, tmp_path):
+        log = tmp_path / "llama-server.log"
+        log.write_text("error: unknown model architecture 'someweirdarch'\n")
+        hint = core.diagnose_llama_server_log(log)
+        assert hint is not None
+        assert "someweirdarch" in hint
+        assert "llama.cpp" in hint
+
+    def test_oom_emits_hint(self, tmp_path):
+        log = tmp_path / "llama-server.log"
+        log.write_text("ggml_cuda: failed to allocate 12345 bytes\n" "CUDA error: out of memory\n")
+        hint = core.diagnose_llama_server_log(log)
+        assert hint is not None
+        assert "n-gpu-layers" in hint or "n_gpu_layers" in hint.replace("-", "_")
+        assert "memory" in hint.lower() or "ctx-size" in hint.lower()
+
+    def test_benign_log_returns_none(self, tmp_path):
+        log = tmp_path / "llama-server.log"
+        log.write_text(
+            "print_info: arch = llama\n"
+            "load_tensors: loaded successfully\n"
+            "main: HTTP server listening, hostname: 127.0.0.1, port: 8001\n"
+        )
+        assert core.diagnose_llama_server_log(log) is None

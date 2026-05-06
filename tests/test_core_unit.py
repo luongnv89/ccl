@@ -722,14 +722,28 @@ class TestLlamaCppInfo:
         assert result["present"] is False
         assert result["server_running"] is False
 
-    def test_server_running_when_models_endpoint_responds(self, monkeypatch):
+    def test_server_running_when_health_and_models_respond(self, monkeypatch):
         monkeypatch.setattr(
             pb,
             "llamacpp_detect",
             lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
         )
 
-        class _FakeResp:
+        class _Health:
+            status = 200
+
+            def read(self):
+                return b'{"status":"ok"}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        class _Models:
+            status = 200
+
             def read(self):
                 return json.dumps({"data": [{"id": "my-model.gguf"}]}).encode()
 
@@ -741,10 +755,53 @@ class TestLlamaCppInfo:
 
         import urllib.request
 
-        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeResp())
+        def _fake_urlopen(req, *a, **kw):
+            url = req if isinstance(req, str) else req.full_url
+            return _Health() if url.endswith("/health") else _Models()
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
         result = pb.llamacpp_info()
         assert result["server_running"] is True
         assert result["model"] == "my-model.gguf"
+
+    def test_server_running_during_model_load_via_health_503(self, monkeypatch):
+        # Regression: large models (35B+) can take 30s+ to load. During that
+        # window, /v1/models doesn't respond yet — but /health returns 503
+        # with "loading model". The probe must treat this as "server up"
+        # so a second `ccl serve` doesn't try to spawn a duplicate on the
+        # already-bound port.
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_detect",
+            lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
+        )
+
+        class _Health503:
+            status = 503
+
+            def read(self):
+                return b'{"status":"loading model"}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        import urllib.error
+        import urllib.request
+
+        def _fake_urlopen(req, *a, **kw):
+            url = req if isinstance(req, str) else req.full_url
+            if url.endswith("/health"):
+                return _Health503()
+            # /v1/models still 503ing during model load — raise on it.
+            raise urllib.error.URLError("models endpoint not ready yet")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+        result = pb.llamacpp_info()
+        assert result["server_running"] is True  # the whole point
+        assert result["model"] is None  # not yet known — fine
 
     def test_server_not_running_when_connection_refused(self, monkeypatch):
         monkeypatch.setattr(
@@ -768,8 +825,20 @@ class TestLlamaCppInfo:
 class _FakeChatResp:
     """Minimal fake OpenAI-compatible chat response for urllib mocking."""
 
-    def __init__(self, content: str, usage: dict | None = None):
-        body = {"choices": [{"message": {"content": content}}]}
+    def __init__(
+        self,
+        content: str,
+        usage: dict | None = None,
+        reasoning_content: str | None = None,
+        finish_reason: str | None = None,
+    ):
+        message = {"content": content}
+        if reasoning_content is not None:
+            message["reasoning_content"] = reasoning_content
+        choice = {"message": message}
+        if finish_reason is not None:
+            choice["finish_reason"] = finish_reason
+        body = {"choices": [choice]}
         if usage is not None:
             body["usage"] = usage
         self._data = json.dumps(body).encode()
@@ -838,6 +907,67 @@ class TestSmokeTestLlamaCppModel:
         result = pb.smoke_test_llamacpp_model("my-model.gguf")
         assert result["ok"] is False
         assert "error" in result
+
+    def test_accepts_ready_in_reasoning_content(self, monkeypatch):
+        # Reasoning models (Qwen3+, etc.) may emit READY inside the
+        # `reasoning_content` trace and leave `content` empty when the
+        # token budget is reached mid-thought. The smoke test must still
+        # treat that as success — engine + chat template are wired up.
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp(
+                content="",
+                reasoning_content="The user wants me to reply READY.",
+                usage={"completion_tokens": 12},
+                finish_reason="length",
+            ),
+        )
+        result = pb.smoke_test_llamacpp_model("qwen3.6-thinker.gguf")
+        assert result["ok"] is True
+        assert result["finish_reason"] == "length"
+
+    def test_failure_surfaces_finish_reason_and_snippet(self, monkeypatch):
+        # When neither field contains READY, the wizard prints
+        # `error or response`. Empty content alone yielded a useless
+        # blank line; the failure result must carry a diagnostic.
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeChatResp(
+                content="",
+                reasoning_content="Here's a thinking process: 1. Analyze input.",
+                usage={"completion_tokens": 16},
+                finish_reason="length",
+            ),
+        )
+        result = pb.smoke_test_llamacpp_model("qwen3.6-thinker.gguf")
+        assert result["ok"] is False
+        assert "finish_reason=length" in result["error"]
+        assert "reasoning but no final answer" in result["error"]
+        assert "Analyze input" in result["error"]
+
+    def test_request_disables_thinking_and_lifts_token_budget(self, monkeypatch):
+        # Capture the outgoing request body and verify the smoke test
+        # actively asks the server to skip chain-of-thought and gives
+        # reasoning models headroom. These two together are what stops
+        # a Qwen3-style model from eating its whole budget on <think>.
+        import urllib.request
+
+        captured = {}
+
+        def fake_urlopen(req, *a, **kw):
+            captured["payload"] = json.loads(req.data.decode())
+            return _FakeChatResp("READY", usage={"completion_tokens": 1})
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        pb.smoke_test_llamacpp_model("any-model.gguf")
+        assert captured["payload"]["max_tokens"] >= 256
+        assert captured["payload"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
 class TestSmokeTestLmStudioModel:
@@ -1194,6 +1324,15 @@ class TestLlamaCppArgBuilders:
 
     def test_safe_repo_slug_falls_back_when_empty(self):
         assert pb.safe_repo_slug("////") == "model"
+
+    def test_default_ctx_size_fits_real_coding_session(self):
+        # 128k is the floor that survives a real coding turn — Claude Code's
+        # system prompt (~26k) plus a single diff-read or multi-file tool
+        # call already pushed the previous 32k default to 41k+ and 400'd in
+        # production. All current coding-tuned models advertise ≥128k native
+        # context, so the auto-started llama-server must match. Lowering
+        # this default regresses the wizard's first user-visible task.
+        assert pb.LLAMACPP_CTX_SIZE >= 131072
 
     def test_build_argv_shape(self):
         argv = pb.build_llamacpp_server_args(

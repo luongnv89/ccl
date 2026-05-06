@@ -26,6 +26,7 @@ import os
 import platform
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -1204,9 +1205,14 @@ def _model_already_installed(engine: str, tag: str, profile: dict[str, Any]) -> 
     if engine == "lmstudio":
         return any(m.get("path") == tag for m in profile.get("lmstudio", {}).get("models", []))
     if engine == "llamacpp":
-        # If the llama-server is already running and serving this model alias,
-        # treat it as installed — the user has it set up and we shouldn't
-        # prompt for a download.
+        # A llamacpp tag picked from the "installed" list is an absolute path
+        # to a GGUF file on disk — if the file exists, the model is installed
+        # and we must not re-prompt the user to download it.
+        if tag and tag.startswith("/") and Path(tag).is_file():
+            return True
+        # Otherwise fall back to the running-server check so an active
+        # llama-server serving a non-path alias (e.g. an HF repo id) is
+        # also treated as installed.
         status = pb.llamacpp_info()
         return bool(status.get("server_running") and status.get("model") == tag)
     return False
@@ -1794,7 +1800,10 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
     if not start_result.get("ok"):
         err = start_result.get("error") or "unknown error"
         log_path = start_result.get("log_path") or ""
+        hint = start_result.get("hint")
         fail(f"Auto-start failed: {err}")
+        if hint:
+            warn(hint)
         if manual_cmd:
             warn("To start llama-server manually, run:")
             console.print(f"  [bold]{manual_cmd}[/bold]")
@@ -1803,6 +1812,7 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
         return {
             "ok": False,
             "error": err,
+            "hint": hint,
             "manual_command": manual_cmd,
             "log_path": log_path,
         }
@@ -1820,6 +1830,63 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
         smoke.setdefault("manual_command", manual_cmd)
         smoke.setdefault("log_path", handle.log_path)
     return smoke
+
+
+def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
+    """
+    Make sure a llama-server is up and serving the wizard's chosen model.
+
+    Step 5 already auto-starts the server before its smoke test, but the
+    server can die between steps (OOM, user kill, machine sleep). Step 7's
+    verify-launch test then fails with ``ConnectionRefused`` and leaves the
+    user stuck. Steps that need the server should call this first.
+
+    Returns ``{"ok": True}`` when the server is healthy (already running with
+    the right model, or freshly started). Returns ``{"ok": False, "error": …}``
+    on failure — caller decides how to surface it.
+    """
+    tag = state.engine_model_tag
+    info_dict = pb.llamacpp_info()
+    if info_dict.get("server_running"):
+        running_model = (info_dict.get("model") or "").strip()
+        if not running_model or _llamacpp_models_match(running_model, tag):
+            return {"ok": True, "reused": True}
+        return {
+            "ok": False,
+            "error": (
+                f"port {info_dict['server_port']} is serving a different model "
+                f"('{running_model}'); wanted '{tag}'"
+            ),
+        }
+    model_path = state.profile.get("llamacpp_model_path") or ""
+    if not model_path or not Path(model_path).is_file():
+        return {
+            "ok": False,
+            "error": (
+                f"no llama-server running and no resolved GGUF path for '{tag}' — "
+                f"re-run wizard step 4 to capture the file path"
+            ),
+        }
+    info(
+        f"Restarting llama-server on "
+        f"{pb.LLAMACPP_SERVER_HOST}:{pb.LLAMACPP_SERVER_PORT} "
+        f"with model {Path(model_path).name}..."
+    )
+    start_result = pb.llamacpp_start_server(
+        model_path=model_path,
+        profile=state.profile,
+        port=pb.LLAMACPP_SERVER_PORT,
+        host=pb.LLAMACPP_SERVER_HOST,
+    )
+    if not start_result.get("ok"):
+        return {
+            "ok": False,
+            "error": start_result.get("error") or "auto-start failed",
+            "log_path": start_result.get("log_path"),
+        }
+    handle = start_result["handle"]
+    ok(f"llama-server is ready (pid {handle.pid}, port {handle.port}).")
+    return {"ok": True, "reused": False}
 
 
 _MIN_MODEL_MATCH_LEN = 12
@@ -2286,13 +2353,21 @@ def _alias_names_for(harness: str) -> list[str]:
     return list(mapping[harness])
 
 
-def _write_helper_script(harness: str, result: WireResult) -> Path:
+def _write_helper_script(
+    harness: str, result: WireResult, *, engine: str | None = None
+) -> Path:
     """
     Write a small bash helper that exports any inline env and execs the
     wire-result argv. Returns the absolute path to the helper.
 
     `harness` is a fence tag — one of "claude", "codex", "claude9",
     "codex9" — and selects the helper-script filename.
+
+    When `engine == "llamacpp"`, the helper grows a pre-flight stanza that
+    probes the configured llama-server `/health` endpoint and runs
+    `ccl serve` to auto-start it (with the model-load banner) when the
+    server is down. This stops `ConnectionRefused` from killing every
+    `cc`/`cx` invocation after a reboot, OOM, or manual kill.
     """
     pb.ensure_state_dirs()
     name = _helper_script_basename(harness)
@@ -2303,6 +2378,32 @@ def _write_helper_script(harness: str, result: WireResult) -> Path:
         "# Managed by claude-codex-local wizard. Re-run the wizard to update.",
         "set -e",
     ]
+
+    if engine == "llamacpp":
+        # Hot path = single curl probe (~10ms when server is up). Cold path
+        # shells out to `ccl serve`, which prints a clear "loading model
+        # into VRAM" banner and waits for /health. Absolute path to the
+        # `ccl` binary is captured at install time so the alias works even
+        # when the user's interactive shell PATH differs from login PATH.
+        ccl_bin = shutil.which("ccl") or "ccl"
+        health_url = f"http://{pb.LLAMACPP_SERVER_HOST}:{pb.LLAMACPP_SERVER_PORT}/health"
+        lines.extend(
+            [
+                "",
+                "# llama.cpp pre-flight: ensure the backing server is up.",
+                f"__CCL_HEALTH_URL={shlex.quote(health_url)}",
+                f"__CCL_BIN={shlex.quote(ccl_bin)}",
+                'if ! curl -fsS --max-time 1 -o /dev/null "$__CCL_HEALTH_URL" 2>/dev/null; then',
+                '    "$__CCL_BIN" serve || {',
+                '        echo "ccl: failed to start llama-server. '
+                'Run \'ccl serve\' to investigate." >&2',
+                "        exit 1",
+                "    }",
+                "fi",
+                "",
+            ]
+        )
+
     if result.env:
         for key, value in result.env.items():
             lines.append(f"export {key}={shlex.quote(value)}")
@@ -2404,7 +2505,7 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
     # presentation concern derived from harness + engine. See
     # _fence_tag_for for the rationale.
     fence_tag = _fence_tag_for(state.primary_harness, state.primary_engine)
-    script_path = _write_helper_script(fence_tag, result)
+    script_path = _write_helper_script(fence_tag, result, engine=state.primary_engine)
     state.helper_script_path = str(script_path)
     ok(f"Wrote helper script: [bold]{script_path}[/bold]")
 
@@ -2452,6 +2553,16 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
         return True
 
     wire_env: dict[str, str] = dict(state.wire_result.get("env", {}))
+
+    # The verify command talks to llama-server over HTTP. If the server is
+    # gone (OOM, killed, machine slept since Step 5), the harness errors with
+    # `ConnectionRefused` and Step 7 fails for an unrelated reason. Restart
+    # it transparently before running the verify command.
+    if engine == "llamacpp":
+        ensure = _ensure_llamacpp_server_running(state)
+        if not ensure.get("ok"):
+            fail(f"Cannot run verify: {ensure.get('error')}")
+            return False
 
     if harness == "claude":
         if engine == "ollama":
@@ -2525,6 +2636,19 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
             console.print(f"[dim]{proc.stderr[-400:]}[/dim]")
         if proc.stdout:
             console.print(f"[dim]{proc.stdout[-400:]}[/dim]")
+        # Targeted hint for the most common llama.cpp failure: the auto-started
+        # server's --ctx-size is smaller than the harness's system prompt
+        # (Claude Code is ~26k tokens). Suggest the env-var override and the
+        # exact restart sequence rather than leaving the user to puzzle it out.
+        if engine == "llamacpp" and "context size" in output.lower():
+            warn(
+                "The running llama-server's --ctx-size is too small for the harness's "
+                "system prompt. Stop it, set a larger context, and re-run:"
+            )
+            console.print(
+                "  [bold]pkill -f llama-server && "
+                "LLAMACPP_CTX_SIZE=131072 ccl --resume[/bold]"
+            )
         return False
     ok("End-to-end verify succeeded (got READY).")
     state.mark("7")
@@ -2886,6 +3010,51 @@ def run_doctor() -> int:
     return 0
 
 
+def run_serve() -> int:
+    """
+    Exposed as `ccl serve`. Ensures the llama-server backing the persisted
+    wizard state is running. Called by the `cc`/`cx` helper script's
+    pre-flight when the /health probe fails, so users don't see
+    `ConnectionRefused` when the server died between sessions.
+
+    Idempotent. Silent when the server is already up. When a cold start is
+    required, prints a prominent banner so the user knows the multi-second
+    model-load delay is expected, not a hang.
+
+    Returns 0 on success (server already up or freshly started), 1 on
+    misconfiguration or start failure.
+    """
+    if not STATE_FILE.exists():
+        fail(f"No wizard state found at {STATE_FILE}. Run `ccl setup` first.")
+        return 1
+    state = WizardState.load()
+    if state.primary_engine != "llamacpp":
+        # Other engines (Ollama, LM Studio, 9router) are usually long-lived
+        # services managed outside ccl; nothing to do here.
+        info(f"Engine '{state.primary_engine or 'unset'}' does not need `ccl serve`.")
+        return 0
+    if not state.engine_model_tag:
+        fail("Wizard state has no model tag — re-run `ccl setup`.")
+        return 1
+
+    # Detect cold start *before* calling the ensure helper so the user sees
+    # the loading banner before the model-load wait starts, not after.
+    info_dict = pb.llamacpp_info()
+    if info_dict.get("server_running"):
+        # Already up — silent reuse keeps the cc/cx hot path quiet.
+        return 0
+
+    warn(
+        "Starting llama-server — first run can take 30s+ while the "
+        "model is loaded into VRAM. Subsequent calls will be instant."
+    )
+    result = _ensure_llamacpp_server_running(state)
+    if not result.get("ok"):
+        fail(f"Could not start llama-server: {result.get('error')}")
+        return 1
+    return 0
+
+
 def run_find_model_standalone() -> int:
     """Exposed as `ccl find-model` — no setup, just a recommendation."""
     header("find-model — llmfit coding-model recommendation")
@@ -2970,6 +3139,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Triage: print wizard state and re-run the presence check",
         description="Show the current wizard state and re-check that harness, engine, and model are healthy.",
     )
+    sub.add_parser(
+        "serve",
+        help="Ensure the llama-server backing the wizard's chosen model is up",
+        description=(
+            "Probe the configured llama-server's /health endpoint and "
+            "auto-start it (with a model-load banner) when it is down. "
+            "Idempotent and silent on the hot path. Used internally by the "
+            "cc/cx helper scripts."
+        ),
+    )
 
     return parser
 
@@ -2994,6 +3173,8 @@ def main() -> int:
         return run_find_model_standalone()
     if cmd == "doctor":
         return run_doctor()
+    if cmd == "serve":
+        return run_serve()
     parser.print_help()
     return 2
 

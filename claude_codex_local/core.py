@@ -20,7 +20,15 @@ STATE_DIR = Path(os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", ORIG_HOME / ".cl
 LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
 LLAMACPP_SERVER_PORT = int(os.environ.get("LLAMACPP_SERVER_PORT", "8001"))
 LLAMACPP_SERVER_HOST = os.environ.get("LLAMACPP_SERVER_HOST", "127.0.0.1")
-LLAMACPP_CTX_SIZE = int(os.environ.get("LLAMACPP_CTX_SIZE", "4096"))
+# 131072 (128k) is the minimum that survives a real coding session: Claude
+# Code's system prompt is ~26k, but a single tool turn that reads a diff or
+# a few source files routinely pushes the request past 40k. We saw real
+# 400s at the previous 32k default within the first user-visible task.
+# Modern coding-tuned models (Qwen2.5-Coder, Qwen3-Coder, DeepSeek-Coder-V2,
+# Llama-3.1-Coder) all advertise ≥128k native context, so this is just
+# matching the model. KV cache for 128k on a 7B–35B model is well within a
+# single 24 GB GPU; bigger models or smaller GPUs should override via env.
+LLAMACPP_CTX_SIZE = int(os.environ.get("LLAMACPP_CTX_SIZE", "131072"))
 # When set explicitly, overrides GPU-offload auto-detection (e.g. "0" forces CPU,
 # "-1" offloads everything to GPU, "33" offloads N layers).
 LLAMACPP_N_GPU_LAYERS = os.environ.get("LLAMACPP_N_GPU_LAYERS")
@@ -1665,13 +1673,29 @@ def llamacpp_info() -> dict[str, Any]:
     if not base["present"]:
         return base
 
-    # Probe /v1/models — llama-server exposes this endpoint when running.
-    url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/v1/models"
+    # Liveness via /health — returns 200 *or* 503 ("loading model") as long
+    # as the server process is alive and bound to the port. Using
+    # /v1/models for liveness was wrong: large models (35B+) can take 30s+
+    # to load before /v1/models responds, during which a second probe would
+    # mistakenly think the server was down and try to spawn a duplicate
+    # (which then crashes on the bound port).
+    health_url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/health"
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        with urllib.request.urlopen(health_url, timeout=2) as resp:
+            base["server_running"] = resp.status in (200, 503)
+    except (urllib.error.URLError, OSError):
+        return base
+    except Exception:
+        return base
+
+    # Read the served model name from /v1/models — only meaningful once the
+    # model is loaded; missing during the loading window is expected and not
+    # an error.
+    models_url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/v1/models"
+    try:
+        with urllib.request.urlopen(models_url, timeout=2) as resp:
             body = json.loads(resp.read())
             models = body.get("data", [])
-            base["server_running"] = True
             base["model"] = models[0]["id"] if models else None
     except (urllib.error.URLError, OSError):
         pass
@@ -1839,6 +1863,76 @@ def llamacpp_wait_until_ready(
     return False
 
 
+def diagnose_llama_server_log(log_path: str | Path, *, tail_bytes: int = 16384) -> str | None:
+    """
+    Read the tail of a llama-server log and return a human-friendly hint if a
+    known startup-failure signature is present, else ``None``.
+
+    Recognised signatures (today):
+      - ``unknown model architecture`` — llama.cpp doesn't even parse this arch.
+      - ``missing tensor 'blk.N.<name>'`` after ``arch = X`` — arch is parsed
+        but the tensor loader for X is incomplete (e.g. qwen3next/Mamba/SSM
+        support not yet built into this binary).
+      - ``failed to allocate``/``out of memory``/``CUDA error: out of memory``
+        — VRAM exhaustion; suggest lowering ``--n-gpu-layers``.
+    """
+    try:
+        path = Path(log_path)
+        if not path.is_file():
+            return None
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > tail_bytes:
+                fh.seek(-tail_bytes, os.SEEK_END)
+            data = fh.read()
+        text = data.decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+    lower = text.lower()
+
+    if "unknown model architecture" in lower:
+        match = re.search(r"unknown model architecture[^\n]*?'([^']+)'", text)
+        arch = match.group(1) if match else "this model"
+        return (
+            f"Your llama.cpp build doesn't recognise the model architecture "
+            f"({arch}). Update llama.cpp from source (git pull && rebuild) and "
+            f"retry, or pick a model GGUF for an architecture this build "
+            f"already supports."
+        )
+
+    if "missing tensor" in lower:
+        arch_match = re.search(r"arch\s*=\s*(\S+)", text)
+        arch = arch_match.group(1) if arch_match else "this model's"
+        tensor_match = re.search(r"missing tensor '([^']+)'", text)
+        tensor = tensor_match.group(1) if tensor_match else None
+        ssm_hint = ""
+        if tensor and ("ssm" in tensor.lower() or "mamba" in tensor.lower()):
+            ssm_hint = (
+                " The missing tensor is a state-space (Mamba/SSM) weight, "
+                "which means this build predates full support for hybrid "
+                "Mamba/Attention models like Qwen3-Next."
+            )
+        elif tensor:
+            ssm_hint = f" Missing tensor: {tensor}."
+        return (
+            f"Your llama.cpp build is too old for the {arch} architecture: "
+            f"it parses the GGUF metadata but the tensor loader is "
+            f"incomplete.{ssm_hint} Update llama.cpp from source "
+            f"(git pull && rebuild) and retry, or use a GGUF for an "
+            f"architecture this build already supports."
+        )
+
+    if "out of memory" in lower or "failed to allocate" in lower:
+        return (
+            "llama-server ran out of memory while loading the model. Try "
+            "lowering --n-gpu-layers (set LLAMACPP_N_GPU_LAYERS=0 to force "
+            "CPU), reducing --ctx-size, or pick a smaller quantisation."
+        )
+
+    return None
+
+
 def llamacpp_start_server(
     *,
     model_path: str,
@@ -1977,6 +2071,7 @@ def llamacpp_start_server(
             "handle": None,
             "argv": argv,
             "error": err,
+            "hint": diagnose_llama_server_log(log_path),
             "log_path": str(log_path),
         }
 
@@ -1990,6 +2085,7 @@ def llamacpp_start_server(
             "handle": None,
             "argv": argv,
             "error": f"llama-server exited with status {proc.returncode} after readiness probe",
+            "hint": diagnose_llama_server_log(log_path),
             "log_path": str(log_path),
         }
 
@@ -2125,30 +2221,62 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
         {
             "model": model,
             "messages": [{"role": "user", "content": "Reply with exactly READY"}],
-            "max_tokens": 16,
+            # Reasoning models (Qwen3+, DeepSeek-R1, …) consume tokens inside
+            # <think> before producing the visible answer. 16 tokens is far
+            # too tight; 256 leaves room for a brief thinking pass without
+            # letting a runaway model hang the wizard.
+            "max_tokens": 256,
             "temperature": 0,
+            # Suppress chain-of-thought when the chat template understands
+            # this kwarg (Qwen3, etc.). Templates that don't reference it
+            # ignore the field, so this is safe across all models.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
     ).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     start = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             body = json.loads(resp.read())
         duration_seconds = max(time.time() - start, 1e-6)
-        text = body["choices"][0]["message"]["content"].strip()
+        choice = body["choices"][0]
+        message = choice.get("message") or {}
+        text = (message.get("content") or "").strip()
+        # Some thinking-aware servers (llama.cpp Qwen3 template, etc.) split
+        # the trace into a separate `reasoning_content` field. Even if the
+        # final answer is empty, finding READY there proves the engine,
+        # model, and chat template are wired up correctly.
+        reasoning = (message.get("reasoning_content") or "").strip()
+        finish_reason = choice.get("finish_reason")
         usage = body.get("usage") or {}
         raw_completion = usage.get("completion_tokens")
         completion_tokens = int(raw_completion) if isinstance(raw_completion, int) else None
         tokens_per_second: float | None = None
         if completion_tokens is not None and completion_tokens > 0:
             tokens_per_second = completion_tokens / duration_seconds
-        return {
-            "ok": "READY" in text.upper(),
+        ok_flag = "READY" in text.upper() or "READY" in reasoning.upper()
+        result: dict[str, Any] = {
+            "ok": ok_flag,
             "response": text,
             "tokens_per_second": tokens_per_second,
             "completion_tokens": completion_tokens,
             "duration_seconds": duration_seconds,
+            "finish_reason": finish_reason,
         }
+        if not ok_flag:
+            # The wizard prints `error or response` on failure; without an
+            # explicit error, an empty `content` (e.g. all tokens consumed
+            # by reasoning, finish_reason=length) shows nothing useful.
+            snippet = (text or reasoning).replace("\n", " ").strip()
+            if len(snippet) > 120:
+                snippet = snippet[:117] + "..."
+            parts = [f"finish_reason={finish_reason}"]
+            if reasoning and not text:
+                parts.append("model produced reasoning but no final answer")
+            if snippet:
+                parts.append(f"saw: '{snippet}'")
+            result["error"] = "; ".join(parts)
+        return result
     except urllib.error.URLError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
@@ -2415,16 +2543,7 @@ def scan_huggingface_gguf_cache() -> list[dict[str, Any]]:
                         size_bytes = resolved.stat().st_size
                         size_gb = size_bytes / (1024**3)
 
-                        # Extract quantization from filename (e.g., Q4_K_M from model-Q4_K_M.gguf)
-                        stem = gguf_file.stem
-                        quant = ""
-                        if "-" in stem:
-                            potential_quant = stem.split("-")[-1]
-                            # Validate it looks like a quantization (Q4_K_M, Q5_K_S, Q8_0, etc.)
-                            if potential_quant.startswith("Q") and any(
-                                c.isdigit() for c in potential_quant
-                            ):
-                                quant = potential_quant
+                        quant = _gguf_quant_from_filename(gguf_file.stem)
 
                         # Build display name
                         if quant:
@@ -2453,6 +2572,87 @@ def scan_huggingface_gguf_cache() -> list[dict[str, Any]]:
     cache["timestamp"] = now
     cache["models"] = models
 
+    return models
+
+
+def _gguf_quant_from_filename(stem: str) -> str:
+    """Extract quantization tag (e.g. ``Q4_K_M``) from a GGUF stem, or "" if absent."""
+    if "-" not in stem:
+        return ""
+    potential = stem.split("-")[-1]
+    if potential.startswith("Q") and any(c.isdigit() for c in potential):
+        return potential
+    return ""
+
+
+def scan_state_dir_gguf_models() -> list[dict[str, Any]]:
+    """
+    Scan ``STATE_DIR/models`` for GGUF files downloaded by the wizard.
+
+    The wizard's HF download path writes to ``STATE_DIR/models/<slug>/`` (see
+    ``wizard.py:_step_5*``), which is *outside* the HuggingFace cache, so the
+    HF-cache scanner alone misses these. Returns the same shape as
+    ``scan_huggingface_gguf_cache``: ``[{"path", "display", "size_gb"}]``.
+    """
+    import logging
+    import time
+
+    cache_key = "_state_dir_gguf_cache"
+    if not hasattr(scan_state_dir_gguf_models, cache_key):
+        setattr(scan_state_dir_gguf_models, cache_key, {"timestamp": 0, "models": []})
+
+    cache = getattr(scan_state_dir_gguf_models, cache_key)
+    now = time.time()
+    if now - cache["timestamp"] < 300:  # 5 minutes
+        return cache["models"]
+
+    models_root = STATE_DIR / "models"
+    models: list[dict[str, Any]] = []
+
+    try:
+        if not models_root.exists():
+            cache["timestamp"] = now
+            cache["models"] = []
+            return []
+
+        # Wizard layout: STATE_DIR/models/<safe_repo_slug>/<file>.gguf, but
+        # rglob handles arbitrary nesting (e.g. include="BF16/*").
+        for gguf_file in models_root.rglob("*.gguf"):
+            try:
+                resolved = gguf_file.resolve()
+                if not resolved.is_file():
+                    continue
+                size_bytes = resolved.stat().st_size
+                size_gb = size_bytes / (1024**3)
+
+                # Reconstruct a friendly base name from the repo slug directory.
+                # safe_repo_slug("org/repo") → "org-repo"; we display it verbatim
+                # since we can't reliably split arbitrary slugs back to org/repo.
+                rel = gguf_file.relative_to(models_root)
+                slug = rel.parts[0] if rel.parts else gguf_file.stem
+                quant = _gguf_quant_from_filename(gguf_file.stem)
+                if quant:
+                    display_name = f"{slug}-{quant} ({size_gb:.1f} GB)"
+                else:
+                    display_name = f"{slug}/{gguf_file.name} ({size_gb:.1f} GB)"
+
+                models.append(
+                    {
+                        "path": str(resolved),
+                        "display": display_name,
+                        "size_gb": size_gb,
+                    }
+                )
+            except (OSError, ValueError) as exc:
+                logging.debug(f"Skipping {gguf_file}: {exc}")
+                continue
+    except PermissionError:
+        logging.debug(f"Permission denied reading STATE_DIR/models: {models_root}")
+    except Exception as exc:
+        logging.debug(f"Error scanning STATE_DIR/models: {exc}")
+
+    cache["timestamp"] = now
+    cache["models"] = models
     return models
 
 
@@ -2531,12 +2731,18 @@ def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[di
                 }
             )
     elif engine == "llamacpp":
-        # Scan HuggingFace cache for downloaded GGUF models
-        gguf_models = scan_huggingface_gguf_cache()
-        for m in gguf_models:
+        # Scan both the HuggingFace cache *and* STATE_DIR/models — the wizard's
+        # HF download writes to STATE_DIR/models/<slug>/ (issue #59), which the
+        # HF-cache scan alone wouldn't see.
+        seen_paths: set[str] = set()
+        for m in scan_huggingface_gguf_cache() + scan_state_dir_gguf_models():
+            path = m["path"]
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
             entries.append(
                 {
-                    "tag": m["path"],
+                    "tag": path,
                     "display": m["display"],
                     "source": "llamacpp",
                     "size_gb": m["size_gb"],
