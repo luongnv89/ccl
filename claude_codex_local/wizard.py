@@ -2260,7 +2260,7 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         # we read it at exec-time the same way 9router does (chmod-600
         # keyfile, $(cat …) expression — never literal in the script).
         base_url = pb.VLLM_BASE_URL
-        env: dict[str, str] = {
+        env = {
             "ANTHROPIC_BASE_URL": base_url,
             "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
             "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"vLLM {tag}",
@@ -2353,7 +2353,7 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
         # key file we read it at exec-time; otherwise a placeholder is fine
         # (vLLM doesn't validate keys unless `--api-key` was passed).
         base_url = pb.VLLM_BASE_URL.rstrip("/")
-        env: dict[str, str] = {"OPENAI_BASE_URL": f"{base_url}/v1"}
+        env = {"OPENAI_BASE_URL": f"{base_url}/v1"}
         raw_env: dict[str, str] = {}
         if pb.VLLM_KEY_FILE.exists():
             key_expr = f'"$(cat {shlex.quote(str(pb.VLLM_KEY_FILE))})"'
