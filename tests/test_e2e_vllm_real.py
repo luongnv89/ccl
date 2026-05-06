@@ -153,7 +153,8 @@ def live_server():
 
     # Surface vllm logs to a temp file so failures are debuggable but the
     # test output stays clean on the happy path.
-    log_path = Path(os.environ.get("CCL_VLLM_LOG", "")) or None
+    raw_log = os.environ.get("CCL_VLLM_LOG")
+    log_path = Path(raw_log) if raw_log else None
     log_file = log_path.open("w") if log_path else subprocess.DEVNULL
 
     proc = subprocess.Popen(
