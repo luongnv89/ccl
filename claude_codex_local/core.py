@@ -1576,8 +1576,8 @@ def _candidate_base_name(name: str) -> str:
     """
     Strip org prefix and quant/format suffixes from an HF model name so we can
     construct GGUF mirror repo ids. Example:
-      "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit" → "Qwen3-Coder-30B-A3B-Instruct"
-      "NexVeridian/Qwen3-Coder-Next-8bit"                       → "Qwen3-Coder-Next"
+      "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit" → "Qwen3-Coder-30B-A3B-Instruct"  # pragma: allowlist secret
+      "NexVeridian/Qwen3-Coder-Next-8bit" → "Qwen3-Coder-Next"
     """
     base = (name or "").split("/", 1)[-1]
     # Trailing quant/format markers we don't want in a GGUF mirror name.
