@@ -217,7 +217,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("lmstudio (engine)", tools["lmstudio"])
     row("llama.cpp (engine)", tools["llamacpp"])
     row("vllm (engine)", tools.get("vllm", {}))
-    row("9router (engine)", tools["9router"])
+    row("9router (engine)", tools.get("9router", {}))
     row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
     console.print(table)
 
@@ -312,7 +312,7 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
     },
     "9router": {
         "name": "9router",
-        "cmd": "npm install -g 9router  &&  9router   # OpenAI-compatible API at http://localhost:20128/v1",
+        "cmd": "npm install -g 9router  # OpenAI-compatible API at http://localhost:20128/v1",
         "url": "https://github.com/decolua/9router",
     },
     "huggingface-cli": {
@@ -424,8 +424,10 @@ def _ensure_tool(key: str) -> bool:
     """
     Offer to install a tool by key (matching INSTALL_HINTS).
     For tools with a runnable install command (ollama, llamacpp, claude, codex,
-    huggingface-cli, 9router) the command is executed directly.
-    For tools requiring manual steps (lmstudio, vllm) the hint is shown
+    huggingface-cli) the command is executed directly.
+    For 9router the npm package is installed, but the long-running daemon
+    must be started manually by the user.  For tools requiring manual steps
+    (lmstudio, vllm) the hint is shown
     and the user is asked to confirm when done, then the profile is re-probed.
     Returns True when the tool is detected as present after the attempt.
     """
