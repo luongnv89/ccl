@@ -43,7 +43,6 @@ import importlib
 import os
 import shutil
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -71,10 +70,14 @@ MAX_MODEL_LEN = os.environ.get("CCL_VLLM_MAX_MODEL_LEN", "4096")
 # Default vLLM serve args: keep memory + context small so the test is
 # friendly to shared GPUs and laptops.
 DEFAULT_SERVE_ARGS = [
-    "--host", REAL_TEST_HOST,
-    "--port", str(REAL_TEST_PORT),
-    "--max-model-len", MAX_MODEL_LEN,
-    "--gpu-memory-utilization", GPU_MEM_UTIL,
+    "--host",
+    REAL_TEST_HOST,
+    "--port",
+    str(REAL_TEST_PORT),
+    "--max-model-len",
+    MAX_MODEL_LEN,
+    "--gpu-memory-utilization",
+    GPU_MEM_UTIL,
     "--enforce-eager",
 ]
 
