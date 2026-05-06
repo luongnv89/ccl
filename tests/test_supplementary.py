@@ -842,9 +842,7 @@ class TestDownloadGgufViaHfCli:
             _q, "select", lambda *a, **kw: type("S", (), {"ask": lambda self: "__cancel__"})()
         )
         monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda *a, **kw: [])
-        monkeypatch.setattr(
-            _q, "text", lambda *a, **kw: type("T", (), {"ask": lambda self: ""})()
-        )
+        monkeypatch.setattr(_q, "text", lambda *a, **kw: type("T", (), {"ask": lambda self: ""})())
 
         result = wiz._download_gguf_via_hf_cli("NexVeridian/Qwen3-Coder-Next-8bit")
         assert result["ok"] is False
@@ -910,9 +908,7 @@ class TestDownloadGgufViaHfCli:
         )
         captured: dict = {}
 
-        def _fake_download(
-            repo, filename=None, local_dir=None, *, include=None, stream=True
-        ):
+        def _fake_download(repo, filename=None, local_dir=None, *, include=None, stream=True):
             captured.update({"repo": repo, "filename": filename, "include": include})
             return {
                 "ok": True,
@@ -956,9 +952,7 @@ class TestDownloadGgufViaHfCli:
         )
         captured: dict = {}
 
-        def _fake_download(
-            repo, filename=None, local_dir=None, *, include=None, stream=True
-        ):
+        def _fake_download(repo, filename=None, local_dir=None, *, include=None, stream=True):
             captured.update({"filename": filename, "include": include})
             return {
                 "ok": True,
@@ -1016,9 +1010,7 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(_q, "select", _no_prompt)
         captured: dict = {}
 
-        def _fake_download(
-            repo, filename=None, local_dir=None, *, include=None, stream=True
-        ):
+        def _fake_download(repo, filename=None, local_dir=None, *, include=None, stream=True):
             captured.update({"filename": filename, "include": include})
             return {
                 "ok": True,
@@ -1077,9 +1069,7 @@ class TestCollectGgufVariants:
 
     def test_default_label_prefers_q4_k_m(self, isolated_state):
         _pb, wiz, _ = isolated_state
-        variants = wiz._collect_gguf_variants(
-            ["a-Q2_K.gguf", "a-Q4_K_M.gguf", "a-Q8_0.gguf"]
-        )
+        variants = wiz._collect_gguf_variants(["a-Q2_K.gguf", "a-Q4_K_M.gguf", "a-Q8_0.gguf"])
         default = wiz._default_variant_label(variants)
         assert default is not None and "Q4_K_M" in default
 

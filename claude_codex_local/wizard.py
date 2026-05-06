@@ -2353,9 +2353,7 @@ def _alias_names_for(harness: str) -> list[str]:
     return list(mapping[harness])
 
 
-def _write_helper_script(
-    harness: str, result: WireResult, *, engine: str | None = None
-) -> Path:
+def _write_helper_script(harness: str, result: WireResult, *, engine: str | None = None) -> Path:
     """
     Write a small bash helper that exports any inline env and execs the
     wire-result argv. Returns the absolute path to the helper.
@@ -2396,7 +2394,7 @@ def _write_helper_script(
                 'if ! curl -fsS --max-time 1 -o /dev/null "$__CCL_HEALTH_URL" 2>/dev/null; then',
                 '    "$__CCL_BIN" serve || {',
                 '        echo "ccl: failed to start llama-server. '
-                'Run \'ccl serve\' to investigate." >&2',
+                "Run 'ccl serve' to investigate.\" >&2",
                 "        exit 1",
                 "    }",
                 "fi",
@@ -2646,8 +2644,7 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
                 "system prompt. Stop it, set a larger context, and re-run:"
             )
             console.print(
-                "  [bold]pkill -f llama-server && "
-                "LLAMACPP_CTX_SIZE=131072 ccl --resume[/bold]"
+                "  [bold]pkill -f llama-server && " "LLAMACPP_CTX_SIZE=131072 ccl --resume[/bold]"
             )
         return False
     ok("End-to-end verify succeeded (got READY).")
