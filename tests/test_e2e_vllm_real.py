@@ -269,7 +269,9 @@ class TestRealSmokeTestHelper:
             max_tokens=32,
         )
         assert result.get("ok") is True, f"smoke_test failed: {result}"
-        assert result.get("tokens_per_second") is None or result["tokens_per_second"] > 0
+        # vLLM always reports usage on a real generation, so tps is populated.
+        assert result.get("tokens_per_second") is not None
+        assert result["tokens_per_second"] > 0
         assert result.get("duration_seconds") is not None
         assert result["duration_seconds"] > 0
 
