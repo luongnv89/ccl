@@ -2648,3 +2648,298 @@ class TestEnsureTool9Router:
         )
         assert wiz._ensure_tool("9router") is False
         assert called["subprocess_run"] is False
+
+
+# ---------------------------------------------------------------------------
+# vLLM wizard wiring — discover/ensure/wire/smoke for engine="vllm".
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureToolVLLM:
+    """vLLM is user-managed (Python venv + GPU drivers). Like 9router, the
+    wizard must NEVER subprocess-run an install command — only probe."""
+
+    def test_returns_true_when_vllm_reachable(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "vllm_info",
+            lambda: {"present": True, "base_url": pb.VLLM_BASE_URL, "models": []},
+        )
+        assert wiz._ensure_tool("vllm") is True
+
+    def test_returns_false_when_unreachable_no_install_attempted(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "vllm_info",
+            lambda: {"present": False, "base_url": pb.VLLM_BASE_URL, "models": []},
+        )
+
+        import subprocess as sp
+
+        monkeypatch.setattr(
+            sp,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not subprocess.run for vllm")
+            ),
+        )
+        import questionary
+
+        monkeypatch.setattr(
+            questionary,
+            "confirm",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not prompt confirm for vllm")
+            ),
+        )
+        assert wiz._ensure_tool("vllm") is False
+
+
+class TestStep4PickModelVLLM:
+    def test_picks_single_loaded_model_without_prompting(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="vllm",
+            primary_harness="claude",
+            profile={
+                "vllm": {
+                    "present": True,
+                    "base_url": "http://localhost:8000",
+                    "models": [{"name": "Qwen/Qwen2.5-0.5B-Instruct"}],
+                }
+            },
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "Qwen/Qwen2.5-0.5B-Instruct"
+        assert state.model_source == "vllm-loaded"
+
+    def test_non_interactive_picks_first_when_multiple(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="vllm",
+            primary_harness="claude",
+            profile={
+                "vllm": {
+                    "present": True,
+                    "base_url": "http://localhost:8000",
+                    "models": [{"name": "model-a"}, {"name": "model-b"}],
+                }
+            },
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "model-a"
+
+    def test_fails_when_server_not_present(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="vllm",
+            primary_harness="claude",
+            profile={"vllm": {"present": False, "base_url": "http://localhost:8000"}},
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+    def test_fails_when_no_models_loaded(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="vllm",
+            primary_harness="claude",
+            profile={
+                "vllm": {
+                    "present": True,
+                    "base_url": "http://localhost:8000",
+                    "models": [],
+                }
+            },
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+    def test_env_override_used_when_set(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_VLLM_MODEL", "override/model")
+        state = wiz.WizardState(
+            primary_engine="vllm",
+            primary_harness="claude",
+            profile={
+                "vllm": {
+                    "present": True,
+                    "base_url": "http://localhost:8000",
+                    "models": [{"name": "loaded/model"}],
+                }
+            },
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "override/model"
+
+
+class TestStep5SmokeTestVLLM:
+    def test_step5_calls_smoke_test_vllm_model(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        captured: dict[str, object] = {}
+
+        def fake_smoke(model, base_url=None, api_key="", **kw):
+            captured["model"] = model
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+            return {"ok": True, "response": "READY", "tokens_per_second": 50.0}
+
+        monkeypatch.setattr(pb, "smoke_test_vllm_model", fake_smoke)
+        for forbidden in (
+            "smoke_test_ollama_model",
+            "smoke_test_lmstudio_model",
+            "smoke_test_llamacpp_model",
+            "smoke_test_router9_models",
+        ):
+            monkeypatch.setattr(
+                pb,
+                forbidden,
+                lambda *a, **kw: (_ for _ in ()).throw(
+                    AssertionError(f"{forbidden} must not be called for vllm")
+                ),
+            )
+
+        state = wiz.WizardState(
+            primary_engine="vllm",
+            primary_harness="claude",
+            engine_model_tag="some/model",
+            profile={"vllm": {"present": True, "base_url": "http://override:9999", "models": []}},
+        )
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert captured["model"] == "some/model"
+        assert captured["base_url"] == "http://override:9999"
+
+
+class TestWireClaudeVLLM:
+    def test_no_keyfile_uses_placeholder_secret(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        # Ensure no leftover keyfile from another test.
+        if pb.VLLM_KEY_FILE.exists():
+            pb.VLLM_KEY_FILE.unlink()
+        result = wiz._wire_claude("vllm", "Qwen/Qwen2.5-0.5B-Instruct")
+        assert result.argv == ["claude", "--model", "Qwen/Qwen2.5-0.5B-Instruct"]
+        assert result.env["ANTHROPIC_BASE_URL"] == pb.VLLM_BASE_URL
+        assert result.env["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "Qwen/Qwen2.5-0.5B-Instruct"
+        assert result.env["ANTHROPIC_API_KEY"] == "sk-local"  # pragma: allowlist secret
+        assert result.env["ANTHROPIC_AUTH_TOKEN"] == "sk-local"  # pragma: allowlist secret
+        assert result.raw_env == {}
+
+    def test_keyfile_present_uses_cat_expression(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        pb.ensure_state_dirs()
+        pb.VLLM_KEY_FILE.write_text("vllm-test-key\n")  # pragma: allowlist secret
+        pb.VLLM_KEY_FILE.chmod(0o600)
+        result = wiz._wire_claude("vllm", "loaded/model")
+        # API key MUST live in raw_env as a $(cat …) expression — never literal.
+        assert "ANTHROPIC_AUTH_TOKEN" in result.raw_env
+        assert "ANTHROPIC_API_KEY" in result.raw_env
+        assert "$(cat" in result.raw_env["ANTHROPIC_AUTH_TOKEN"]
+        assert str(pb.VLLM_KEY_FILE) in result.raw_env["ANTHROPIC_AUTH_TOKEN"]
+        # And NOT carry a literal API key in env.
+        assert "ANTHROPIC_API_KEY" not in result.env
+        assert "ANTHROPIC_AUTH_TOKEN" not in result.env
+
+
+class TestWireCodexVLLM:
+    def test_no_keyfile_path(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        if pb.VLLM_KEY_FILE.exists():
+            pb.VLLM_KEY_FILE.unlink()
+        result = wiz._wire_codex("vllm", "loaded/model")
+        assert result.argv == ["codex", "-m", "loaded/model"]
+        assert result.env["OPENAI_BASE_URL"] == f"{pb.VLLM_BASE_URL.rstrip('/')}/v1"
+        assert result.env["OPENAI_API_KEY"] == "sk-local"  # pragma: allowlist secret
+        assert result.raw_env == {}
+
+    def test_keyfile_present_uses_cat_expression(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        pb.ensure_state_dirs()
+        pb.VLLM_KEY_FILE.write_text("vllm-test-key\n")  # pragma: allowlist secret
+        pb.VLLM_KEY_FILE.chmod(0o600)
+        result = wiz._wire_codex("vllm", "loaded/model")
+        assert "OPENAI_API_KEY" in result.raw_env
+        assert "$(cat" in result.raw_env["OPENAI_API_KEY"]
+        assert str(pb.VLLM_KEY_FILE) in result.raw_env["OPENAI_API_KEY"]
+        # Plain env must NOT carry a literal API key.
+        assert "OPENAI_API_KEY" not in result.env
+
+
+class TestVLLMInDiscovery:
+    """vllm should appear in `_ALL_ENGINES` and the discovery profile shape."""
+
+    def test_vllm_in_all_engines(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert "vllm" in wiz._ALL_ENGINES
+
+    def test_machine_profile_includes_vllm_when_unreachable(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        # Force the adapter to look unreachable.
+        monkeypatch.setattr(
+            pb.VLLMAdapter,
+            "detect",
+            lambda self: {"present": False, "version": ""},
+        )
+        # Also block llmfit / harness probes that would otherwise hit the host.
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": False, "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "lms_info",
+            lambda: {"present": False, "version": "", "models": [], "server_running": False},
+        )
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llmfit_system", lambda: {})
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(
+            pb.Router9Adapter, "detect", lambda self: {"present": False, "version": ""}
+        )
+
+        profile = pb.machine_profile()
+        assert "vllm" in profile["tools"]
+        assert profile["tools"]["vllm"]["present"] is False
+        assert "vllm" not in profile["presence"]["engines"]
+        assert "vllm" in profile  # full block too
+        assert profile["vllm"]["present"] is False
+
+    def test_machine_profile_lists_vllm_in_engines_when_reachable(
+        self, isolated_state, monkeypatch
+    ):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb.VLLMAdapter,
+            "detect",
+            lambda self: {
+                "present": True,
+                "version": "0.6.0",
+                "base_url": pb.VLLM_BASE_URL,
+            },
+        )
+        monkeypatch.setattr(
+            pb.VLLMAdapter,
+            "list_models",
+            lambda self: [{"name": "loaded/model", "format": "unknown", "local": True}],
+        )
+        # Block other probes from touching the host.
+        monkeypatch.setattr(
+            pb, "command_version", lambda *a, **kw: {"present": False, "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "lms_info",
+            lambda: {"present": False, "version": "", "models": [], "server_running": False},
+        )
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llmfit_system", lambda: {})
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(
+            pb.Router9Adapter, "detect", lambda self: {"present": False, "version": ""}
+        )
+
+        profile = pb.machine_profile()
+        assert "vllm" in profile["presence"]["engines"]
+        assert profile["vllm"]["models"] == [
+            {"name": "loaded/model", "format": "unknown", "local": True}
+        ]

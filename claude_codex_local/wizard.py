@@ -79,7 +79,7 @@ class WizardState:
     # user's primary + secondary selections
     primary_harness: str = ""  # "claude" | "codex"
     secondary_harnesses: list[str] = field(default_factory=list)
-    primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp" | "9router"
+    primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp" | "vllm" | "9router"
     secondary_engines: list[str] = field(default_factory=list)
     # model pick
     model_name: str = ""  # raw user input or find-model selection
@@ -216,6 +216,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("ollama (engine)", tools["ollama"])
     row("lmstudio (engine)", tools["lmstudio"])
     row("llama.cpp (engine)", tools["llamacpp"])
+    row("vllm (engine)", tools.get("vllm", {}))
     row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
     console.print(table)
 
@@ -265,7 +266,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     if not presence["harnesses"]:
         warn("No harness found (need claude or codex)")
     if not presence["engines"]:
-        warn("No engine found (need ollama, lmstudio, or llama.cpp)")
+        warn("No engine found (need ollama, lmstudio, llama.cpp, vllm, or 9router)")
     return False
 
 
@@ -299,6 +300,15 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
         "cmd": "brew install llama.cpp   # or build from https://github.com/ggml-org/llama.cpp",
         "url": "https://github.com/ggml-org/llama.cpp",
     },
+    "vllm": {
+        "name": "vLLM",
+        "cmd": (
+            "pip install vllm  &&  "
+            "vllm serve <hf-model-id> --host 0.0.0.0 --port 8000   "
+            "# expects an OpenAI-compatible API at $VLLM_BASE_URL (default http://localhost:8000)"
+        ),
+        "url": "https://docs.vllm.ai/",
+    },
     "9router": {
         "name": "9router",
         "cmd": "# Install 9router locally and start it. It exposes an OpenAI-compatible API on http://localhost:20128/v1",
@@ -325,7 +335,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
     if not presence.get("harnesses"):
         missing.append("HARNESS (claude or codex)")
     if not presence.get("engines"):
-        missing.append("ENGINE (ollama, lmstudio, llamacpp, or 9router)")
+        missing.append("ENGINE (ollama, lmstudio, llamacpp, vllm, or 9router)")
 
     if not missing:
         info("Nothing missing.")
@@ -342,6 +352,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
         _show_install_hint("ollama")
         _show_install_hint("lmstudio")
         _show_install_hint("llamacpp")
+        _show_install_hint("vllm")
         _show_install_hint("9router")
 
     if non_interactive:
@@ -413,7 +424,7 @@ def _ensure_tool(key: str) -> bool:
     Offer to install a tool by key (matching INSTALL_HINTS).
     For tools with a runnable install command (ollama, llamacpp, claude, codex,
     huggingface-cli) the command is executed directly.
-    For tools requiring manual steps (lmstudio, 9router) the hint is shown
+    For tools requiring manual steps (lmstudio, vllm, 9router) the hint is shown
     and the user is asked to confirm when done, then the profile is re-probed.
     Returns True when the tool is detected as present after the attempt.
     """
@@ -426,6 +437,18 @@ def _ensure_tool(key: str) -> bool:
         warn(
             f"9router not reachable at {pb.ROUTER9_BASE_URL}. "
             "Start 9router locally then re-run the wizard."
+        )
+        return False
+
+    # vLLM: same shape as 9router. The server runs in a Python venv with
+    # GPU drivers; we cannot script that install — only detect reachability.
+    if key == "vllm":
+        if pb.vllm_info().get("present"):
+            return True
+        _show_install_hint(key)
+        warn(
+            f"vLLM not reachable at {pb.VLLM_BASE_URL}. "
+            "Install vLLM and start `vllm serve <model>` then re-run the wizard."
         )
         return False
 
@@ -524,7 +547,7 @@ def _ensure_llmfit() -> bool:
 
 
 _ALL_HARNESSES = ["claude", "codex"]
-_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "9router"]
+_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "vllm", "9router"]
 
 
 def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
@@ -770,6 +793,64 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     return True
 
 
+def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -> bool:
+    """Step 4 specialisation for engine=vllm.
+
+    A running vLLM server already has its model loaded (`vllm serve <id>`),
+    so there's nothing to download and no llmfit/disk math to do — we just
+    confirm which loaded model to talk to. /v1/models is queried via
+    vllm_info() and the user picks one. With a single loaded model (the
+    common case) we skip the prompt.
+    """
+    profile_vllm = state.profile.get("vllm", {})
+    if not profile_vllm.get("present"):
+        fail(
+            f"vLLM not reachable at {pb.VLLM_BASE_URL}. "
+            "Start `vllm serve <model>` before re-running the wizard."
+        )
+        return False
+
+    models = [m.get("name", "") for m in profile_vllm.get("models", []) if m.get("name")]
+    env_model = os.environ.get("CCL_VLLM_MODEL", "").strip()
+
+    if env_model:
+        if models and env_model not in models:
+            warn(
+                f"CCL_VLLM_MODEL={env_model!r} is not in the loaded model list "
+                f"({', '.join(models) or 'none'}); using it anyway."
+            )
+        choice = env_model
+    elif not models:
+        fail(
+            f"vLLM at {profile_vllm.get('base_url')} reports zero loaded models. "
+            "Restart it with `vllm serve <hf-model-id>` and re-run the wizard."
+        )
+        return False
+    elif len(models) == 1:
+        choice = models[0]
+        ok(f"Using the single model loaded by vLLM: [bold]{choice}[/bold]")
+    elif non_interactive:
+        choice = models[0]
+        ok(f"Non-interactive: picking [bold]{choice}[/bold] from {len(models)} loaded models")
+    else:
+        picked = questionary.select(
+            "Which vLLM-loaded model do you want to use?",
+            choices=models,
+            default=models[0],
+        ).ask()
+        if not picked:
+            return False
+        choice = picked
+
+    state.engine_model_tag = choice
+    state.model_name = choice
+    state.model_source = "vllm-loaded"
+    state.model_candidate = {}
+    ok(f"Picked vLLM model: [bold]{choice}[/bold]")
+    state.mark("4")
+    return True
+
+
 def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 4 — Pick a model")
     engine = state.primary_engine
@@ -778,6 +859,11 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
     # disk-based size checks. Branch to a dedicated picker.
     if engine == "9router":
         return _step_4_pick_model_9router(state, non_interactive)
+
+    # vLLM hosts exactly one model per `vllm serve` process; we read it
+    # from /v1/models rather than llmfit / disk.
+    if engine == "vllm":
+        return _step_4_pick_model_vllm(state, non_interactive)
 
     # If llamacpp is primary and a server is already running with a model loaded,
     # offer to use that model directly — the user clearly already has it set up.
@@ -1976,6 +2062,16 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
         # Auto-start llama-server with the just-downloaded GGUF model so the
         # user doesn't have to launch it by hand (issue #53).
         result = _llamacpp_smoke_test(state, non_interactive=non_interactive)
+    elif engine == "vllm":
+        # vLLM is user-managed (Python venv + GPU drivers); the wizard never
+        # starts the server. Hit the OpenAI-compatible chat endpoint directly.
+        base_url = state.profile.get("vllm", {}).get("base_url") or pb.VLLM_BASE_URL
+        api_key = ""
+        if pb.VLLM_KEY_FILE.exists():
+            api_key = pb.VLLM_KEY_FILE.read_text().strip()
+        if not api_key:
+            api_key = os.environ.get("VLLM_API_KEY", "")
+        result = pb.smoke_test_vllm_model(tag, base_url=base_url, api_key=api_key)
     elif engine == "9router":
         # CRITICAL: never call /chat/completions for 9router — that's paid
         # cloud quota. We verify reachability by re-checking /v1/models.
@@ -2158,6 +2254,33 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
         return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
+    if engine == "vllm":
+        # vLLM exposes an OpenAI-compatible API. Auth is off by default but
+        # vllm supports `--api-key`; if a key was written to VLLM_KEY_FILE
+        # we read it at exec-time the same way 9router does (chmod-600
+        # keyfile, $(cat …) expression — never literal in the script).
+        base_url = pb.VLLM_BASE_URL
+        env = {
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"vLLM {tag}",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                f"Local model served by vLLM at {base_url}"
+            ),
+            "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+        raw_env: dict[str, str] = {}
+        if pb.VLLM_KEY_FILE.exists():
+            key_expr = f'"$(cat {shlex.quote(str(pb.VLLM_KEY_FILE))})"'
+            raw_env["ANTHROPIC_AUTH_TOKEN"] = key_expr
+            raw_env["ANTHROPIC_API_KEY"] = key_expr
+        else:
+            env["ANTHROPIC_API_KEY"] = "sk-local"  # pragma: allowlist secret
+            env["ANTHROPIC_AUTH_TOKEN"] = "sk-local"  # pragma: allowlist secret
+        return WireResult(
+            argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
+        )
     if engine == "9router":
         # 9router exposes an OpenAI-compatible API and requires a paid
         # cloud API key. We deliberately keep the key OUT of the helper
@@ -2225,6 +2348,19 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
             "OPENAI_API_KEY": "sk-local",  # pragma: allowlist secret
         }
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
+    if engine == "vllm":
+        # Same pattern as _wire_claude(engine="vllm"): if the user wrote a
+        # key file we read it at exec-time; otherwise a placeholder is fine
+        # (vLLM doesn't validate keys unless `--api-key` was passed).
+        base_url = pb.VLLM_BASE_URL.rstrip("/")
+        env = {"OPENAI_BASE_URL": f"{base_url}/v1"}
+        raw_env: dict[str, str] = {}
+        if pb.VLLM_KEY_FILE.exists():
+            key_expr = f'"$(cat {shlex.quote(str(pb.VLLM_KEY_FILE))})"'
+            raw_env["OPENAI_API_KEY"] = key_expr
+        else:
+            env["OPENAI_API_KEY"] = "sk-local"  # pragma: allowlist secret
+        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
     if engine == "9router":
         # See _wire_claude(engine="9router") for the rationale: the API
         # key is read at exec-time from a chmod-600 file, never embedded
