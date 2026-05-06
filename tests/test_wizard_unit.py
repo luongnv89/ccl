@@ -1661,16 +1661,12 @@ class TestRunServe:
         self._persist_state(wiz, engine="ollama", tag="qwen3-coder:30b")
         called = []
         monkeypatch.setattr(pb, "llamacpp_info", lambda: called.append("info") or {})
-        monkeypatch.setattr(
-            pb, "llamacpp_start_server", lambda **kw: called.append("start")
-        )
+        monkeypatch.setattr(pb, "llamacpp_start_server", lambda **kw: called.append("start"))
         assert wiz.run_serve() == 0
         # Did NOT touch llama.cpp at all.
         assert called == []
 
-    def test_serve_is_silent_when_server_already_running(
-        self, isolated_state, monkeypatch, capsys
-    ):
+    def test_serve_is_silent_when_server_already_running(self, isolated_state, monkeypatch, capsys):
         # Hot path — every `cc` invocation hits this. Must not print anything
         # the user has to read past, and must not spawn a new server.
         pb, wiz, _ = isolated_state
@@ -1681,9 +1677,7 @@ class TestRunServe:
             lambda: {"server_running": True, "server_port": 8001, "model": "Foo.gguf"},
         )
         spawn_calls = []
-        monkeypatch.setattr(
-            pb, "llamacpp_start_server", lambda **kw: spawn_calls.append(kw)
-        )
+        monkeypatch.setattr(pb, "llamacpp_start_server", lambda **kw: spawn_calls.append(kw))
         assert wiz.run_serve() == 0
         out = capsys.readouterr().out + capsys.readouterr().err
         # No banner, no progress lines.
@@ -1733,9 +1727,7 @@ class TestRunServe:
         out = captured.out + captured.err
         assert "30s+" in out  # the cold-start expectation is visible
 
-    def test_serve_returns_failure_when_start_fails(
-        self, isolated_state, monkeypatch, tmp_path
-    ):
+    def test_serve_returns_failure_when_start_fails(self, isolated_state, monkeypatch, tmp_path):
         pb, wiz, _ = isolated_state
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"\x00")
