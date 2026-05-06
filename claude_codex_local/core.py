@@ -42,6 +42,13 @@ LLAMACPP_PID_DIR = STATE_DIR / "run"
 ROUTER9_BASE_URL = os.environ.get("CCL_9ROUTER_BASE_URL", "http://localhost:20128/v1")
 ROUTER9_KEY_FILE = STATE_DIR / "9router-api-key"
 
+# vLLM exposes an OpenAI-compatible API. Unlike ollama / llama.cpp the wizard
+# does not start the server (vllm needs a Python venv with CUDA/ROCm wheels);
+# we only probe reachability. The optional API key sits in a chmod-600 file
+# next to the 9router one — same security boundary.
+VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000")
+VLLM_KEY_FILE = STATE_DIR / "vllm-api-key"
+
 # Mapping from HuggingFace model name patterns → Ollama registry tags.
 # Ordered from newest/best to older fallbacks; first match wins.
 HF_TO_OLLAMA: list[tuple[re.Pattern[str], str]] = [
@@ -306,13 +313,17 @@ class VLLMAdapter:
         return headers
 
     def detect(self) -> dict[str, Any]:
-        """Check if vLLM server is accessible."""
+        """Check if vLLM server is accessible.
+
+        Uses a short fixed timeout (not VLLM_TIMEOUT) so the wizard's discover
+        step doesn't hang for a full minute when the server is down.
+        """
         import urllib.request
 
         try:
             url = self._full_url("/v1/models")
             req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status == 200:
                     return {
                         "present": True,
@@ -355,13 +366,17 @@ class VLLMAdapter:
             return {"ok": False, "detail": str(exc)}
 
     def list_models(self) -> list[dict[str, Any]]:
-        """List available models from vLLM server."""
+        """List available models from vLLM server.
+
+        Same short-timeout reasoning as detect(): this is a metadata probe,
+        not an inference call, so it shouldn't share VLLM_TIMEOUT.
+        """
         import urllib.request
 
         try:
             url = self._full_url("/v1/models")
             req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 body = json.loads(resp.read())
                 models = body.get("data", [])
                 return [{"name": m["id"], "format": "unknown", "local": True} for m in models]
@@ -902,6 +917,37 @@ def smoke_test_router9_models(base_url: str | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # vLLM helpers
 # ---------------------------------------------------------------------------
+
+
+def vllm_info() -> dict[str, Any]:
+    """
+    Probe vLLM: server reachability at VLLM_BASE_URL and the model list it
+    advertises via /v1/models. Returns a profile-shaped dict regardless of
+    reachability so callers can render a uniform discover row.
+
+    Shape:
+        {
+            "present": bool,         # /v1/models returned 200
+            "base_url": str,         # resolved URL (no trailing slash)
+            "version": str,          # X-VLLM-Version header if exposed
+            "models": list[dict],    # [{"name": str, "format": "...", "local": True}, ...]
+            "error": str,            # populated when present is False
+        }
+    """
+    adapter = VLLMAdapter()
+    detect = adapter.detect()
+    base_url = adapter._base_url or VLLM_BASE_URL
+    info: dict[str, Any] = {
+        "present": bool(detect.get("present")),
+        "base_url": base_url,
+        "version": detect.get("version", ""),
+        "models": [],
+    }
+    if not info["present"]:
+        info["error"] = f"vLLM not reachable at {base_url}"
+        return info
+    info["models"] = adapter.list_models()
+    return info
 
 
 def smoke_test_vllm_model(
@@ -2288,6 +2334,7 @@ def machine_profile() -> dict[str, Any]:
     lms = lms_info()
     llamacpp = llamacpp_detect()
     hf_cli = huggingface_cli_detect()
+    vllm = vllm_info()
 
     ollama_info = command_version("ollama")
     claude_info = command_version("claude")
@@ -2307,6 +2354,8 @@ def machine_profile() -> dict[str, Any]:
         engines_present.append("lmstudio")
     if llamacpp.get("present"):
         engines_present.append("llamacpp")
+    if vllm.get("present"):
+        engines_present.append("vllm")
     router9_info = Router9Adapter().detect()
     router9_health = (
         Router9Adapter().healthcheck()
@@ -2333,6 +2382,11 @@ def machine_profile() -> dict[str, Any]:
                 "version": command_version("lms")["version"] if lms["present"] else "",
             },
             "llamacpp": llamacpp,
+            "vllm": {
+                "present": vllm["present"],
+                "version": vllm.get("version", ""),
+                "base_url": vllm["base_url"],
+            },
             "huggingface_cli": hf_cli,
             "claude": claude_info,
             "codex": codex_info,
@@ -2352,6 +2406,7 @@ def machine_profile() -> dict[str, Any]:
         "ollama": {"models": parse_ollama_list()},
         "lmstudio": lms,
         "llamacpp": llamacpp,
+        "vllm": vllm,
         "9router": {
             "present": bool(router9_info.get("present")),
             "base_url": ROUTER9_BASE_URL,
