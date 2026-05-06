@@ -554,6 +554,168 @@ class TestHuggingfaceDownloadGguf:
 
 
 # ---------------------------------------------------------------------------
+# huggingface_list_repo_files / huggingface_repo_has_gguf / resolve_gguf_mirror
+# (#58 — prevent llama.cpp from being handed MLX-only HF repos)
+# ---------------------------------------------------------------------------
+
+
+class TestHuggingfaceListRepoFiles:
+    def test_returns_filenames_from_siblings(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.request
+
+        body = {
+            "siblings": [
+                {"rfilename": "model-Q4_K_M.gguf"},
+                {"rfilename": "README.md"},
+                {"rfilename": "tokenizer.json"},
+            ]
+        }
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeHttpResp(body))
+        files = pb.huggingface_list_repo_files("org/repo")
+        assert files == ["model-Q4_K_M.gguf", "README.md", "tokenizer.json"]
+
+    def test_blank_repo_id_returns_empty(self, isolated_state):
+        pb, _, _ = isolated_state
+        assert pb.huggingface_list_repo_files("") == []
+        assert pb.huggingface_list_repo_files("   ") == []
+
+    def test_network_error_returns_empty(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.error
+        import urllib.request
+
+        def _raise(*a, **kw):
+            raise urllib.error.URLError("connection refused")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _raise)
+        assert pb.huggingface_list_repo_files("org/repo") == []
+
+    def test_malformed_payload_returns_empty(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        import urllib.request
+
+        # body is a list, not the expected dict — must not crash.
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: _FakeHttpResp([1, 2, 3]))
+        assert pb.huggingface_list_repo_files("org/repo") == []
+
+
+class TestHuggingfaceRepoHasGguf:
+    def test_true_when_gguf_present(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: ["model-Q4_K_M.gguf", "README.md"],
+        )
+        assert pb.huggingface_repo_has_gguf("org/repo") is True
+
+    def test_false_when_listing_has_no_gguf(self, isolated_state, monkeypatch):
+        # MLX repos look like this: many .safetensors shards, no .gguf.
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: [
+                "model-00001-of-00017.safetensors",
+                "model.safetensors.index.json",
+                "tokenizer.json",
+            ],
+        )
+        assert pb.huggingface_repo_has_gguf("NexVeridian/Qwen3-Coder-Next-8bit") is False
+
+    def test_none_when_listing_empty(self, isolated_state, monkeypatch):
+        # Network down / 404 → empty list → tri-state None so callers don't
+        # mistake an outage for "this repo has no GGUF".
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "huggingface_list_repo_files", lambda repo: [])
+        assert pb.huggingface_repo_has_gguf("org/repo") is None
+
+
+class TestResolveGgufMirror:
+    def test_returns_original_repo_when_it_has_gguf(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        pb._GGUF_MIRROR_CACHE.clear()
+        monkeypatch.setattr(
+            pb,
+            "huggingface_repo_has_gguf",
+            lambda repo: True if repo == "TheBloke/Foo-GGUF" else None,
+        )
+        assert pb.resolve_gguf_mirror("TheBloke/Foo-GGUF") == "TheBloke/Foo-GGUF"
+
+    def test_falls_back_to_known_mirror_author(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        pb._GGUF_MIRROR_CACHE.clear()
+        # Original repo has no GGUF; bartowski mirror does.
+        seen = {"NexVeridian/Qwen3-Coder-Next-8bit": False}
+
+        def _has_gguf(repo):
+            if repo in seen:
+                return False
+            if repo == "bartowski/Qwen3-Coder-Next-GGUF":
+                return True
+            return None
+
+        monkeypatch.setattr(pb, "huggingface_repo_has_gguf", _has_gguf)
+        # Search fallback should never be reached when a known mirror author
+        # works — assert by failing the test if it is.
+        monkeypatch.setattr(
+            pb,
+            "huggingface_search_models",
+            lambda *a, **kw: pytest_fail_unreached(),
+        )
+        resolved = pb.resolve_gguf_mirror("NexVeridian/Qwen3-Coder-Next-8bit")
+        assert resolved == "bartowski/Qwen3-Coder-Next-GGUF"
+
+    def test_returns_none_when_no_mirror_found(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        pb._GGUF_MIRROR_CACHE.clear()
+        monkeypatch.setattr(pb, "huggingface_repo_has_gguf", lambda repo: False)
+        monkeypatch.setattr(pb, "huggingface_search_models", lambda *a, **kw: [])
+        assert pb.resolve_gguf_mirror("Foo/Bar-MLX-4bit") is None
+
+    def test_caches_by_base_name(self, isolated_state, monkeypatch):
+        pb, _, _ = isolated_state
+        pb._GGUF_MIRROR_CACHE.clear()
+        calls = {"n": 0}
+
+        def _has_gguf(repo):
+            calls["n"] += 1
+            return True if repo == "bartowski/Foo-GGUF" else False
+
+        monkeypatch.setattr(pb, "huggingface_repo_has_gguf", _has_gguf)
+        monkeypatch.setattr(pb, "huggingface_search_models", lambda *a, **kw: [])
+        first = pb.resolve_gguf_mirror("Some/Foo-MLX-4bit")
+        first_call_count = calls["n"]
+        second = pb.resolve_gguf_mirror("Some/Foo-MLX-4bit")
+        # Second call must hit the cache without any new HF probes.
+        assert first == second == "bartowski/Foo-GGUF"
+        assert calls["n"] == first_call_count
+
+    def test_blank_name_returns_none(self, isolated_state):
+        pb, _, _ = isolated_state
+        pb._GGUF_MIRROR_CACHE.clear()
+        assert pb.resolve_gguf_mirror("") is None
+        assert pb.resolve_gguf_mirror(None) is None  # type: ignore[arg-type]
+
+    def test_strips_quant_suffixes_for_search(self, isolated_state):
+        pb, _, _ = isolated_state
+        # _candidate_base_name is the parser used to construct mirror repo ids.
+        assert pb._candidate_base_name("NexVeridian/Qwen3-Coder-Next-8bit") == "Qwen3-Coder-Next"
+        assert (
+            pb._candidate_base_name("lmstudio-community/Qwen3-Coder-30B-MLX-4bit")
+            == "Qwen3-Coder-30B"
+        )
+        assert pb._candidate_base_name("Qwen/Qwen3-Coder-30B") == "Qwen3-Coder-30B"
+
+
+def pytest_fail_unreached():  # helper used by the test above
+    import pytest as _pytest
+
+    _pytest.fail("unexpected fallback to huggingface_search_models")
+
+
+# ---------------------------------------------------------------------------
 # wizard._download_gguf_via_hf_cli
 # ---------------------------------------------------------------------------
 
@@ -576,10 +738,13 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
         )
+        # Empty file listing is treated as "ambiguous, proceed without
+        # filter" — preserves the outage-tolerance contract from #58.
+        monkeypatch.setattr(pb, "huggingface_list_repo_files", lambda repo: [])
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
-            lambda repo, filename=None, local_dir=None, stream=True: {
+            lambda repo, filename=None, local_dir=None, *, include=None, stream=True: {
                 "ok": True,
                 "path": "/tmp/model.gguf",
                 "error": None,
@@ -604,8 +769,8 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
-            lambda repo, filename=None, local_dir=None, stream=True: (
-                captured.update({"repo": repo, "filename": filename})
+            lambda repo, filename=None, local_dir=None, *, include=None, stream=True: (
+                captured.update({"repo": repo, "filename": filename, "include": include})
                 or {
                     "ok": True,
                     "path": "/tmp/model.gguf",
@@ -625,6 +790,7 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
         )
+        monkeypatch.setattr(pb, "huggingface_list_repo_files", lambda repo: [])
         # A failure that doesn't look like not-found should propagate as-is
         # without invoking the fuzzy-search loop.
         monkeypatch.setattr(
@@ -643,6 +809,290 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(pb, "huggingface_search_models", lambda *a, **kw: ["org/repo"])
         result = wiz._download_gguf_via_hf_cli("org/repo")
         assert result["ok"] is False
+
+    def test_fails_fast_when_repo_has_no_gguf(self, isolated_state, monkeypatch):
+        # #58 — if HF tells us the repo holds no GGUF files, abort *before*
+        # invoking the CLI. Otherwise the user wastes ~80 GiB on an MLX repo
+        # like NexVeridian/Qwen3-Coder-Next-8bit that llama.cpp can't load.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        # Non-empty listing with no .gguf entries → fail-fast branch.
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: ["config.json", "model.safetensors", "tokenizer.json"],
+        )
+
+        # The HF CLI download must NOT be invoked at all.
+        cli_called = {"flag": False}
+
+        def _fail_if_called(*a, **kw):
+            cli_called["flag"] = True
+            raise AssertionError("huggingface_download_gguf should not be reached")
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", _fail_if_called)
+
+        # User declines fuzzy-retry → wrapper returns a clean failure dict
+        # without ever invoking the CLI.
+        import questionary as _q
+
+        monkeypatch.setattr(
+            _q, "select", lambda *a, **kw: type("S", (), {"ask": lambda self: "__cancel__"})()
+        )
+        monkeypatch.setattr(pb, "huggingface_fuzzy_find", lambda *a, **kw: [])
+        monkeypatch.setattr(
+            _q, "text", lambda *a, **kw: type("T", (), {"ask": lambda self: ""})()
+        )
+
+        result = wiz._download_gguf_via_hf_cli("NexVeridian/Qwen3-Coder-Next-8bit")
+        assert result["ok"] is False
+        assert "no .gguf" in (result.get("error") or "").lower()
+        assert cli_called["flag"] is False
+
+    def test_pinned_filename_skips_pre_flight_check(self, isolated_state, monkeypatch):
+        # Caller pinned a specific .gguf filename → trust them. The pre-flight
+        # listing check (which can give false negatives on private/gated repos)
+        # must be bypassed when the user knows exactly what they want.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+
+        def _fail_if_called(*a, **kw):
+            raise AssertionError("repo file listing must not be fetched when filename is pinned")
+
+        monkeypatch.setattr(pb, "huggingface_list_repo_files", _fail_if_called)
+        monkeypatch.setattr(
+            pb,
+            "huggingface_download_gguf",
+            lambda repo, filename=None, local_dir=None, *, include=None, stream=True: {
+                "ok": True,
+                "path": "/tmp/model.gguf",
+                "error": None,
+                "bytes_downloaded": 100,
+                "elapsed_seconds": 0.1,
+                "not_found": False,
+            },
+        )
+        result = wiz._download_gguf_via_hf_cli("org/repo model-Q4_K_M.gguf")
+        assert result["ok"] is True
+
+    def test_multi_quant_repo_prompts_for_one_variant(self, isolated_state, monkeypatch):
+        # #60 — repos like unsloth/Qwen3-Coder-Next-GGUF hold 30+ quants. Pulling
+        # them all is 1+ TB. The wizard must show a picker and pass the chosen
+        # quant via filename (top-level) or include glob (sharded subfolder),
+        # never invoking `hf download <repo>` with no filter.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: [
+                "Qwen3-Coder-Next-Q2_K.gguf",
+                "Qwen3-Coder-Next-Q4_K_M.gguf",
+                "Qwen3-Coder-Next-Q5_K_M.gguf",
+                "BF16/model-00001-of-00012.gguf",
+                "BF16/model-00002-of-00012.gguf",
+                "config.json",
+            ],
+        )
+        # User picks the Q4_K_M top-level file from the picker.
+        import questionary as _q
+
+        monkeypatch.setattr(
+            _q,
+            "select",
+            lambda *a, **kw: _StubAsk("Qwen3-Coder-Next-Q4_K_M.gguf"),
+        )
+        captured: dict = {}
+
+        def _fake_download(
+            repo, filename=None, local_dir=None, *, include=None, stream=True
+        ):
+            captured.update({"repo": repo, "filename": filename, "include": include})
+            return {
+                "ok": True,
+                "path": "/tmp/x.gguf",
+                "error": None,
+                "bytes_downloaded": 1,
+                "elapsed_seconds": 0.0,
+                "not_found": False,
+            }
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", _fake_download)
+        result = wiz._download_gguf_via_hf_cli("unsloth/Qwen3-Coder-Next-GGUF")
+        assert result["ok"] is True
+        assert captured["filename"] == "Qwen3-Coder-Next-Q4_K_M.gguf"
+        # When a top-level filename is selected, include must remain unset so
+        # we don't double-filter and miss the file.
+        assert captured["include"] is None
+
+    def test_multi_quant_picker_sharded_uses_include_glob(self, isolated_state, monkeypatch):
+        # Sharded variants (e.g. BF16 split across 12 shards) must download
+        # via --include "BF16/*", never as a single filename.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: [
+                "model-Q4_K_M.gguf",
+                "BF16/shard-00001-of-00012.gguf",
+                "BF16/shard-00002-of-00012.gguf",
+            ],
+        )
+        import questionary as _q
+
+        monkeypatch.setattr(
+            _q,
+            "select",
+            lambda *a, **kw: _StubAsk("BF16/ (sharded, 2 shards)"),
+        )
+        captured: dict = {}
+
+        def _fake_download(
+            repo, filename=None, local_dir=None, *, include=None, stream=True
+        ):
+            captured.update({"filename": filename, "include": include})
+            return {
+                "ok": True,
+                "path": "/tmp/x",
+                "error": None,
+                "bytes_downloaded": 1,
+                "elapsed_seconds": 0.0,
+                "not_found": False,
+            }
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", _fake_download)
+        result = wiz._download_gguf_via_hf_cli("org/repo")
+        assert result["ok"] is True
+        assert captured["filename"] is None
+        assert captured["include"] == "BF16/*"
+
+    def test_multi_quant_picker_cancel_returns_failure(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: ["a-Q2_K.gguf", "a-Q4_K_M.gguf"],
+        )
+        import questionary as _q
+
+        monkeypatch.setattr(_q, "select", lambda *a, **kw: _StubAsk("__cancel__"))
+
+        def _fail_if_called(*a, **kw):
+            raise AssertionError("download must not start when user cancels picker")
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", _fail_if_called)
+        result = wiz._download_gguf_via_hf_cli("org/repo")
+        assert result["ok"] is False
+        assert "cancel" in (result.get("error") or "").lower()
+
+    def test_single_variant_repo_auto_selects(self, isolated_state, monkeypatch):
+        # Only one GGUF in the repo → no picker, just download it directly.
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: ["model-Q4_K_M.gguf", "config.json"],
+        )
+        import questionary as _q
+
+        def _no_prompt(*a, **kw):
+            raise AssertionError("picker must not run for single-variant repos")
+
+        monkeypatch.setattr(_q, "select", _no_prompt)
+        captured: dict = {}
+
+        def _fake_download(
+            repo, filename=None, local_dir=None, *, include=None, stream=True
+        ):
+            captured.update({"filename": filename, "include": include})
+            return {
+                "ok": True,
+                "path": "/tmp/m.gguf",
+                "error": None,
+                "bytes_downloaded": 1,
+                "elapsed_seconds": 0.0,
+                "not_found": False,
+            }
+
+        monkeypatch.setattr(pb, "huggingface_download_gguf", _fake_download)
+        assert wiz._download_gguf_via_hf_cli("org/repo")["ok"] is True
+        assert captured["filename"] == "model-Q4_K_M.gguf"
+        assert captured["include"] is None
+
+
+class TestCollectGgufVariants:
+    """Pure helper: GGUF file list → pickable variants."""
+
+    def test_groups_top_level_files_and_sharded_dirs(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        files = [
+            "model-Q4_K_M.gguf",
+            "model-Q5_K_M.gguf",
+            "BF16/shard-00001-of-00003.gguf",
+            "BF16/shard-00002-of-00003.gguf",
+            "BF16/shard-00003-of-00003.gguf",
+            "config.json",
+            "tokenizer.json",
+        ]
+        variants = wiz._collect_gguf_variants(files)
+        labels = [v["label"] for v in variants]
+        # Sharded folder collapses to one entry; top-level files stay 1:1.
+        assert "model-Q4_K_M.gguf" in labels
+        assert "model-Q5_K_M.gguf" in labels
+        assert any("BF16" in lbl and "sharded" in lbl for lbl in labels)
+        # Non-GGUF files are dropped.
+        assert all(".json" not in lbl for lbl in labels)
+
+    def test_top_level_uses_filename_kind(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        v = wiz._collect_gguf_variants(["foo-Q4_K_M.gguf"])
+        assert v == [{"label": "foo-Q4_K_M.gguf", "kind": "file", "spec": "foo-Q4_K_M.gguf"}]
+
+    def test_sharded_uses_include_glob(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        v = wiz._collect_gguf_variants(
+            [
+                "BF16/a.gguf",
+                "BF16/b.gguf",
+            ]
+        )
+        assert len(v) == 1
+        assert v[0]["kind"] == "include"
+        assert v[0]["spec"] == "BF16/*"
+
+    def test_default_label_prefers_q4_k_m(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        variants = wiz._collect_gguf_variants(
+            ["a-Q2_K.gguf", "a-Q4_K_M.gguf", "a-Q8_0.gguf"]
+        )
+        default = wiz._default_variant_label(variants)
+        assert default is not None and "Q4_K_M" in default
+
+    def test_default_label_falls_back_to_first(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        variants = wiz._collect_gguf_variants(["a-Q2_K.gguf", "a-Q8_0.gguf"])
+        default = wiz._default_variant_label(variants)
+        assert default == variants[0]["label"]
+
+    def test_empty_input_yields_empty_list(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        assert wiz._collect_gguf_variants([]) == []
+        assert wiz._collect_gguf_variants(["only.json", "weights.safetensors"]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -824,10 +1274,12 @@ class TestFuzzySearchDownloadFlow:
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
+        # Empty file listing → ambiguous, proceed (fuzzy-on-404 path runs).
+        monkeypatch.setattr(pb, "huggingface_list_repo_files", lambda repo: [])
         # Call 1: fail with 404. Call 2: success with the fuzzy-picked repo.
         calls: list[str] = []
 
-        def fake_download(repo, filename=None, local_dir=None, stream=True):
+        def fake_download(repo, filename=None, local_dir=None, *, include=None, stream=True):
             calls.append(repo)
             if len(calls) == 1:
                 return {
@@ -874,9 +1326,10 @@ class TestFuzzySearchDownloadFlow:
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
+        monkeypatch.setattr(pb, "huggingface_list_repo_files", lambda repo: [])
         attempt = {"n": 0}
 
-        def fake_download(repo, filename=None, local_dir=None, stream=True):
+        def fake_download(repo, filename=None, local_dir=None, *, include=None, stream=True):
             attempt["n"] += 1
             if attempt["n"] == 1:
                 return {
@@ -921,6 +1374,7 @@ class TestFuzzySearchDownloadFlow:
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
+        monkeypatch.setattr(pb, "huggingface_repo_has_gguf", lambda repo: None)
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",

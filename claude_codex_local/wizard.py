@@ -1252,6 +1252,84 @@ def _render_llama_server_command(argv: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in argv)
 
 
+def _collect_gguf_variants(files: list[str]) -> list[dict[str, str]]:
+    """
+    Group a repo's GGUF file listing into pickable single-quant download units.
+
+    Each returned entry is one variant the user can choose:
+      - top-level file ``Foo-Q4_K_M.gguf``  → {kind: "file", spec: filename}
+      - sharded folder ``BF16/model-…``     → {kind: "include", spec: "BF16/*"}
+
+    Sharded folders collapse all of their shards into a single entry so we
+    download the whole shard set together (pulling shard 1 of 12 alone is
+    useless). Existing index/config files in the same folder are excluded
+    from the variant list itself but will be pulled in by the include glob.
+
+    Returns variants sorted alphabetically by label. Empty list when ``files``
+    contains no GGUFs.
+    """
+    top_files: list[str] = []
+    sharded_dirs: dict[str, int] = {}
+    for f in files:
+        if not f.lower().endswith(".gguf"):
+            continue
+        parent, _, _name = f.rpartition("/")
+        if parent:
+            sharded_dirs[parent] = sharded_dirs.get(parent, 0) + 1
+        else:
+            top_files.append(f)
+    variants: list[dict[str, str]] = []
+    for f in top_files:
+        variants.append({"label": f, "kind": "file", "spec": f})
+    for d, n in sharded_dirs.items():
+        variants.append(
+            {
+                "label": f"{d}/ (sharded, {n} shards)",
+                "kind": "include",
+                "spec": f"{d}/*",
+            }
+        )
+    variants.sort(key=lambda v: v["label"].lower())
+    return variants
+
+
+# Preferred quant when the picker auto-selects a default — Q4_K_M is the
+# canonical "good balance" quant for most consumer hardware. Falls back to
+# the first variant alphabetically when no Q4_K_M is present.
+_DEFAULT_QUANT_HINT = "q4_k_m"
+
+
+def _default_variant_label(variants: list[dict[str, str]]) -> str | None:
+    """Pick a sensible default label for the quant picker, or None if empty."""
+    if not variants:
+        return None
+    for v in variants:
+        if _DEFAULT_QUANT_HINT in v["label"].lower():
+            return v["label"]
+    return variants[0]["label"]
+
+
+def _prompt_gguf_variant(repo_id: str, variants: list[dict[str, str]]) -> dict[str, str] | None:
+    """Show a picker over GGUF variants in ``repo_id``; return the chosen one or None on cancel."""
+    console.print(
+        f"\n[cyan]'{repo_id}' contains {len(variants)} GGUF variants.[/cyan] "
+        f"Pick one — downloading the whole repo would pull every quant ({len(variants)} files / folders)."
+    )
+    choices: list[Any] = [questionary.Choice(v["label"], value=v["label"]) for v in variants]
+    choices.append(questionary.Choice("Cancel", value="__cancel__"))
+    pick = questionary.select(
+        "Select a quant to download:",
+        choices=choices,
+        default=_default_variant_label(variants),
+    ).ask()
+    if pick is None or pick == "__cancel__":
+        return None
+    for v in variants:
+        if v["label"] == pick:
+            return v
+    return None
+
+
 def _download_gguf_via_hf_cli(repo_id: str) -> dict:
     """
     Download a GGUF model from Hugging Face Hub using the HuggingFace CLI.
@@ -1311,17 +1389,75 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
         parts = current.split(None, 1)
         hf_repo = parts[0]
         filename = parts[1] if len(parts) > 1 else None
+        include: str | None = None
+
+        # Pre-flight (#58, #60): when the user is fetching a whole repo,
+        # enumerate the repo's files first. Two failure modes to head off:
+        #   (a) MLX-only / safetensors-only repo with zero GGUFs — catastrophic
+        #       80+ GiB of unusable files (#58). Redirect via fuzzy search.
+        #   (b) GGUF mirror with many quants (e.g. unsloth's 30+ variants) —
+        #       a bare `hf download <repo>` mirrors *all* of them, easily 1+ TB
+        #       (#60). Show a picker so the user grabs one quant.
+        # When the user already pinned a specific filename we trust them.
+        # When the listing is empty (network blip / private repo / API change)
+        # we treat it as ambiguous and proceed without a filter — better to
+        # let the CLI fail downstream than block a real download on an HF
+        # outage. The user can always Ctrl-C if it goes sideways.
+        if filename is None:
+            repo_files = pb.huggingface_list_repo_files(hf_repo)
+            variants = _collect_gguf_variants(repo_files) if repo_files else []
+            if repo_files and not variants:
+                warn(
+                    f"Repo '{hf_repo}' contains no .gguf files — "
+                    f"llama.cpp can only load GGUF models.\n"
+                    f"  Try a GGUF mirror such as 'bartowski/<model>-GGUF' "
+                    f"or 'unsloth/<model>-GGUF'."
+                )
+                next_repo = _prompt_fuzzy_hf_match(hf_repo)
+                if next_repo is None:
+                    return {
+                        "ok": False,
+                        "path": None,
+                        "repo_id": current,
+                        "error": f"repo '{hf_repo}' contains no .gguf files",
+                    }
+                current = next_repo
+                continue
+            if len(variants) == 1:
+                only = variants[0]
+                if only["kind"] == "file":
+                    filename = only["spec"]
+                else:
+                    include = only["spec"]
+                info(f"Repo contains a single GGUF variant: {only['label']}")
+            elif len(variants) > 1:
+                picked = _prompt_gguf_variant(hf_repo, variants)
+                if picked is None:
+                    return {
+                        "ok": False,
+                        "path": None,
+                        "repo_id": current,
+                        "error": "user cancelled quant selection",
+                    }
+                if picked["kind"] == "file":
+                    filename = picked["spec"]
+                else:
+                    include = picked["spec"]
 
         # Route every download under STATE_DIR/models/<slug> so we can recover
         # the resolved .gguf path after the streaming HF CLI finishes (issue #53).
         local_dir = STATE_DIR / "models" / pb.safe_repo_slug(hf_repo)
         local_dir.mkdir(parents=True, exist_ok=True)
 
-        console.print(f"\n[cyan]Downloading {current} from Hugging Face Hub...[/cyan]")
+        download_label = filename or include or "<full repo>"
+        console.print(
+            f"\n[cyan]Downloading {hf_repo} ({download_label}) from Hugging Face Hub...[/cyan]"
+        )
         result = pb.huggingface_download_gguf(
             hf_repo,
             filename=filename,
             local_dir=str(local_dir),
+            include=include,
             stream=True,
         )
         if result.get("ok"):

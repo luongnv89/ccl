@@ -9,3 +9,5 @@ coverage.xml
 .mypy_cache/
 .ruff_cache/
 .claude/worktrees/
+.test-model-cache/
+*.egg-info/

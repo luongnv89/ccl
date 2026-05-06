@@ -1205,6 +1205,7 @@ def huggingface_download_gguf(
     filename: str | None = None,
     local_dir: str | None = None,
     *,
+    include: str | None = None,
     stream: bool = True,
 ) -> dict[str, Any]:
     """
@@ -1213,8 +1214,15 @@ def huggingface_download_gguf(
     Args:
         repo_id:   HF repo ID, e.g. "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
         filename:  Specific file to download (e.g. "model-Q4_K_M.gguf").
-                   When None the entire repo is fetched (picks the first GGUF).
+                   When None and ``include`` is also None, the entire repo is
+                   fetched — only safe when the caller has already verified
+                   the repo holds a single quant.
         local_dir: Directory to store the file. Defaults to the HF cache.
+        include:   Glob pattern passed to ``hf download --include``. Use this
+                   to grab one quant from a multi-quant GGUF repo (e.g.
+                   ``"*Q4_K_M*.gguf"`` for top-level files or ``"BF16/*"`` for
+                   sharded subfolders). Mutually exclusive with ``filename``;
+                   if both are given, ``filename`` wins.
         stream:    When True (default) the CLI's stdout/stderr stream to the
                    terminal so the user can see the HF CLI's built-in progress
                    bar (download speed / bytes / ETA). When False, output is
@@ -1246,6 +1254,8 @@ def huggingface_download_gguf(
     cmd = [det["binary"], "download", repo_id]
     if filename:
         cmd.append(filename)
+    elif include:
+        cmd += ["--include", include]
     if local_dir:
         cmd += ["--local-dir", local_dir]
 
@@ -1476,6 +1486,146 @@ def huggingface_fuzzy_find(query: str, *, max_results: int = 3) -> list[str]:
     # difflib found nothing — fall back to HF's own ordering so we still
     # surface *some* suggestion instead of silently failing.
     return candidates[:max_results]
+
+
+def huggingface_list_repo_files(
+    repo_id: str,
+    *,
+    timeout: float = 10.0,
+) -> list[str]:
+    """
+    Return the filenames stored in a Hugging Face model repo, or ``[]`` on
+    any error (network down, repo gone, malformed payload).
+
+    Uses the public `/api/models/{repo}` endpoint and reads ``siblings`` —
+    same dependency-free urllib pattern as ``huggingface_search_models``.
+
+    The empty-list-on-error contract is intentional: callers downstream
+    treat an empty result as "ambiguous, proceed" so a temporary HF outage
+    never blocks a download. Use ``[".gguf" in f for f in result]`` to test
+    repo content; only act on a *non-empty* file list.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    if not repo_id or not repo_id.strip():
+        return []
+    try:
+        encoded = urllib.parse.quote(repo_id.strip(), safe="/")
+        url = f"https://huggingface.co/api/models/{encoded}"
+        req = urllib.request.Request(url, headers={"User-Agent": "claude-codex-local"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https only
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return []
+    if not isinstance(body, dict):
+        return []
+    siblings = body.get("siblings")
+    if not isinstance(siblings, list):
+        return []
+    files: list[str] = []
+    for entry in siblings:
+        if isinstance(entry, dict):
+            name = entry.get("rfilename")
+            if isinstance(name, str) and name:
+                files.append(name)
+    return files
+
+
+def huggingface_repo_has_gguf(repo_id: str) -> bool | None:
+    """
+    Tri-state check: does ``repo_id`` contain at least one ``.gguf`` file?
+
+    Returns:
+      True  — the file listing was retrieved and contains a GGUF.
+      False — the file listing was retrieved and contains *no* GGUF.
+      None  — the file listing could not be retrieved (network/404/empty);
+              caller should treat as "unknown" and not block on it.
+    """
+    files = huggingface_list_repo_files(repo_id)
+    if not files:
+        return None
+    return any(f.lower().endswith(".gguf") for f in files)
+
+
+# Cache of "candidate base name" → resolved GGUF repo id (or None when no
+# mirror was found). Avoids repeated HF API hits while the wizard re-renders
+# its model picker. Cleared at process exit; the wizard's TTL is fine.
+_GGUF_MIRROR_CACHE: dict[str, str | None] = {}
+
+# Authors who reliably publish high-quality GGUF conversions of popular
+# open-weight LLMs. Probed in order — first hit wins.
+_GGUF_MIRROR_AUTHORS: tuple[str, ...] = (
+    "bartowski",
+    "unsloth",
+    "lmstudio-community",
+    "TheBloke",
+)
+
+
+def _candidate_base_name(name: str) -> str:
+    """
+    Strip org prefix and quant/format suffixes from an HF model name so we can
+    construct GGUF mirror repo ids. Example:
+      "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit" → "Qwen3-Coder-30B-A3B-Instruct"
+      "NexVeridian/Qwen3-Coder-Next-8bit"                       → "Qwen3-Coder-Next"
+    """
+    base = (name or "").split("/", 1)[-1]
+    # Trailing quant/format markers we don't want in a GGUF mirror name.
+    base = re.sub(
+        r"[-_](MLX[-_]?\w*|FP\d+|BF\d+|GPTQ|AWQ|\d+bit|GGUF)$",
+        "",
+        base,
+        flags=re.IGNORECASE,
+    )
+    return base
+
+
+def resolve_gguf_mirror(name: str) -> str | None:
+    """
+    Resolve an HF model name (typically from llmfit's coding catalog, which is
+    MLX-centric) to a Hugging Face repo that actually contains GGUF files.
+
+    Strategy, first hit wins:
+      1. The original repo, if it already contains GGUF files.
+      2. ``<author>/<base>-GGUF`` for each well-known mirror author.
+      3. HF search for ``<base>-GGUF`` and pick the first hit that verifies.
+
+    Returns the resolved repo id, or ``None`` when no mirror could be located.
+    Results are memoised by base-name so the wizard can call this on every
+    re-render of the picker without hammering the HF API.
+
+    Network errors degrade to ``None`` rather than blocking — the wizard
+    treats that the same as "no mirror found" and silently omits the
+    affected llmfit recommendation from the llama.cpp profile picker.
+    """
+    if not name:
+        return None
+    base = _candidate_base_name(name)
+    if not base:
+        return None
+    cache_key = base.lower()
+    if cache_key in _GGUF_MIRROR_CACHE:
+        return _GGUF_MIRROR_CACHE[cache_key]
+
+    def _remember(value: str | None) -> str | None:
+        _GGUF_MIRROR_CACHE[cache_key] = value
+        return value
+
+    if huggingface_repo_has_gguf(name) is True:
+        return _remember(name)
+
+    for author in _GGUF_MIRROR_AUTHORS:
+        candidate = f"{author}/{base}-GGUF"
+        if huggingface_repo_has_gguf(candidate) is True:
+            return _remember(candidate)
+
+    for hit in huggingface_search_models(f"{base}-GGUF", limit=5):
+        if huggingface_repo_has_gguf(hit) is True:
+            return _remember(hit)
+
+    return _remember(None)
 
 
 def llamacpp_detect() -> dict[str, Any]:
@@ -2182,9 +2332,14 @@ def _candidate_tag_for_engine(c: dict[str, Any], engine: str) -> str | None:
     if engine == "lmstudio":
         return c.get("lms_hub_name") or c.get("lms_mlx_path")
     if engine == "llamacpp":
-        # llama.cpp accepts the raw HF reference; any candidate with a name
-        # is usable via the HuggingFace CLI download path.
-        return c.get("name")
+        # llama.cpp can only load GGUF files. llmfit's coding catalog is
+        # MLX-centric (for LM Studio), so the candidate's own repo is often
+        # safetensors-only — handing that name to the HF download path
+        # produced 80+ GiB of unusable files in #58. Resolve to a known GGUF
+        # mirror (bartowski/unsloth/etc.) instead, and silently drop the
+        # candidate when no mirror can be located.
+        name = c.get("name")
+        return resolve_gguf_mirror(name) if name else None
     return None
 
 

@@ -1679,11 +1679,19 @@ class TestLlamaCppDownloadCapturesPath:
         pb, wiz, state_dir = isolated_state
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf"})
 
+        # Single-variant repo → wizard auto-selects without prompting.
+        monkeypatch.setattr(
+            pb,
+            "huggingface_list_repo_files",
+            lambda repo: ["model-Q4_K_M.gguf", "config.json"],
+        )
+
         captured: dict = {}
 
-        def _fake_download(repo_id, filename=None, local_dir=None, *, stream=True):
+        def _fake_download(repo_id, filename=None, local_dir=None, *, include=None, stream=True):
             captured["repo_id"] = repo_id
             captured["filename"] = filename
+            captured["include"] = include
             captured["local_dir"] = local_dir
             # Simulate the streaming HF CLI dropping a file in local_dir.
             target_dir = wiz.Path(local_dir)

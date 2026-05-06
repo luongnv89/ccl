@@ -304,14 +304,15 @@ class TestRealHuggingFaceDownload:
         binary may not be on PATH — the actual subprocess call to
         huggingface-cli still happens and must succeed.
         """
-        import sys
+        import claude_codex_local.core as pb
 
-        pb = sys.modules["claude_codex_local.core"]
-        monkeypatch.setattr(
-            pb,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "huggingface-cli", "version": "patched"},
-        )
+        # Use the live detection result so the patched binary matches whatever
+        # is actually on PATH (newer HF releases hard-deprecate the legacy
+        # `huggingface-cli` shim and only ship `hf`).
+        det = pb.huggingface_cli_detect()
+        if not det.get("present"):
+            pytest.skip("HuggingFace CLI not on PATH")
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: det)
         result = pb.huggingface_download_gguf(
             repo_id=MODEL_REPO,
             filename=MODEL_FILE,

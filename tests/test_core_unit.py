@@ -474,12 +474,30 @@ class TestRecommendForMode:
         assert rec["engine_tag"] == "qwen/qwen3-coder-30b"
         assert rec["mode"] == "quality"
 
-    def test_llamacpp_returns_raw_name(self, monkeypatch):
+    def test_llamacpp_resolves_gguf_mirror(self, monkeypatch):
+        # llmfit's catalog is MLX-centric; for llama.cpp we must resolve to a
+        # repo that actually contains GGUF files (#58). The picker silently
+        # drops candidates with no GGUF mirror — this test verifies the top
+        # candidate's resolved tag wins when a mirror exists.
         monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        # Clear the mirror cache so the test sees fresh resolution.
+        pb._GGUF_MIRROR_CACHE.clear()
+        monkeypatch.setattr(
+            pb,
+            "resolve_gguf_mirror",
+            lambda name: "bartowski/Qwen3-Coder-30B-GGUF" if name else None,
+        )
         rec = pb.recommend_for_mode(_empty_profile(), "balanced", "llamacpp")
         assert rec is not None
-        # llama.cpp uses the HF name directly.
-        assert rec["engine_tag"] == "Qwen/Qwen3-Coder-30B"
+        assert rec["engine_tag"] == "bartowski/Qwen3-Coder-30B-GGUF"
+
+    def test_llamacpp_skips_when_no_gguf_mirror(self, monkeypatch):
+        # When no GGUF mirror is found for *any* candidate, recommend_for_mode
+        # must return None instead of falsely surfacing an MLX-only repo (#58).
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        pb._GGUF_MIRROR_CACHE.clear()
+        monkeypatch.setattr(pb, "resolve_gguf_mirror", lambda name: None)
+        assert pb.recommend_for_mode(_empty_profile(), "balanced", "llamacpp") is None
 
     def test_returns_none_when_no_candidates(self, monkeypatch):
         monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
