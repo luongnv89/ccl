@@ -2607,7 +2607,9 @@ class TestStep7Verify9Router:
 
 
 class TestEnsureTool9Router:
-    """Issue #51 — _ensure_tool must NOT auto-install 9router; it lives on user's machine."""
+    """9router ships as an npm one-liner (`npm install -g 9router`). The wizard
+    offers to install it interactively, but never fork-spawns the long-running
+    dashboard server — the user starts that themselves."""
 
     def test_returns_true_when_router9_endpoint_reachable(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
@@ -2616,38 +2618,105 @@ class TestEnsureTool9Router:
         )
         assert wiz._ensure_tool("9router") is True
 
-    def test_returns_false_when_router9_unreachable_no_install_attempted(
-        self, isolated_state, monkeypatch
-    ):
-        """When 9router is not reachable, _ensure_tool prints help and returns False
-        WITHOUT trying to subprocess.run an install command. This is critical:
-        9router is a long-running server the user must start manually."""
+    def test_warns_and_returns_false_when_npm_missing(self, isolated_state, monkeypatch):
+        """No npm on PATH → no install attempted, no confirm prompted, returns False."""
         pb, wiz, _ = isolated_state
         monkeypatch.setattr(
             pb.Router9Adapter, "detect", lambda self: {"present": False, "version": ""}
         )
-
-        called: dict[str, bool] = {"subprocess_run": False}
-
-        def fake_run(*a, **kw):
-            called["subprocess_run"] = True
-            raise AssertionError("must not subprocess.run for 9router")
+        monkeypatch.setattr(
+            wiz.shutil,
+            "which",
+            lambda name: None,
+        )
 
         import subprocess as sp
 
-        monkeypatch.setattr(sp, "run", fake_run)
-        # Also block questionary so we'd notice an interactive confirm.
+        monkeypatch.setattr(
+            sp,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not subprocess.run when npm is missing")
+            ),
+        )
         import questionary
 
         monkeypatch.setattr(
             questionary,
             "confirm",
             lambda *a, **kw: (_ for _ in ()).throw(
-                AssertionError("must not prompt confirm for 9router")
+                AssertionError("must not prompt confirm when npm is missing")
             ),
         )
         assert wiz._ensure_tool("9router") is False
+
+    def test_offers_npm_install_user_declines_returns_false(self, isolated_state, monkeypatch):
+        """User declines the install prompt → no subprocess, returns False."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb.Router9Adapter, "detect", lambda self: {"present": False, "version": ""}
+        )
+        # npm is on PATH; 9router CLI is not yet installed.
+        monkeypatch.setattr(
+            wiz.shutil,
+            "which",
+            lambda name: "/usr/bin/npm" if name == "npm" else None,
+        )
+
+        called: dict[str, bool] = {"subprocess_run": False}
+
+        def fake_run(*a, **kw):
+            called["subprocess_run"] = True
+            raise AssertionError("must not subprocess.run when user declines")
+
+        monkeypatch.setattr(wiz.subprocess, "run", fake_run)
+
+        class _DeclineConfirm:
+            def ask(self):
+                return False
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _DeclineConfirm())
+        assert wiz._ensure_tool("9router") is False
         assert called["subprocess_run"] is False
+
+    def test_offers_npm_install_user_accepts_runs_install(self, isolated_state, monkeypatch):
+        """User accepts → wizard runs `npm install -g 9router`, then asks
+        the user to start the daemon and re-probes."""
+        pb, wiz, _ = isolated_state
+        # Reachability flips to True after install + manual start.
+        detect_calls = {"n": 0}
+
+        def fake_detect(self):
+            detect_calls["n"] += 1
+            return {"present": detect_calls["n"] >= 2, "version": ""}
+
+        monkeypatch.setattr(pb.Router9Adapter, "detect", fake_detect)
+        monkeypatch.setattr(
+            wiz.shutil,
+            "which",
+            lambda name: "/usr/bin/npm" if name == "npm" else None,
+        )
+
+        run_calls: list[list[str]] = []
+
+        def fake_run(cmd, check=False, **kw):
+            run_calls.append(list(cmd))
+
+            class _R:
+                returncode = 0
+
+            return _R()
+
+        monkeypatch.setattr(wiz.subprocess, "run", fake_run)
+
+        class _AcceptConfirm:
+            def ask(self):
+                return True
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _AcceptConfirm())
+
+        assert wiz._ensure_tool("9router") is True
+        assert ["npm", "install", "-g", "9router"] in run_calls
 
 
 # ---------------------------------------------------------------------------

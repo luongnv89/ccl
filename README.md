@@ -153,7 +153,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 - macOS or Linux with zsh or bash
 - Python 3.10+
 - At least one harness: [Claude Code](https://claude.ai/code) or [Codex CLI](https://github.com/openai/codex)
-- At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), llama.cpp, or [9router](https://github.com/9router/9router) (cloud-routing proxy)
+- At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), llama.cpp, or [9router](https://github.com/decolua/9router) (cloud-routing proxy)
 - [`llmfit`](https://github.com/luongnv89/llmfit) on `PATH` (optional — for automatic model selection)
 
 ---
@@ -174,7 +174,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 ## 9router quick-start
 
-[9router](https://github.com/9router/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude) or `cx9` (Codex) alias and leaves your existing `cc` / `cx` aliases untouched.
+[9router](https://github.com/decolua/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude) or `cx9` (Codex) alias and leaves your existing `cc` / `cx` aliases untouched.
 
 ### Installing and running 9router
 
