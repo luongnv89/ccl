@@ -3209,16 +3209,32 @@ def _build_oneshot_cmd(
     if harness == "claude":
         if engine == "ollama":
             return [
-                "ollama", "launch", "claude", "--model", tag, "--",
-                "-p", prompt, "--model", tag,
+                "ollama",
+                "launch",
+                "claude",
+                "--model",
+                tag,
+                "--",
+                "-p",
+                prompt,
+                "--model",
+                tag,
             ]
         return list(wire_result.get("argv", [])) + ["-p", prompt]
     if harness == "codex":
         if engine == "ollama":
             return [
-                "ollama", "launch", "codex", "--model", tag, "--",
-                "exec", "--skip-git-repo-check",
-                "--oss", "--local-provider=ollama", prompt,
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "exec",
+                "--skip-git-repo-check",
+                "--oss",
+                "--local-provider=ollama",
+                prompt,
             ]
         return ["codex", "exec", "--skip-git-repo-check", "-m", tag, prompt]
     return None
@@ -3289,6 +3305,9 @@ def run_session(prompt: str | None = None) -> int:
     if not state.wire_result:
         fail("No wired launch found on state — re-run `ccl setup`.")
         return 1
+    if prompt is not None and not prompt.strip():
+        fail("--prompt cannot be empty.")
+        return 1
 
     # llama.cpp's backing server may have been killed since the last session;
     # bring it back before any harness invocation hits ConnectionRefused.
@@ -3303,9 +3322,7 @@ def run_session(prompt: str | None = None) -> int:
         # behavior as `cc` / `cx`, including any pre-flight stanzas baked in
         # by step 6.5.
         helper_path = state.helper_script_path or str(
-            pb.STATE_DIR / "bin" / _helper_script_basename(
-                _fence_tag_for(harness, engine)
-            )
+            pb.STATE_DIR / "bin" / _helper_script_basename(_fence_tag_for(harness, engine))
         )
         helper = Path(helper_path)
         if not helper.exists():
@@ -3416,7 +3433,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  ccl doctor                       Triage the current install\n"
             "  ccl find-model                   Show a recommended coding model\n"
             "  ccl run                          Launch the configured session interactively\n"
-            '  ccl run -p "what is 2+2?"      Launch one-shot for agent automation\n'
+            '  ccl run -p "what is 2+2?"        Launch one-shot for agent automation\n'
         ),
     )
     parser.add_argument("--version", action="version", version=f"ccl {__version__}")

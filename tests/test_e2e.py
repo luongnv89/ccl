@@ -571,8 +571,14 @@ esac"""
             argv = ["claude", "--model", tag]
         elif harness == "codex" and engine == "ollama":
             argv = [
-                "ollama", "launch", "codex", "--model", tag, "--",
-                "--oss", "--local-provider=ollama",
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "--oss",
+                "--local-provider=ollama",
             ]
         else:
             argv = ["codex", "-m", tag]
@@ -672,8 +678,7 @@ esac"""
         argv_log = tmp_path / "codex-argv.log"
         put_stub(
             "codex",
-            f'echo "$@" > {shlex.quote(str(argv_log))}\n'
-            "exit 0",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\n' "exit 0",
         )
         self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
         result = self._spawn_ccl(
@@ -684,6 +689,72 @@ esac"""
         assert result.returncode == 0, result.stderr
         recorded = argv_log.read_text()
         assert "exec --skip-git-repo-check -m qwen3-coder:30b test prompt 2" in recorded
+
+    def test_ccl_run_long_form_prompt(self, fake_bin, tmp_path):
+        """Argparse aliasing — `--prompt` must work the same as `-p`."""
+        bdir, put_stub = fake_bin
+        argv_log = tmp_path / "codex-argv.log"
+        put_stub(
+            "codex",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\n' "exit 0",
+        )
+        self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "--prompt", "long form test"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "long form test" in argv_log.read_text()
+
+    def test_ccl_run_empty_prompt_rejected(self, fake_bin, tmp_path):
+        """Empty `-p ""` is a footgun for shell-script callers — reject it."""
+        self._seed_state(tmp_path, "claude", "lmstudio", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", ""],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "prompt" in combined and "empty" in combined
+
+    def test_ccl_run_with_raw_env_keyfile(self, fake_bin, tmp_path):
+        """
+        9router/vllm key-on-disk path: `raw_env` shell expressions
+        (`"$(cat /path)"`) must be resolved at exec-time without leaking the
+        key into the wizard state. Asserts the harness sees the resolved
+        value, not the literal expression.
+        """
+        bdir, put_stub = fake_bin
+        keyfile = tmp_path / "router9-key"
+        keyfile.write_text("sk-router9-test-secret\n")
+        env_log = tmp_path / "claude-env.log"
+        put_stub(
+            "claude",
+            f'echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" > {shlex.quote(str(env_log))}\n'
+            f'echo "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" >> {shlex.quote(str(env_log))}\n'
+            "exit 0",
+        )
+        key_expr = f'"$(cat {shlex.quote(str(keyfile))})"'
+        self._seed_state(
+            tmp_path,
+            "claude",
+            "9router",
+            "kr/claude-sonnet-4.5",
+            raw_env={"ANTHROPIC_API_KEY": key_expr, "ANTHROPIC_AUTH_TOKEN": key_expr},
+        )
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "ping"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        leaked = env_log.read_text()
+        assert "ANTHROPIC_API_KEY=sk-router9-test-secret" in leaked
+        assert "ANTHROPIC_AUTH_TOKEN=sk-router9-test-secret" in leaked
+        # Critical: the literal `$(cat ...)` expression must NOT reach the harness.
+        assert "$(cat" not in leaked
 
     def test_ccl_run_no_prompt_execs_helper(self, fake_bin, tmp_path):
         """
@@ -696,9 +767,7 @@ esac"""
         helper = helper_dir / "cc"
         marker = tmp_path / "helper-was-called"
         helper.write_text(
-            "#!/usr/bin/env bash\n"
-            f"echo invoked > {shlex.quote(str(marker))}\n"
-            "exit 0\n"
+            "#!/usr/bin/env bash\n" f"echo invoked > {shlex.quote(str(marker))}\n" "exit 0\n"
         )
         helper.chmod(0o755)
         result = self._spawn_ccl(
