@@ -91,7 +91,7 @@ Uses an inline-env approach: the helper script exports `OPENAI_BASE_URL`, `OPENA
 
 ### 9router (cloud-routing proxy, optional)
 
-[9router](https://github.com/9router/9router) is a local server that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and forwards calls to paid cloud models (e.g. `kr/claude-sonnet-4.5`). The CCL adapter:
+[9router](https://github.com/decolua/9router) is a local server that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and forwards calls to paid cloud models (e.g. `kr/claude-sonnet-4.5`). The CCL adapter:
 
 - **Detects via `GET /v1/models`** with a 5-second timeout — never `/chat/completions`, since each chat call burns paid quota.
 - **Uses the deferred-secret pattern** (see `WireResult.raw_env` above): the API key is stored in `~/.claude-codex-local/9router-api-key` (chmod 0600) and the helper script reads it at exec time via `$(cat …)`.

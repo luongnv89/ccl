@@ -217,6 +217,7 @@ def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool
     row("lmstudio (engine)", tools["lmstudio"])
     row("llama.cpp (engine)", tools["llamacpp"])
     row("vllm (engine)", tools.get("vllm", {}))
+    row("9router (engine)", tools.get("9router", {}))
     row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
     console.print(table)
 
@@ -311,8 +312,8 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
     },
     "9router": {
         "name": "9router",
-        "cmd": "# Install 9router locally and start it. It exposes an OpenAI-compatible API on http://localhost:20128/v1",
-        "url": "https://github.com/9router/9router",
+        "cmd": "npm install -g 9router  # OpenAI-compatible API at http://localhost:20128/v1",
+        "url": "https://github.com/decolua/9router",
     },
     "huggingface-cli": {
         "name": "Hugging Face CLI",
@@ -424,20 +425,61 @@ def _ensure_tool(key: str) -> bool:
     Offer to install a tool by key (matching INSTALL_HINTS).
     For tools with a runnable install command (ollama, llamacpp, claude, codex,
     huggingface-cli) the command is executed directly.
-    For tools requiring manual steps (lmstudio, vllm, 9router) the hint is shown
+    For 9router the npm package is installed, but the long-running daemon
+    must be started manually by the user.  For tools requiring manual steps
+    (lmstudio, vllm) the hint is shown
     and the user is asked to confirm when done, then the profile is re-probed.
     Returns True when the tool is detected as present after the attempt.
     """
-    # 9router is a stand-alone server we cannot auto-install; we detect
-    # it over HTTP and ask the user to start it manually.
+    # 9router ships as an npm package (`npm install -g 9router`) but the
+    # detection check is HTTP-based — the server has to be running too.
+    # We can install for the user, but the long-running `9router` daemon
+    # has to be started manually in another terminal.
     if key == "9router":
         if pb.Router9Adapter().detect().get("present"):
             return True
         _show_install_hint(key)
-        warn(
-            f"9router not reachable at {pb.ROUTER9_BASE_URL}. "
-            "Start 9router locally then re-run the wizard."
+        if not shutil.which("9router"):
+            if not shutil.which("npm"):
+                warn(
+                    "npm not found. Install Node.js (https://nodejs.org) first, "
+                    "then re-run the wizard so it can install 9router."
+                )
+                return False
+            install = questionary.confirm(
+                "Install 9router globally now via [npm install -g 9router]?",
+                default=True,
+            ).ask()
+            if not install:
+                warn(
+                    f"9router not installed. Once you install and start it on "
+                    f"{pb.ROUTER9_BASE_URL}, re-run the wizard."
+                )
+                return False
+            try:
+                subprocess.run(["npm", "install", "-g", "9router"], check=True)
+            except subprocess.CalledProcessError as exc:
+                fail(f"npm install -g 9router failed: {exc}")
+                return False
+            ok("9router installed.")
+        # The dashboard server is long-running — we don't fork-spawn it from
+        # the wizard. Ask the user to start it in another terminal, then probe.
+        console.print(
+            "\n[bold]Start 9router in another terminal:[/bold]\n"
+            "    [cyan]9router[/cyan]\n"
+            "Then sign in and add provider keys at the dashboard "
+            "(http://localhost:20128)."
         )
+        proceed = questionary.confirm(
+            f"Confirm when 9router is running and reachable at {pb.ROUTER9_BASE_URL}.",
+            default=True,
+        ).ask()
+        if not proceed:
+            return False
+        if pb.Router9Adapter().detect().get("present"):
+            ok("9router is reachable.")
+            return True
+        warn(f"9router still not reachable at {pb.ROUTER9_BASE_URL}.")
         return False
 
     # vLLM: same shape as 9router. The server runs in a Python venv with
