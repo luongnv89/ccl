@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -546,7 +547,7 @@ esac"""
 
     def test_ccl_all_commands_help(self, fake_bin, tmp_path):
         """Test that all ccl subcommands have help available."""
-        commands = ["setup", "doctor", "find-model"]
+        commands = ["setup", "doctor", "find-model", "run"]
         for cmd in commands:
             result = self._spawn_ccl(
                 extra_args=[cmd, "--help"],
@@ -555,3 +556,224 @@ esac"""
             )
             # Each command should at least show some help output
             assert result.returncode in [0, 2], f"{cmd} --help failed"
+
+    # ----- ccl run subcommand (issue #70) -----
+
+    def _seed_state(self, tmp_path, harness, engine, tag, *, raw_env=None):
+        """Write a minimal wizard-state.json so `ccl run` has wired state to load."""
+        state_dir = tmp_path / "state"
+        state_dir.mkdir(exist_ok=True)
+        # Argv mirrors what step 6 wires for each backend; only the shape that
+        # `_build_oneshot_cmd` reads back matters here.
+        if harness == "claude" and engine == "ollama":
+            argv = ["ollama", "launch", "claude", "--model", tag, "--"]
+        elif harness == "claude":
+            argv = ["claude", "--model", tag]
+        elif harness == "codex" and engine == "ollama":
+            argv = [
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "--oss",
+                "--local-provider=ollama",
+            ]
+        else:
+            argv = ["codex", "-m", tag]
+        wire_result = {
+            "argv": argv,
+            "env": {"FAKE_BACKEND_ENV": "1"},
+            "effective_tag": tag,
+            "raw_env": raw_env or {},
+        }
+        state_payload = {
+            "completed_steps": ["1", "2", "3", "4", "5", "6", "6.5", "7", "8"],
+            "primary_harness": harness,
+            "primary_engine": engine,
+            "engine_model_tag": tag,
+            "wire_result": wire_result,
+            "helper_script_path": str(state_dir / "bin" / ("cc" if harness == "claude" else "cx")),
+        }
+        (state_dir / "wizard-state.json").write_text(json.dumps(state_payload) + "\n")
+        return state_dir
+
+    def test_ccl_run_help(self, fake_bin, tmp_path):
+        """`ccl run --help` should describe the subcommand and -p/--prompt."""
+        result = self._spawn_ccl(
+            extra_args=["run", "--help"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0
+        out = result.stdout.lower()
+        assert "prompt" in out and "-p" in result.stdout
+
+    def test_ccl_run_no_state_errors(self, fake_bin, tmp_path):
+        """`ccl run -p ...` without prior setup must fail cleanly, not crash."""
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "hello"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "no wizard state" in combined or "ccl setup" in combined
+
+    def test_ccl_run_with_prompt_claude_ollama(self, fake_bin, tmp_path):
+        """
+        With prompt + Claude/Ollama state seeded, `ccl run` should dispatch to
+        `ollama launch claude ... -- -p <prompt> --model <tag>` (mirrors verify
+        step shape). The fake `ollama` records its argv so we can assert.
+        """
+        bdir, put_stub = fake_bin
+        argv_log = tmp_path / "ollama-argv.log"
+        put_stub(
+            "ollama",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\n'
+            'case "$1" in --version) echo "ollama version 0.1.99";; esac\n'
+            "exit 0",
+        )
+        self._seed_state(tmp_path, "claude", "ollama", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "test prompt 1"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        recorded = argv_log.read_text()
+        # The `--` separator + `-p PROMPT` pattern is what makes the prompt
+        # land on the claude binary instead of being eaten by `ollama launch`.
+        assert "launch claude --model qwen3-coder:30b -- -p test prompt 1" in recorded
+
+    def test_ccl_run_with_prompt_codex_ollama(self, fake_bin, tmp_path):
+        """
+        Codex+Ollama needs the special exec-after-`--` shape so `--oss` and
+        `--local-provider=ollama` land AFTER the `exec` subcommand. Without
+        this branch, `ccl run -p ...` would hit the documented limitation and
+        fail with a ChatGPT-account error.
+        """
+        bdir, put_stub = fake_bin
+        argv_log = tmp_path / "ollama-argv.log"
+        put_stub(
+            "ollama",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\n'
+            'case "$1" in --version) echo "ollama version 0.1.99";; esac\n'
+            "exit 0",
+        )
+        self._seed_state(tmp_path, "codex", "ollama", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "say hi"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        recorded = argv_log.read_text()
+        assert "exec --skip-git-repo-check --oss --local-provider=ollama say hi" in recorded
+
+    def test_ccl_run_with_prompt_codex_lmstudio(self, fake_bin, tmp_path):
+        """Codex+LM Studio path uses `codex exec --skip-git-repo-check -m TAG PROMPT`."""
+        bdir, put_stub = fake_bin
+        argv_log = tmp_path / "codex-argv.log"
+        put_stub(
+            "codex",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\n' "exit 0",
+        )
+        self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "test prompt 2"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        recorded = argv_log.read_text()
+        assert "exec --skip-git-repo-check -m qwen3-coder:30b test prompt 2" in recorded
+
+    def test_ccl_run_long_form_prompt(self, fake_bin, tmp_path):
+        """Argparse aliasing — `--prompt` must work the same as `-p`."""
+        bdir, put_stub = fake_bin
+        argv_log = tmp_path / "codex-argv.log"
+        put_stub(
+            "codex",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\n' "exit 0",
+        )
+        self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "--prompt", "long form test"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "long form test" in argv_log.read_text()
+
+    def test_ccl_run_empty_prompt_rejected(self, fake_bin, tmp_path):
+        """Empty `-p ""` is a footgun for shell-script callers — reject it."""
+        self._seed_state(tmp_path, "claude", "lmstudio", "qwen3-coder:30b")
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", ""],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "prompt" in combined and "empty" in combined
+
+    def test_ccl_run_with_raw_env_keyfile(self, fake_bin, tmp_path):
+        """
+        9router/vllm key-on-disk path: `raw_env` shell expressions
+        (`"$(cat /path)"`) must be resolved at exec-time without leaking the
+        key into the wizard state. Asserts the harness sees the resolved
+        value, not the literal expression.
+        """
+        bdir, put_stub = fake_bin
+        keyfile = tmp_path / "router9-key"
+        keyfile.write_text("sk-router9-test-secret\n")
+        env_log = tmp_path / "claude-env.log"
+        put_stub(
+            "claude",
+            f'echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" > {shlex.quote(str(env_log))}\n'
+            f'echo "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" >> {shlex.quote(str(env_log))}\n'
+            "exit 0",
+        )
+        key_expr = f'"$(cat {shlex.quote(str(keyfile))})"'
+        self._seed_state(
+            tmp_path,
+            "claude",
+            "9router",
+            "kr/claude-sonnet-4.5",
+            raw_env={"ANTHROPIC_API_KEY": key_expr, "ANTHROPIC_AUTH_TOKEN": key_expr},
+        )
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "ping"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        leaked = env_log.read_text()
+        assert "ANTHROPIC_API_KEY=sk-router9-test-secret" in leaked
+        assert "ANTHROPIC_AUTH_TOKEN=sk-router9-test-secret" in leaked
+        # Critical: the literal `$(cat ...)` expression must NOT reach the harness.
+        assert "$(cat" not in leaked
+
+    def test_ccl_run_no_prompt_execs_helper(self, fake_bin, tmp_path):
+        """
+        Without -p, `ccl run` should defer to the helper script — preserving
+        the existing interactive-launch UX (AC #4 of issue #70).
+        """
+        state_dir = self._seed_state(tmp_path, "claude", "lmstudio", "qwen3-coder:30b")
+        helper_dir = state_dir / "bin"
+        helper_dir.mkdir(exist_ok=True)
+        helper = helper_dir / "cc"
+        marker = tmp_path / "helper-was-called"
+        helper.write_text(
+            "#!/usr/bin/env bash\n" f"echo invoked > {shlex.quote(str(marker))}\n" "exit 0\n"
+        )
+        helper.chmod(0o755)
+        result = self._spawn_ccl(
+            extra_args=["run"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        assert marker.exists(), "helper script should have been invoked"

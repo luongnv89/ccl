@@ -135,8 +135,15 @@ ccl setup --non-interactive                     # CI-friendly install
 ccl setup --resume                              # resume after a failure
 ccl find-model                                  # standalone model recommendation
 ccl doctor                                      # wizard state + presence check
+ccl run                                         # launch the configured session interactively
+ccl run -p "what is 2+2?"                       # one-shot: drive CCL from another agent
 ccl --version                                   # print version and exit
 ```
+
+`ccl run -p "<prompt>"` runs the harness in non-interactive mode (Claude
+Code's `-p`, Codex's `exec`) so external agents and CI scripts can drive a
+local model end-to-end without keystrokes. Without `-p`, behavior matches the
+`cc` / `cx` alias and the session starts interactively.
 
 Advanced / debug (no user binary — run as a Python module):
 

@@ -3190,6 +3190,167 @@ def run_doctor() -> int:
     return 0
 
 
+def _build_oneshot_cmd(
+    harness: str,
+    engine: str,
+    tag: str,
+    wire_result: dict[str, Any],
+    prompt: str,
+) -> list[str] | None:
+    """
+    Build the harness/engine-specific argv for a one-shot session driven by
+    `ccl run -p PROMPT`.
+
+    Mirrors the verify step's per-backend argv shape (see step_2_7_verify) so
+    automation drivers get the same dispatch path the wizard already exercises.
+    The Codex+Ollama branch sidesteps the documented top-level-flag limitation
+    by placing `--oss --local-provider=ollama` AFTER the `exec` subcommand.
+    """
+    if harness == "claude":
+        if engine == "ollama":
+            return [
+                "ollama",
+                "launch",
+                "claude",
+                "--model",
+                tag,
+                "--",
+                "-p",
+                prompt,
+                "--model",
+                tag,
+            ]
+        return list(wire_result.get("argv", [])) + ["-p", prompt]
+    if harness == "codex":
+        if engine == "ollama":
+            return [
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "exec",
+                "--skip-git-repo-check",
+                "--oss",
+                "--local-provider=ollama",
+                prompt,
+            ]
+        return ["codex", "exec", "--skip-git-repo-check", "-m", tag, prompt]
+    return None
+
+
+def _resolve_wire_env(wire_result: dict[str, Any]) -> dict[str, str]:
+    """
+    Materialize the env dict the harness should run under.
+
+    `wire_result.env` values are literal strings. `wire_result.raw_env` values
+    are bash expressions evaluated at exec-time by the helper script (e.g.
+    `"$(cat /path/to/key)"` for the 9router/vllm key files — see WireResult).
+    `ccl run` bypasses the helper script, so we evaluate raw_env in a one-shot
+    bash subshell to keep the secret-on-disk boundary intact.
+    """
+    env: dict[str, str] = dict(wire_result.get("env", {}))
+    raw_env: dict[str, str] = dict(wire_result.get("raw_env", {}))
+    if not raw_env:
+        return env
+    script_lines = [f"export {shlex.quote(k)}={v}" for k, v in raw_env.items()]
+    keys_alt = "|".join(re.escape(k) for k in raw_env)
+    script_lines.append(f"env | grep -E '^({keys_alt})='")
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", "\n".join(script_lines)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return env
+    if proc.returncode != 0:
+        return env
+    for line in proc.stdout.splitlines():
+        if "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k in raw_env:
+            env[k] = v
+    return env
+
+
+def run_session(prompt: str | None = None) -> int:
+    """
+    Exposed as `ccl run [-p PROMPT]`. Launch the configured harness with an
+    optional initial prompt so external agents can drive CCL non-interactively.
+
+    With `-p PROMPT`, the harness runs in one-shot mode (Claude Code's `-p` /
+    Codex's `exec` subcommand) and exits when the response is complete — the
+    common automation case. Without `-p`, behavior is identical to invoking
+    the alias (`cc` / `cx` / `cc9` / `cx9`): the helper script execs the
+    wired argv and the user gets an interactive session.
+
+    Returns the harness's exit code, or a non-zero CCL-level code when
+    preconditions fail (no setup, missing helper script, unknown harness).
+    """
+    if not STATE_FILE.exists():
+        fail(f"No wizard state found at {STATE_FILE}. Run `ccl setup` first.")
+        return 1
+    state = WizardState.load()
+    harness = state.primary_harness
+    engine = state.primary_engine
+    tag = state.engine_model_tag
+    if not harness or not engine:
+        fail("Wizard state is incomplete — re-run `ccl setup`.")
+        return 1
+    if not state.wire_result:
+        fail("No wired launch found on state — re-run `ccl setup`.")
+        return 1
+    if prompt is not None and not prompt.strip():
+        fail("--prompt cannot be empty.")
+        return 1
+
+    # llama.cpp's backing server may have been killed since the last session;
+    # bring it back before any harness invocation hits ConnectionRefused.
+    if engine == "llamacpp":
+        ensure = _ensure_llamacpp_server_running(state)
+        if not ensure.get("ok"):
+            fail(f"Cannot start llama-server: {ensure.get('error')}")
+            return 1
+
+    if prompt is None:
+        # Interactive: defer to the helper script so the user gets the same
+        # behavior as `cc` / `cx`, including any pre-flight stanzas baked in
+        # by step 6.5.
+        helper_path = state.helper_script_path or str(
+            pb.STATE_DIR / "bin" / _helper_script_basename(_fence_tag_for(harness, engine))
+        )
+        helper = Path(helper_path)
+        if not helper.exists():
+            fail(f"Helper script missing at {helper}. Re-run `ccl setup`.")
+            return 1
+        try:
+            proc = subprocess.run([str(helper)])
+        except KeyboardInterrupt:
+            return 130
+        return proc.returncode
+
+    cmd = _build_oneshot_cmd(harness, engine, tag, state.wire_result, prompt)
+    if cmd is None:
+        fail(f"Unknown harness for `ccl run`: {harness}")
+        return 1
+
+    env_overlay = _resolve_wire_env(state.wire_result)
+    full_env = {**os.environ, **env_overlay}
+    try:
+        proc = subprocess.run(cmd, env=full_env)
+    except FileNotFoundError as exc:
+        fail(f"Cannot launch harness: {exc}")
+        return 127
+    except KeyboardInterrupt:
+        return 130
+    return proc.returncode
+
+
 def run_serve() -> int:
     """
     Exposed as `ccl serve`. Ensures the llama-server backing the persisted
@@ -3271,6 +3432,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  ccl --non-interactive            Scripted install with defaults\n"
             "  ccl doctor                       Triage the current install\n"
             "  ccl find-model                   Show a recommended coding model\n"
+            "  ccl run                          Launch the configured session interactively\n"
+            '  ccl run -p "what is 2+2?"        Launch one-shot for agent automation\n'
         ),
     )
     parser.add_argument("--version", action="version", version=f"ccl {__version__}")
@@ -3330,6 +3493,24 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    run = sub.add_parser(
+        "run",
+        help="Launch the configured harness, optionally with an initial prompt",
+        description=(
+            "Launch the configured Claude Code or Codex session. With "
+            "-p/--prompt PROMPT, the prompt is submitted as the first user "
+            "message and the harness runs in one-shot mode (Claude's `-p`, "
+            "Codex's `exec`) — useful when calling CCL from another agent or "
+            "CI script. Without -p, behavior matches the cc/cx alias and the "
+            "session starts interactively."
+        ),
+    )
+    run.add_argument(
+        "-p",
+        "--prompt",
+        help="Initial prompt to submit; runs the harness in one-shot mode",
+    )
+
     return parser
 
 
@@ -3355,6 +3536,8 @@ def main() -> int:
         return run_doctor()
     if cmd == "serve":
         return run_serve()
+    if cmd == "run":
+        return run_session(prompt=getattr(args, "prompt", None))
     parser.print_help()
     return 2
 
