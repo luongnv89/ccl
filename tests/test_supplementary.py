@@ -2062,3 +2062,66 @@ class TestMachineProfileCache:
         # Should not raise — the cache save silently fails
         result = pb.machine_profile()
         assert "host" in result
+
+    def test_force_scan_clears_caches(self, isolated_state, monkeypatch):
+        """--force-scan clears both file and in-process caches before scanning."""
+        import time
+
+        pb, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Pre-write a cache file and populate in-process cache
+        profile = {
+            "host": {"platform": "cached", "system": "Linux", "release": "6.1", "machine": "x86_64"},
+            "tools": {"ollama": {"present": True}},
+            "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
+            "_cached_at": time.time(),
+            "_fingerprint": "old",
+        }
+        cache_file = state_dir / "machine-profile.json"
+        cache_file.write_text(json.dumps(profile))
+
+        # Clear in-process cache first, then populate it with old data
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Mock scan functions so force_scan actually triggers a fresh profile
+        # Need both a harness (claude/codex) and an engine (ollama/lms/etc)
+        # for has_minimum=True so step returns True.
+        monkeypatch.setattr(pb, "llmfit_system", lambda: None)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [{"name": "qwen2.5-coder:7b", "size": 1000}])
+
+        def fake_cmdver(name, args=None):
+            present = name == "claude" or name == "ollama"
+            return {"present": present, "version": "0.5.0" if present else ""}
+
+        monkeypatch.setattr(pb, "command_version", fake_cmdver)
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        # Create a minimal state object
+        state = wiz.WizardState()
+
+        # Call step_2_1_discover with force_scan=True
+        ok = wiz.step_2_1_discover(state, non_interactive=True, force_scan=True)
+        assert ok is True
+
+        # File cache should have been deleted and re-written with fresh data
+        assert cache_file.exists()
+        fresh_cached = json.loads(cache_file.read_text())
+        assert fresh_cached["_fingerprint"] != "old"
+        assert abs(fresh_cached["_cached_at"] - time.time()) < 5
+
+        # Verify in-process cache was also cleared (fresh profile in state)
+        assert not state.profile["host"]["platform"].startswith("cached")

@@ -2337,12 +2337,18 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
 
 
 def _compute_machine_fingerprint(profile: dict) -> str:
-    """Compute a hash of key hardware identifiers for cache invalidation."""
+    """Compute a hash of key hardware identifiers for cache invalidation.
+
+    Reads hardware identifiers from the already-built profile dict rather
+    than calling ``platform.*`` again — avoids redundant work and makes the
+    function pure (profile-only input, no external I/O).
+    """
+    host = profile.get("host", {})
     keys = [
-        platform.system(),
-        platform.machine(),
-        platform.release(),
-        profile.get("host", {}).get("platform", ""),
+        host.get("system", ""),
+        host.get("machine", ""),
+        host.get("release", ""),
+        host.get("platform", ""),
     ]
     # Include llmfit_system hash if present
     sys_block = profile.get("llmfit_system", {}).get("system", {})
