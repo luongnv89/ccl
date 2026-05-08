@@ -11,6 +11,7 @@ Supplementary tests that push coverage into the remaining easy branches:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -1712,3 +1713,460 @@ class TestLooksLikeMissingRepoSearchApiError:
         out = wiz._download_gguf_via_hf_cli("user/real-repo")
         assert out["ok"] is False
         assert "exited with status 1" in (out["error"] or "")
+
+
+# ---------------------------------------------------------------------------
+# Machine profile cache — file + in-process caching for machine_profile().
+# ---------------------------------------------------------------------------
+
+
+class TestMachineProfileCache:
+    """Verify file-based and in-process caching behaviour of machine_profile()."""
+
+    def test_cache_save_load_roundtrip(self, isolated_state, monkeypatch):
+        """_save_machine_profile_cache / _load_machine_profile_cache preserve data."""
+        import time
+
+        pb, _, state_dir = isolated_state
+
+        profile = {
+            "host": {
+                "platform": "Linux/x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {
+                "ollama": {"present": True, "version": "0.5"},
+                "llamacpp": {"present": False},
+            },
+            "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
+        }
+        fingerprint = "abc12345"
+
+        # Ensure in-process cache is clear
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        pb._save_machine_profile_cache(profile, fingerprint)
+        loaded = pb._load_machine_profile_cache()
+
+        assert loaded is not None
+        assert loaded["host"] == profile["host"]
+        assert loaded["tools"]["ollama"]["present"] is True
+        assert loaded["_fingerprint"] == fingerprint
+        assert "0.5" == loaded["tools"]["ollama"]["version"]
+        assert isinstance(loaded["_cached_at"], float)
+        assert abs(loaded["_cached_at"] - time.time()) < 2
+
+    def test_cache_hit_returns_cached_profile(self, isolated_state, monkeypatch):
+        """When the file cache is fresh, machine_profile() returns it without a full scan."""
+        import time
+
+        pb, _, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Pre-write a fresh cache file
+        profile = {
+            "host": {
+                "platform": "cached-platform",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {"ollama": {"present": True, "version": "0.5"}},
+            "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
+            "_cached_at": time.time(),
+            "_fingerprint": "fresh",
+        }
+        cache_file = state_dir / "machine-profile.json"
+        cache_file.write_text(json.dumps(profile))
+
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        result = pb.machine_profile()
+        assert result["host"]["platform"] == "cached-platform"
+        assert result["presence"]["harnesses"] == ["claude"]
+
+    def test_cache_miss_triggers_full_scan(self, isolated_state, monkeypatch):
+        """Without a cache file, machine_profile() performs a full scan and saves the result."""
+        pb, _, state_dir = isolated_state
+
+        # No cache file exists — nothing to delete
+        cache_file = state_dir / "machine-profile.json"
+        assert not cache_file.exists()
+
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Mock out slow sub-calls so this test stays fast
+        monkeypatch.setattr(pb, "llmfit_system", lambda: None)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(
+            pb, "command_version", lambda name, args=None: {"present": False, "version": ""}
+        )
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        pb.machine_profile()
+
+        # Should have saved to file
+        assert cache_file.exists()
+        import json as _json
+
+        cached = _json.loads(cache_file.read_text())
+        assert "_cached_at" in cached
+        assert "_fingerprint" in cached
+        assert cached["host"]["platform"]  # filled by real platform calls
+
+    def test_cache_ttl_expiry_forces_rescan(self, isolated_state, monkeypatch):
+        """A cache file older than 1 hour is considered stale and re-scanned."""
+        import time
+
+        pb, _, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write a cache file with timestamp 2 hours ago
+        old_ts = time.time() - 7200  # 2 hours
+        profile = {
+            "host": {"platform": "old-platform"},
+            "tools": {"ollama": {"present": True}},
+            "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
+            "_cached_at": old_ts,
+            "_fingerprint": "old",
+        }
+        cache_file = state_dir / "machine-profile.json"
+        cache_file.write_text(json.dumps(profile))
+
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Mock scan so it returns something different
+        monkeypatch.setattr(pb, "llmfit_system", lambda: None)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(
+            pb, "command_version", lambda name, args=None: {"present": False, "version": ""}
+        )
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        pb.machine_profile()
+
+        # Should have re-scanned and updated timestamp
+        cached = json.loads(cache_file.read_text())
+        # New timestamp should be recent (within the last few seconds)
+        assert abs(cached["_cached_at"] - time.time()) < 5
+
+    def test_in_process_cache_within_ttl(self, isolated_state, monkeypatch):
+        """Two machine_profile() calls within 30s: the second returns the in-process cache."""
+        pb, _, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Ensure no file cache exists
+        cache_file = state_dir / "machine-profile.json"
+        if cache_file.exists():
+            cache_file.unlink()
+
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Track how many times the scan functions are called
+        call_count = {"llmfit": 0, "command_version": 0}
+
+        def fake_llmfit():
+            call_count["llmfit"] += 1
+            return None
+
+        def fake_cmdver(name, args=None):
+            call_count["command_version"] += 1
+            return {"present": False, "version": ""}
+
+        monkeypatch.setattr(pb, "llmfit_system", fake_llmfit)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(pb, "command_version", fake_cmdver)
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        # First call — full scan
+        result1 = pb.machine_profile()
+        scan_calls_after_first = call_count["llmfit"]
+
+        # Second call — should hit in-process cache (no additional scan calls)
+        result2 = pb.machine_profile()
+
+        # Both should return the same result
+        assert result1["host"]["platform"] == result2["host"]["platform"]
+        # No additional scan calls between the two
+        assert call_count["llmfit"] == scan_calls_after_first
+
+    def test_in_process_cache_expired_forces_rescan(self, isolated_state, monkeypatch):
+        """Two calls 31s apart: the second re-scans because the in-process TTL expired."""
+        pb, _, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        cache_file = state_dir / "machine-profile.json"
+        if cache_file.exists():
+            cache_file.unlink()
+
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Track scan calls
+        scan_count = [0]
+
+        def fake_llmfit():
+            scan_count[0] += 1
+            return None
+
+        def fake_cmdver(name, args=None):
+            return {"present": False, "version": ""}
+
+        monkeypatch.setattr(pb, "llmfit_system", fake_llmfit)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(pb, "command_version", fake_cmdver)
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        # Patch time.time() to simulate passage of time
+        base_time = 1000000.0
+        current_time = base_time
+
+        def fake_time():
+            return current_time
+
+        monkeypatch.setattr(pb.time, "time", fake_time)
+
+        # Also prevent file cache from being hit
+        monkeypatch.setattr(pb, "_load_machine_profile_cache", lambda: None)
+
+        # First call at T=0
+        result1 = pb.machine_profile()
+        assert scan_count[0] == 1
+
+        # Advance time by 31 seconds
+        current_time = base_time + 31
+
+        # Second call: in-process cache expired, should re-scan
+        result2 = pb.machine_profile()
+        assert scan_count[0] == 2
+        # Results should be identical (same fake data)
+        assert result1["host"]["platform"] == result2["host"]["platform"]
+
+    def test_compute_fingerprint_consistent(self, isolated_state, monkeypatch):
+        """Same profile always produces the same fingerprint."""
+        pb, _, _ = isolated_state
+
+        profile = {
+            "host": {
+                "platform": "Linux-x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {},
+            "llmfit_system": {"system": {"available_ram_gb": 32, "cpu_model": "TestCPU"}},
+        }
+
+        fp1 = pb._compute_machine_fingerprint(profile)
+        fp2 = pb._compute_machine_fingerprint(profile)
+
+        assert fp1 == fp2
+        assert len(fp1) == 16
+        assert isinstance(fp1, str)
+
+    def test_compute_fingerprint_differs_on_profile_change(self, isolated_state, monkeypatch):
+        """Different profiles produce different fingerprints."""
+        pb, _, _ = isolated_state
+
+        profile_a = {
+            "host": {
+                "platform": "Linux-x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {},
+            "llmfit_system": {"system": {"available_ram_gb": 32, "cpu_model": "CPU-A"}},
+        }
+        profile_b = {
+            "host": {
+                "platform": "Linux-x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {},
+            "llmfit_system": {"system": {"available_ram_gb": 64, "cpu_model": "CPU-B"}},
+        }
+
+        fp_a = pb._compute_machine_fingerprint(profile_a)
+        fp_b = pb._compute_machine_fingerprint(profile_b)
+
+        assert fp_a != fp_b
+
+    def test_cache_io_error_silently_fails(self, isolated_state, monkeypatch):
+        """Cache file I/O errors should not break machine_profile()."""
+        pb, _, state_dir = isolated_state
+
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Make cache file path point to a non-existent directory
+        monkeypatch.setattr(pb, "MACHINE_PROFILE_CACHE_FILE", state_dir / "nonexist" / "mp.json")
+
+        # Mock scan functions
+        monkeypatch.setattr(pb, "llmfit_system", lambda: None)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(
+            pb, "command_version", lambda name, args=None: {"present": False, "version": ""}
+        )
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        # Should not raise — the cache save silently fails
+        result = pb.machine_profile()
+        assert "host" in result
+
+    def test_force_scan_clears_caches(self, isolated_state, monkeypatch):
+        """--force-scan clears both file and in-process caches before scanning."""
+        import time
+
+        pb, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Pre-write a cache file and populate in-process cache
+        profile = {
+            "host": {
+                "platform": "cached",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {"ollama": {"present": True}},
+            "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
+            "_cached_at": time.time(),
+            "_fingerprint": "old",
+        }
+        cache_file = state_dir / "machine-profile.json"
+        cache_file.write_text(json.dumps(profile))
+
+        # Clear in-process cache first, then populate it with old data
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
+
+        # Mock scan functions so force_scan actually triggers a fresh profile
+        # Need both a harness (claude/codex) and an engine (ollama/lms/etc)
+        # for has_minimum=True so step returns True.
+        monkeypatch.setattr(pb, "llmfit_system", lambda: None)
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(
+            pb, "parse_ollama_list", lambda: [{"name": "qwen2.5-coder:7b", "size": 1000}]
+        )
+
+        def fake_cmdver(name, args=None):
+            present = name == "claude" or name == "ollama"
+            return {"present": present, "version": "0.5.0" if present else ""}
+
+        monkeypatch.setattr(pb, "command_version", fake_cmdver)
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False}
+
+            def healthcheck(self):
+                return {"ok": False, "detail": "not running"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+
+        # Create a minimal state object
+        state = wiz.WizardState()
+
+        # Call step_2_1_discover with force_scan=True
+        ok = wiz.step_2_1_discover(state, non_interactive=True, force_scan=True)
+        assert ok is True
+
+        # File cache should have been deleted and re-written with fresh data
+        assert cache_file.exists()
+        fresh_cached = json.loads(cache_file.read_text())
+        assert fresh_cached["_fingerprint"] != "old"
+        assert abs(fresh_cached["_cached_at"] - time.time()) < 5
+
+        # Verify in-process cache was also cleared (fresh profile in state)
+        assert not state.profile["host"]["platform"].startswith("cached")

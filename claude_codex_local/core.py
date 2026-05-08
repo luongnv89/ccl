@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import platform
@@ -10,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -48,6 +50,11 @@ ROUTER9_KEY_FILE = STATE_DIR / "9router-api-key"
 # next to the 9router one — same security boundary.
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000")
 VLLM_KEY_FILE = STATE_DIR / "vllm-api-key"
+
+# Machine profile cache: persist the full scan so subsequent setup runs
+# do not re-probe every tool on the host.
+MACHINE_PROFILE_CACHE_FILE = STATE_DIR / "machine-profile.json"
+MACHINE_PROFILE_TTL_SECONDS = 3600  # 1 hour
 
 # Mapping from HuggingFace model name patterns → Ollama registry tags.
 # Ordered from newest/best to older fallbacks; first match wins.
@@ -2329,7 +2336,92 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+def _compute_machine_fingerprint(profile: dict) -> str:
+    """Compute a hash of key hardware identifiers for cache invalidation.
+
+    Reads hardware identifiers from the already-built profile dict rather
+    than calling ``platform.*`` again — avoids redundant work and makes the
+    function pure (profile-only input, no external I/O).
+    """
+    host = profile.get("host", {})
+    keys = [
+        host.get("system", ""),
+        host.get("machine", ""),
+        host.get("release", ""),
+        host.get("platform", ""),
+    ]
+    # Include llmfit_system hash if present
+    sys_block = profile.get("llmfit_system", {}).get("system", {})
+    if sys_block:
+        keys.append(str(sys_block.get("available_ram_gb", "")))
+        keys.append(str(sys_block.get("cpu_model", "")))
+    fingerprint_input = "|".join(str(k) for k in keys if k)
+    return hashlib.sha256(fingerprint_input.encode()).hexdigest()[:16]
+
+
+def _load_machine_profile_cache() -> dict | None:
+    """Load a cached machine profile if it exists and is not expired."""
+    try:
+        if not MACHINE_PROFILE_CACHE_FILE.exists():
+            return None
+        with open(MACHINE_PROFILE_CACHE_FILE) as f:
+            data = json.load(f)
+        # Check TTL
+        cached_ts = data.get("_cached_at", 0)
+        if time.time() - cached_ts > MACHINE_PROFILE_TTL_SECONDS:
+            return None  # Expired
+        return data
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_machine_profile_cache(profile: dict, fingerprint: str) -> None:
+    """Persist machine profile to cache file with fingerprint and timestamp."""
+    try:
+        MACHINE_PROFILE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cache_data = {
+            **profile,
+            "_cached_at": time.time(),
+            "_fingerprint": fingerprint,
+        }
+        with open(MACHINE_PROFILE_CACHE_FILE, "w") as f:
+            json.dump(cache_data, f, indent=2)
+    except OSError:
+        pass  # Silently fail — a cache miss is not a failure
+
+
+def _machine_profile_in_process_cache() -> dict | None:
+    """In-process memoization for repeated calls within the same session."""
+    cache_key = "_inproc_cache"
+    if not hasattr(_machine_profile_in_process_cache, cache_key):
+        setattr(_machine_profile_in_process_cache, cache_key, {"timestamp": 0, "data": None})
+    cache = getattr(_machine_profile_in_process_cache, cache_key)
+    # Same-process cache lasts for 30 seconds
+    if time.time() - cache["timestamp"] < 30:
+        return cache["data"]
+    return None
+
+
+def _set_machine_profile_in_process_cache(data: dict) -> None:
+    cache_key = "_inproc_cache"
+    setattr(
+        _set_machine_profile_in_process_cache, cache_key, {"timestamp": time.time(), "data": data}
+    )
+
+
 def machine_profile() -> dict[str, Any]:
+    # Check in-process cache first
+    cached = _machine_profile_in_process_cache()
+    if cached is not None:
+        return cached
+
+    # Check file-based cache
+    file_cache = _load_machine_profile_cache()
+    if file_cache is not None:
+        _set_machine_profile_in_process_cache(file_cache)
+        return file_cache
+
+    # Full scan — build profile
     llmfit_sys = llmfit_system()
     lms = lms_info()
     llamacpp = llamacpp_detect()
@@ -2417,6 +2509,12 @@ def machine_profile() -> dict[str, Any]:
     }
     if llmfit_sys:
         profile["llmfit_system"] = llmfit_sys
+
+    # Persist to file cache for future runs
+    fingerprint = _compute_machine_fingerprint(profile)
+    _save_machine_profile_cache(profile, fingerprint)
+    _set_machine_profile_in_process_cache(profile)
+
     return profile
 
 

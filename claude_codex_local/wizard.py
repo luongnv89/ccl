@@ -190,8 +190,17 @@ def info(msg: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def step_2_1_discover(state: WizardState, non_interactive: bool = False) -> bool:
+def step_2_1_discover(
+    state: WizardState, non_interactive: bool = False, force_scan: bool = False
+) -> bool:
     header("Step 1 — Discover environment")
+    if force_scan:
+        # Clear file-based cache
+        with contextlib.suppress(OSError):
+            pb.MACHINE_PROFILE_CACHE_FILE.unlink(missing_ok=True)
+        # Clear in-process cache
+        ck = "_inproc_cache"
+        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
     profile = pb.machine_profile()
     state.profile = profile
 
@@ -2978,6 +2987,7 @@ def run_wizard(
     start_step: str | None = None,
     force_harness: str | None = None,
     force_engine: str | None = None,
+    force_scan: bool = False,
 ) -> int:
     state = WizardState.load() if resume else WizardState()
     if not resume and not non_interactive and sys.stdout.isatty():
@@ -2995,7 +3005,10 @@ def run_wizard(
         # Step 2 is conditional: only run if step 1 failed presence check.
         if step_id == "2" and state.profile.get("presence", {}).get("has_minimum"):
             continue
-        ok_step = fn(state, non_interactive)
+        if step_id == "1":
+            ok_step = fn(state, non_interactive, force_scan=force_scan)  # type: ignore[call-arg]
+        else:
+            ok_step = fn(state, non_interactive)
         if not ok_step:
             fail(f"Step {step_id} ({title}) did not complete. Re-run with --resume to continue.")
             return 1
@@ -3471,6 +3484,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("ollama", "lmstudio", "llamacpp", "9router"),
         help="Force the primary engine",
     )
+    setup.add_argument(
+        "--force-scan",
+        action="store_true",
+        help="Force a fresh machine spec scan (ignore cached data)",
+    )
 
     sub.add_parser(
         "find-model",
@@ -3529,6 +3547,7 @@ def main() -> int:
             non_interactive=getattr(args, "non_interactive", False),
             force_harness=getattr(args, "harness", None),
             force_engine=getattr(args, "engine", None),
+            force_scan=getattr(args, "force_scan", False),
         )
     if cmd == "find-model":
         return run_find_model_standalone()
