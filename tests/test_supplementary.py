@@ -1730,8 +1730,16 @@ class TestMachineProfileCache:
         pb, _, state_dir = isolated_state
 
         profile = {
-            "host": {"platform": "Linux/x86_64", "system": "Linux", "release": "6.1", "machine": "x86_64"},
-            "tools": {"ollama": {"present": True, "version": "0.5"}, "llamacpp": {"present": False}},
+            "host": {
+                "platform": "Linux/x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
+            "tools": {
+                "ollama": {"present": True, "version": "0.5"},
+                "llamacpp": {"present": False},
+            },
             "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
         }
         fingerprint = "abc12345"
@@ -1760,7 +1768,12 @@ class TestMachineProfileCache:
 
         # Pre-write a fresh cache file
         profile = {
-            "host": {"platform": "cached-platform", "system": "Linux", "release": "6.1", "machine": "x86_64"},
+            "host": {
+                "platform": "cached-platform",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
             "tools": {"ollama": {"present": True, "version": "0.5"}},
             "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
             "_cached_at": time.time(),
@@ -1794,7 +1807,9 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
         monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
         monkeypatch.setattr(
             pb, "command_version", lambda name, args=None: {"present": False, "version": ""}
@@ -1809,7 +1824,7 @@ class TestMachineProfileCache:
 
         monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
 
-        result = pb.machine_profile()
+        pb.machine_profile()
 
         # Should have saved to file
         assert cache_file.exists()
@@ -1848,7 +1863,9 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
         monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
         monkeypatch.setattr(
             pb, "command_version", lambda name, args=None: {"present": False, "version": ""}
@@ -1863,7 +1880,7 @@ class TestMachineProfileCache:
 
         monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
 
-        result = pb.machine_profile()
+        pb.machine_profile()
 
         # Should have re-scanned and updated timestamp
         cached = json.loads(cache_file.read_text())
@@ -1899,7 +1916,9 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
         monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
         monkeypatch.setattr(pb, "command_version", fake_cmdver)
 
@@ -1926,8 +1945,6 @@ class TestMachineProfileCache:
 
     def test_in_process_cache_expired_forces_rescan(self, isolated_state, monkeypatch):
         """Two calls 31s apart: the second re-scans because the in-process TTL expired."""
-        import time
-
         pb, _, state_dir = isolated_state
         state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1953,7 +1970,9 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
         monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
         monkeypatch.setattr(pb, "command_version", fake_cmdver)
 
@@ -1996,7 +2015,12 @@ class TestMachineProfileCache:
         pb, _, _ = isolated_state
 
         profile = {
-            "host": {"platform": "Linux-x86_64", "system": "Linux", "release": "6.1", "machine": "x86_64"},
+            "host": {
+                "platform": "Linux-x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
             "tools": {},
             "llmfit_system": {"system": {"available_ram_gb": 32, "cpu_model": "TestCPU"}},
         }
@@ -2013,12 +2037,22 @@ class TestMachineProfileCache:
         pb, _, _ = isolated_state
 
         profile_a = {
-            "host": {"platform": "Linux-x86_64", "system": "Linux", "release": "6.1", "machine": "x86_64"},
+            "host": {
+                "platform": "Linux-x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
             "tools": {},
             "llmfit_system": {"system": {"available_ram_gb": 32, "cpu_model": "CPU-A"}},
         }
         profile_b = {
-            "host": {"platform": "Linux-x86_64", "system": "Linux", "release": "6.1", "machine": "x86_64"},
+            "host": {
+                "platform": "Linux-x86_64",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
             "tools": {},
             "llmfit_system": {"system": {"available_ram_gb": 64, "cpu_model": "CPU-B"}},
         }
@@ -2044,7 +2078,9 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
         monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
         monkeypatch.setattr(
             pb, "command_version", lambda name, args=None: {"present": False, "version": ""}
@@ -2072,7 +2108,12 @@ class TestMachineProfileCache:
 
         # Pre-write a cache file and populate in-process cache
         profile = {
-            "host": {"platform": "cached", "system": "Linux", "release": "6.1", "machine": "x86_64"},
+            "host": {
+                "platform": "cached",
+                "system": "Linux",
+                "release": "6.1",
+                "machine": "x86_64",
+            },
             "tools": {"ollama": {"present": True}},
             "presence": {"harnesses": ["claude"], "engines": ["ollama"], "has_minimum": True},
             "_cached_at": time.time(),
@@ -2092,8 +2133,12 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
         monkeypatch.setattr(pb, "llamacpp_detect", lambda: {"present": False, "version": ""})
         monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"})
-        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [{"name": "qwen2.5-coder:7b", "size": 1000}])
+        monkeypatch.setattr(
+            pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
+        )
+        monkeypatch.setattr(
+            pb, "parse_ollama_list", lambda: [{"name": "qwen2.5-coder:7b", "size": 1000}]
+        )
 
         def fake_cmdver(name, args=None):
             present = name == "claude" or name == "ollama"

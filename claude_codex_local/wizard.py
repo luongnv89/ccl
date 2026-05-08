@@ -190,14 +190,14 @@ def info(msg: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def step_2_1_discover(state: WizardState, non_interactive: bool = False, force_scan: bool = False) -> bool:
+def step_2_1_discover(
+    state: WizardState, non_interactive: bool = False, force_scan: bool = False
+) -> bool:
     header("Step 1 — Discover environment")
     if force_scan:
         # Clear file-based cache
-        try:
+        with contextlib.suppress(OSError):
             pb.MACHINE_PROFILE_CACHE_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
         # Clear in-process cache
         ck = "_inproc_cache"
         setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
@@ -3006,7 +3006,7 @@ def run_wizard(
         if step_id == "2" and state.profile.get("presence", {}).get("has_minimum"):
             continue
         if step_id == "1":
-            ok_step = fn(state, non_interactive, force_scan=force_scan)
+            ok_step = fn(state, non_interactive, force_scan=force_scan)  # type: ignore[call-arg]
         else:
             ok_step = fn(state, non_interactive)
         if not ok_step:
