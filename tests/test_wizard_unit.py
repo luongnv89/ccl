@@ -1053,6 +1053,37 @@ class TestTargetedPreferenceRefresh:
         assert profile["presence"]["engines"] == ["ollama"]
         assert profile["ollama"]["models"][0]["name"] == "qwen2.5-coder:7b"
 
+    def test_selected_harness_status_is_reported_after_live_check(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude", primary_engine="ollama")
+        state.profile = {
+            "tools": {"claude": {"present": False}, "ollama": {"present": False}},
+            "presence": {"harnesses": [], "engines": [], "has_minimum": False},
+        }
+
+        def fake_command_version(name):
+            return {
+                "present": name in {"claude", "ollama"},
+                "version": f"{name} 1.0",
+            }
+
+        monkeypatch.setattr(pb, "command_version", fake_command_version)
+        monkeypatch.setattr(
+            pb,
+            "parse_ollama_list",
+            lambda: [{"name": "qwen2.5-coder:7b", "local": True}],
+        )
+
+        wiz.console.width = 200
+        with wiz.console.capture() as captured:
+            assert wiz.step_2_3_pick_preferences(state, non_interactive=True) is True
+
+        output = captured.get()
+        assert "claude CLI detected: claude 1.0" in output
+        assert "No existing local helper configuration recorded" in output
+
 
 class TestStep24PickerIntegration:
     """

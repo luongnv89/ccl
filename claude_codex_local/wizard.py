@@ -739,6 +739,30 @@ def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
     return engine in profile["presence"].get("engines", [])
 
 
+def _show_selected_harness_status(state: WizardState) -> None:
+    """Show the live CLI status and any existing local helper wiring."""
+    harness = state.primary_harness
+    if not harness:
+        return
+
+    tool_info = state.profile.get("tools", {}).get(harness, {})
+    if tool_info.get("present"):
+        ok(f"{harness} CLI detected: {tool_info.get('version') or 'found'}")
+    else:
+        warn(f"{harness} CLI is not currently detected.")
+
+    if state.helper_script_path:
+        script_path = Path(state.helper_script_path)
+        if script_path.exists():
+            ok(f"Existing local helper present: {script_path}")
+        else:
+            warn(f"Previous local helper missing: {script_path}; setup will recreate it later.")
+    elif state.wire_result:
+        info("Existing wire configuration found; helper aliases are not installed yet.")
+    else:
+        info("No existing local helper configuration recorded; setup will wire it later.")
+
+
 def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 3 — Pick preferences")
     presence = _sync_presence_from_tools(state.profile)
@@ -817,6 +841,8 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             state.primary_harness = choice
             state.secondary_harnesses = [h for h in harnesses if h != choice]
             break
+
+    _show_selected_harness_status(state)
 
     # Engine pick
     engines = state.profile["presence"]["engines"]
