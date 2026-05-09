@@ -2992,7 +2992,7 @@ class TestVLLMInDiscovery:
         )
         # Block other probes from touching the host.
         monkeypatch.setattr(
-            pb, "command_version", lambda *a, **kw: {"present": False, "version": ""}
+            pb, "command_version", lambda cmd, **kw: {"present": cmd == "vllm", "version": "0.6.0"} if cmd == "vllm" else {"present": False, "version": ""}
         )
         monkeypatch.setattr(
             pb,

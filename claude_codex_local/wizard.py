@@ -491,8 +491,8 @@ def _ensure_tool(key: str) -> bool:
         warn(f"9router still not reachable at {pb.ROUTER9_BASE_URL}.")
         return False
 
-    # vLLM: same shape as 9router. The server runs in a Python venv with
-    # GPU drivers; we cannot script that install — only detect reachability.
+    # vLLM: CLI must be installed (via pip install vllm), and the server must be
+    # running (via vllm serve) to serve models. The CLI check comes first.
     if key == "vllm":
         if pb.vllm_info().get("present"):
             return True
