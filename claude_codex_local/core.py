@@ -2404,9 +2404,7 @@ def _machine_profile_in_process_cache() -> dict | None:
 
 def _set_machine_profile_in_process_cache(data: dict) -> None:
     cache_key = "_inproc_cache"
-    setattr(
-        _machine_profile_in_process_cache, cache_key, {"timestamp": time.time(), "data": data}
-    )
+    setattr(_machine_profile_in_process_cache, cache_key, {"timestamp": time.time(), "data": data})
 
 
 def machine_profile() -> dict[str, Any]:
