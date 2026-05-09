@@ -3624,19 +3624,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force a fresh machine spec scan (ignore cached data)",
     )
-    # Lazy-llmfit flags (issue #79). Mutually exclusive: --run-llmfit refreshes
-    # the hardware capability scan; --no-llmfit explicitly defers it. They are
-    # both advisory — --force-scan still wipes the umbrella cache regardless.
-    llmfit_group = setup.add_mutually_exclusive_group()
-    llmfit_group.add_argument(
+    # Lazy-llmfit flag (issue #79). The hardware capability scan is deferred by
+    # default; --run-llmfit forces a refresh. Use --force-scan to wipe the
+    # umbrella machine-profile cache (which always includes llmfit data).
+    setup.add_argument(
         "--run-llmfit",
         action="store_true",
         help="Run the llmfit hardware capability scan (refresh cached data)",
-    )
-    llmfit_group.add_argument(
-        "--no-llmfit",
-        action="store_true",
-        help="Skip the llmfit hardware capability scan (use cached data only)",
     )
 
     sub.add_parser(
