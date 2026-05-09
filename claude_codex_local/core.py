@@ -928,32 +928,48 @@ def smoke_test_router9_models(base_url: str | None = None) -> dict[str, Any]:
 
 def vllm_info() -> dict[str, Any]:
     """
-    Probe vLLM: server reachability at VLLM_BASE_URL and the model list it
-    advertises via /v1/models. Returns a profile-shaped dict regardless of
-    reachability so callers can render a uniform discover row.
+    Probe vLLM: CLI installation status and server reachability at VLLM_BASE_URL.
+    Returns a profile-shaped dict regardless of reachability so callers can render
+    a uniform discover row.
 
     Shape:
         {
-            "present": bool,         # /v1/models returned 200
+            "present": bool,         # vllm CLI installed
             "base_url": str,         # resolved URL (no trailing slash)
-            "version": str,          # X-VLLM-Version header if exposed
+            "version": str,          # CLI version or X-VLLM-Version header
             "models": list[dict],    # [{"name": str, "format": "...", "local": True}, ...]
             "error": str,            # populated when present is False
+            "server_reachable": bool,  # /v1/models returned 200 (optional)
         }
     """
-    adapter = VLLMAdapter()
-    detect = adapter.detect()
-    base_url = adapter._base_url or VLLM_BASE_URL
+    # First check if vllm CLI is installed
+    cli_info = command_version("vllm")
+    base_url = VLLM_BASE_URL
+
     info: dict[str, Any] = {
-        "present": bool(detect.get("present")),
+        "present": cli_info.get("present", False),
         "base_url": base_url,
-        "version": detect.get("version", ""),
+        "version": cli_info.get("version", ""),
         "models": [],
     }
+
     if not info["present"]:
-        info["error"] = f"vLLM not reachable at {base_url}"
+        info["error"] = "vllm CLI not installed"
         return info
-    info["models"] = adapter.list_models()
+
+    # If CLI is installed, also check if server is reachable
+    adapter = VLLMAdapter()
+    detect = adapter.detect()
+
+    info["server_reachable"] = bool(detect.get("present"))
+    if detect.get("version"):
+        info["version"] = detect.get("version", "")
+
+    if info["server_reachable"]:
+        info["models"] = adapter.list_models()
+    else:
+        info["error"] = f"vLLM server not reachable at {base_url} (but CLI is installed)"
+
     return info
 
 
