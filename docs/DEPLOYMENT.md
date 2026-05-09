@@ -27,10 +27,10 @@ The installer is designed to work without cloning the repo:
 
 Environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CCL_REF` | `main` | Git ref (branch, tag, or commit) to install |
-| `CCL_INSTALL_DIR` | `~/.claude-codex-local-src` | Install directory |
+| Variable          | Default                     | Description                                 |
+| ----------------- | --------------------------- | ------------------------------------------- |
+| `CCL_REF`         | `main`                      | Git ref (branch, tag, or commit) to install |
+| `CCL_INSTALL_DIR` | `~/.claude-codex-local-src` | Install directory                           |
 
 ## CI
 

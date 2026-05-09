@@ -47,17 +47,17 @@ The wizard is exposed as the `ccl` binary (installed by `[project.scripts]` in `
 
 A 9-step wizard that runs once (or with `--resume` after a failure):
 
-| Step | Action |
-|------|--------|
-| 1 | Discover installed harnesses and engines |
-| 2 | Report missing tools and installation hints |
-| 3 | Ask which harness + engine to use |
-| 4 | Ask which model (or auto-pick via `llmfit`, installed on-demand if needed) |
-| 5 | Smoke-test the engine with the chosen model |
-| 6 | Wire up the harness |
-| 7 | Install helper script + shell aliases (`cc` / `cx`) |
-| 8 | End-to-end verification |
-| 9 | Generate personalized `guide.md` |
+| Step | Action                                                                     |
+| ---- | -------------------------------------------------------------------------- |
+| 1    | Discover installed harnesses and engines                                   |
+| 2    | Report missing tools and installation hints                                |
+| 3    | Ask which harness + engine to use                                          |
+| 4    | Ask which model (or auto-pick via `llmfit`, installed on-demand if needed) |
+| 5    | Smoke-test the engine with the chosen model                                |
+| 6    | Wire up the harness                                                        |
+| 7    | Install helper script + shell aliases (`cc` / `cx`)                        |
+| 8    | End-to-end verification                                                    |
+| 9    | Generate personalized `guide.md`                                           |
 
 State is persisted to `.claude-codex-local/wizard-state.json` so a failed run can be resumed without starting over.
 

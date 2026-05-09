@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Refactoring
 
-- Refactor wizard _alias_block and _write_helper_script to use 4-way dispatch (#51) (@luongnv89)
+- Refactor wizard \_alias_block and \_write_helper_script to use 4-way dispatch (#51) (@luongnv89)
 - Extend WireResult with raw_env field for deferred shell expressions (#51) (@luongnv89)
 
 **Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.8.3...v0.9.0
@@ -44,12 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.3] - 2026-04-24
 
 ### Fixed
+
 - Retired the qwen2.5-coder 0.5b verified path and removed related claims from the README, docs, model mapping, and static site (#49)
 - Restored the bootstrap docs to point users to `ccl find-model` instead of a hardcoded tiny model download path (#49)
 
 ## [0.8.2] - 2026-04-20
 
 ### Fixed
+
 - Wizard step IDs renumbered from the `2.x` scheme (`2.1`–`2.8`) to sequential integers (`1`–`8`), so progress indicators are consistent throughout the setup flow (#47)
 - Documentation updated to reflect the new sequential step numbering (`1`–`11` across all wizard sections)
 - E2e and unit tests updated to reference the new step IDs
@@ -57,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.1] - 2026-04-17
 
 ### Fixed
+
 - Machine specifications table now shows real CPU, RAM, and GPU values — the wizard was reading `llmfit system --json` fields from the top level, but they are wrapped under a `system` key; Platform row now comes from `platform.system()` / `platform.machine()` since llmfit does not emit those keys (#46)
 - llmfit ranking now uses **available** RAM instead of total — `llmfit fit --json` is invoked with `--ram <available_ram_gb>G` so the Speed/Balanced/Quality picks match what will actually fit on the host right now (#46)
 - Embedding and reranker models are hidden from the installed-models picker for both Ollama and LM Studio — they cannot serve as chat coding models and were surfacing as confusing choices (e.g. `embeddinggemma:300m`, `nomic-embed-text:latest`) (#46)
@@ -65,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.0] - 2026-04-17
 
 ### Added
+
 - vLLM backend adapter with unit and e2e test coverage — high-throughput inference engine now joins Ollama, LM Studio, and llama.cpp as a first-class engine option
 - Wizard detects an already-running `llama-server` and offers its active model as a pick, so you can keep your warm process instead of re-pulling a GGUF
 - Wizard pre-populates the model picker with models discovered on-host and recommendation profile picks, so the first press of Enter lands on a sensible default (#35, #36)
@@ -73,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fuzzy-search fallback for Hugging Face GGUF downloads: when a repo is not found, the wizard queries the Hub's search API, presents up to 3 closest matches as a numbered picker, and lets the user either pick one or re-enter a different name. When no similar models are found the wizard reports it and re-prompts for a new name (#38)
 
 ### Fixed
+
 - Post-review polish for the fuzzy fallback and KI wizard flow (#45)
 - vLLM adapter type annotations and lint warnings cleared under `mypy` and `ruff`
 - Removed a stray agent worktree gitlink that broke CI on fresh clones
@@ -80,24 +85,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0] - 2026-04-12
 
 ### Added
+
 - Machine specifications table (CPU cores/name, RAM total/available, GPU details) displayed during environment discovery step (#31)
 - Comprehensive e2e test suite covering all `ccl` CLI commands: `setup`, `doctor`, `find-model`, and their flags — 26 tests total (#29, #32)
 
 ### Fixed
+
 - `--resume` and `--non-interactive` flags are now available at the top-level `ccl` parser, so `ccl --resume` works without specifying the `setup` subcommand explicitly (#28, #30)
 
 ## [0.6.0] - 2026-04-11
 
 ### Added
+
 - ASCII 3D welcome banner with project tagline displayed at wizard startup (#23, #25)
 
 ### Fixed
+
 - HuggingFace CLI detection now checks both `hf` (modern) and `huggingface-cli` (legacy) binary names, uses the resolved binary in download commands, and injects the Python scripts directory into PATH immediately after pip install so the new binary is discoverable without reloading the shell (#21, #22)
 - `llmfit` check made optional — environment discovery (Step 1, formerly 2.1) no longer gates on llmfit being installed; llmfit is now checked only on-demand when the user requests model selection help (#24, #26)
 
 ## [0.5.0] - 2026-04-11
 
 ### Changed
+
 - **BREAKING:** Single canonical CLI binary. The package now installs one entry point, `ccl`, replacing the previous `claude-codex-local` and `ccl-bridge` commands. The command tree is unchanged (`ccl setup`, `ccl doctor`, `ccl find-model`) — only the binary name differs. Update any scripts, docs, or aliases that invoked the old names.
 - **BREAKING:** Removed `ccl-bridge` entirely. Its debug subcommands (`profile`, `recommend`, `doctor`, `adapters`) were internal JSON dumpers, not user-facing tools. They are still reachable for debugging via `python -m claude_codex_local.core <cmd>`.
 - **Internal rename:** `claude_codex_local/bridge.py` is now `claude_codex_local/core.py`. Anyone importing `claude_codex_local.bridge` directly must switch to `claude_codex_local.core`. The `core` module is the neutral home for the machine profile, engine adapters, and llmfit bindings — the old `bridge` name predated the package layout.
@@ -132,6 +142,7 @@ Your existing `~/.claude-codex-local/` state directory and the `cc` / `cx` shell
 ## [0.4.0] - 2026-04-11
 
 ### Added
+
 - Smoke test now measures and reports model throughput in tokens/second for Ollama, LM Studio, and llama.cpp engines, with slow/acceptable/fast guidance and an interactive prompt to re-pick slow models (#18)
 - Per-harness shell alias fences in `~/.zshrc` / `~/.bashrc` so `cc` (Claude Code) and `cx` (Codex) aliases coexist after setting up both harnesses, plus one-shot migration of legacy unified blocks (#19)
 - Changelog section on the GitHub Pages landing page and content refresh for v0.3.0 features (#15)
@@ -139,17 +150,20 @@ Your existing `~/.claude-codex-local/` state directory and the `cc` / `cx` shell
 ## [0.3.0] - 2026-04-11
 
 ### Added
+
 - llama.cpp backend adapter (`llamacpp` engine support) with `llama-server` integration (#10)
 - Docker-based e2e test suite covering pip, uv, source, and extras install scenarios (#12)
 - `pip install .[dev]` optional extras group (pytest, ruff, mypy, bandit, detect-secrets, pre-commit)
 - GitHub Pages landing page with brand refresh and two-column hero layout
 
 ### Fixed
+
 - Empty array expansion in `run_e2e_docker.sh` under `set -u` (source/extras scenarios)
 
 ## [0.2.0] - 2026-04-10
 
 ### Added
+
 - One-command remote installer (`install.sh`) — no clone required
 - `ollama launch` integration as primary engine path
 - Shell alias installer with idempotent fenced block in `~/.zshrc` / `~/.bashrc`
@@ -162,16 +176,19 @@ Your existing `~/.claude-codex-local/` state directory and the `cc` / `cx` shell
 - Installable Python package structure for PyPI distribution
 
 ### Changed
+
 - Wizard now uses `ollama launch` instead of isolated HOME and variant builder
 - LM Studio support moved to secondary/fallback path
 
 ### Fixed
+
 - Shell alias block replaced idempotently on re-run (no more duplicates)
 - Users reminded to `source ~/.zshrc` before first `cc`/`cx` run
 
 ## [0.1.0] - 2026-04-01
 
 ### Added
+
 - Initial proof-of-concept: interactive wizard (8 steps)
 - Harness support: Claude Code, Codex CLI
 - Engine support: Ollama, LM Studio, llama.cpp
