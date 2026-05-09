@@ -502,7 +502,7 @@ class TestDiagnoseLlamaServerLog:
 
     def test_oom_emits_hint(self, tmp_path):
         log = tmp_path / "llama-server.log"
-        log.write_text("ggml_cuda: failed to allocate 12345 bytes\n" "CUDA error: out of memory\n")
+        log.write_text("ggml_cuda: failed to allocate 12345 bytes\nCUDA error: out of memory\n")
         hint = core.diagnose_llama_server_log(log)
         assert hint is not None
         assert "n-gpu-layers" in hint or "n_gpu_layers" in hint.replace("-", "_")
