@@ -20,11 +20,13 @@ hardening (4.3).
 ## Overview
 
 ### Development Phases
+
 - **POC**: Prove that a familiar Claude/Codex-style workflow can talk to a local backend without changing the user’s mental model.
 - **MVP**: Support Ollama, LM Studio, and llama.cpp with machine profiling, `llmfit` scoring, separate config, mode presets, switching, and doctor flow.
 - **Full Release**: Add download guidance, benchmark sanity checks, stronger adapter coverage, and optional richer integrations.
 
 ### Key Dependencies
+
 - Runtime adapter contract must be settled before multi-runtime support scales.
 - Machine profiling and `llmfit` scoring must exist before model recommendation/preset logic is trustworthy.
 - Config separation must be implemented before local/offical switching can be considered safe.
@@ -56,52 +58,57 @@ hardening (4.3).
 
 ### Dependency Table
 
-| Task ID | Task Title | Depends On | Blocks | Can Parallel With |
-|---------|------------|------------|--------|-------------------|
-| 1.1 | Define adapter and bridge architecture | None | 1.4, 2.2 | 1.2, 2.1 |
-| 1.2 | Implement machine profiling core | None | 1.3, 2.3 | 1.1, 2.1 |
-| 1.3 | Integrate `llmfit` scoring | 1.2 | 2.3, 2.4 | 1.4 |
-| 1.4 | Prove one end-to-end local backend path | 1.1 | 2.2, 3.1 | 1.3 |
-| 2.1 | Build config/state manager with safe separation | None | 2.5, 3.2 | 1.1, 1.2 |
-| 2.2 | Add Ollama / LM Studio / llama.cpp adapters | 1.1, 1.4 | 3.1, 3.3 | 2.3 |
-| 2.3 | Implement model recommendation engine + presets | 1.2, 1.3 | 3.2, 4.1 | 2.2 |
-| 2.4 | Create setup flow | 1.3 | 3.2, 3.4 | 2.5 |
-| 2.5 | Implement official/local switching | 2.1 | 3.2, 3.4 | 2.4 |
-| 3.1 | Ship Claude/Codex bridge polish | 2.2, 1.4 | 4.2 | 3.2, 3.3 |
-| 3.2 | Build doctor + recovery UX | 2.3, 2.4, 2.5 | 4.3 | 3.1, 3.3 |
-| 3.3 | Add compatibility + integration tests | 2.2 | 4.2, 4.3 | 3.1, 3.2 |
-| 3.4 | Add docs and onboarding commands | 2.4, 2.5 | 4.3 | 3.1, 3.2 |
-| 4.1 | Add recommended model download guidance | 2.3 | — | 4.2, 4.3 |
-| 4.2 | Add benchmark sanity-check mode | 3.1, 3.3 | — | 4.1, 4.3 |
-| 4.3 | Hardening, packaging, and release prep | 3.2, 3.3, 3.4 | — | 4.1, 4.2 |
+| Task ID | Task Title                                      | Depends On    | Blocks   | Can Parallel With |
+| ------- | ----------------------------------------------- | ------------- | -------- | ----------------- |
+| 1.1     | Define adapter and bridge architecture          | None          | 1.4, 2.2 | 1.2, 2.1          |
+| 1.2     | Implement machine profiling core                | None          | 1.3, 2.3 | 1.1, 2.1          |
+| 1.3     | Integrate `llmfit` scoring                      | 1.2           | 2.3, 2.4 | 1.4               |
+| 1.4     | Prove one end-to-end local backend path         | 1.1           | 2.2, 3.1 | 1.3               |
+| 2.1     | Build config/state manager with safe separation | None          | 2.5, 3.2 | 1.1, 1.2          |
+| 2.2     | Add Ollama / LM Studio / llama.cpp adapters     | 1.1, 1.4      | 3.1, 3.3 | 2.3               |
+| 2.3     | Implement model recommendation engine + presets | 1.2, 1.3      | 3.2, 4.1 | 2.2               |
+| 2.4     | Create setup flow                               | 1.3           | 3.2, 3.4 | 2.5               |
+| 2.5     | Implement official/local switching              | 2.1           | 3.2, 3.4 | 2.4               |
+| 3.1     | Ship Claude/Codex bridge polish                 | 2.2, 1.4      | 4.2      | 3.2, 3.3          |
+| 3.2     | Build doctor + recovery UX                      | 2.3, 2.4, 2.5 | 4.3      | 3.1, 3.3          |
+| 3.3     | Add compatibility + integration tests           | 2.2           | 4.2, 4.3 | 3.1, 3.2          |
+| 3.4     | Add docs and onboarding commands                | 2.4, 2.5      | 4.3      | 3.1, 3.2          |
+| 4.1     | Add recommended model download guidance         | 2.3           | —        | 4.2, 4.3          |
+| 4.2     | Add benchmark sanity-check mode                 | 3.1, 3.3      | —        | 4.1, 4.3          |
+| 4.3     | Hardening, packaging, and release prep          | 3.2, 3.3, 3.4 | —        | 4.1, 4.2          |
 
 ### Parallel Execution Groups
 
 **Wave 1** (Start immediately):
+
 - [x] Task 1.1: Define adapter and bridge architecture
 - [x] Task 1.2: Implement machine profiling core
 - [x] Task 2.1: Build config/state manager with safe separation
 
 **Wave 2** (After core foundations):
-- [x] Task 1.3: Integrate `llmfit` scoring *(requires: 1.2)*
-- [x] Task 1.4: Prove one end-to-end local backend path *(requires: 1.1)*
+
+- [x] Task 1.3: Integrate `llmfit` scoring _(requires: 1.2)_
+- [x] Task 1.4: Prove one end-to-end local backend path _(requires: 1.1)_
 
 **Wave 3** (After proof works):
-- [x] Task 2.2: Add Ollama / LM Studio / llama.cpp adapters *(requires: 1.1, 1.4)*
-- [x] Task 2.3: Implement model recommendation engine + presets *(requires: 1.2, 1.3)*
-- [x] Task 2.4: Create setup flow *(requires: 1.3)*
-- [x] Task 2.5: Implement official/local switching *(requires: 2.1)*
+
+- [x] Task 2.2: Add Ollama / LM Studio / llama.cpp adapters _(requires: 1.1, 1.4)_
+- [x] Task 2.3: Implement model recommendation engine + presets _(requires: 1.2, 1.3)_
+- [x] Task 2.4: Create setup flow _(requires: 1.3)_
+- [x] Task 2.5: Implement official/local switching _(requires: 2.1)_
 
 **Wave 4** (MVP completion):
-- [x] Task 3.1: Ship Claude/Codex bridge polish *(requires: 2.2, 1.4)*
-- [x] Task 3.2: Build doctor + recovery UX *(requires: 2.3, 2.4, 2.5)*
-- [x] Task 3.3: Add compatibility + integration tests *(requires: 2.2)*
-- [x] Task 3.4: Add docs and onboarding commands *(requires: 2.4, 2.5)*
+
+- [x] Task 3.1: Ship Claude/Codex bridge polish _(requires: 2.2, 1.4)_
+- [x] Task 3.2: Build doctor + recovery UX _(requires: 2.3, 2.4, 2.5)_
+- [x] Task 3.3: Add compatibility + integration tests _(requires: 2.2)_
+- [x] Task 3.4: Add docs and onboarding commands _(requires: 2.4, 2.5)_
 
 **Wave 5** (Post-MVP enhancement):
-- [ ] Task 4.1: Add recommended model download guidance *(requires: 2.3)*
-- [ ] Task 4.2: Add benchmark sanity-check mode *(requires: 3.1, 3.3)*
-- [ ] Task 4.3: Hardening, packaging, and release prep *(requires: 3.2, 3.3, 3.4)*
+
+- [ ] Task 4.1: Add recommended model download guidance _(requires: 2.3)_
+- [ ] Task 4.2: Add benchmark sanity-check mode _(requires: 3.1, 3.3)_
+- [ ] Task 4.3: Hardening, packaging, and release prep _(requires: 3.2, 3.3, 3.4)_
 
 ### Critical Path
 
@@ -125,6 +132,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Design the internal contract for runtime adapters and the backend-bridge layer so the product can keep the Claude/Codex harness mental model without hard-coding to one runtime. This is the architectural bet everything else rests on.
 
 **Acceptance Criteria**:
+
 - [x] Document a shared runtime adapter interface (`detect`, `healthcheck`, `list_models`, `run_test`, `recommend_params`)
 - [x] Define how Claude-oriented and Codex-oriented bridge layers talk to runtime adapters
 - [x] Define config boundaries so official Claude/Codex setups are not overwritten by default
@@ -143,6 +151,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Build the machine capability detector so later model recommendations are based on hardware reality instead of guesswork.
 
 **Acceptance Criteria**:
+
 - [x] Detect OS, architecture, CPU, and RAM
 - [x] Detect GPU/VRAM when available, otherwise classify as CPU-only
 - [x] Capture acceleration hints (Metal/CUDA where applicable)
@@ -161,6 +170,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Connect `llmfit` so the product can produce one coding-focused recommendation instead of exposing users to model-zoo chaos.
 
 **Acceptance Criteria**:
+
 - [x] `llmfit` is invoked using the machine profile
 - [x] Balanced, Fast, and Quality recommendation outputs are supported
 - [x] A human-readable explanation is returned for the top recommendation
@@ -179,6 +189,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Build a minimal working proof that one harness-oriented path can talk to one local backend end to end without forcing the user into a totally new workflow.
 
 **Acceptance Criteria**:
+
 - [x] One supported local runtime can be reached through the bridge
 - [x] One harness-oriented local run path succeeds end to end
 - [x] Active runtime/model are shown clearly to the user
@@ -199,6 +210,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Implement local config storage so the tool can remember runtime/model preferences without mutating official Claude/Codex state.
 
 **Acceptance Criteria**:
+
 - [x] Local config is stored under a separate namespace
 - [x] Last-known-good profile can be saved and reloaded
 - [x] Official config remains untouched by default
@@ -217,6 +229,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Implement the three runtime adapters needed for MVP and normalize them behind the shared contract.
 
 **Acceptance Criteria**:
+
 - [x] Ollama adapter supports detect, healthcheck, list models, and test run
 - [x] LM Studio adapter supports detect, healthcheck, list models, and test run
 - [x] llama.cpp adapter supports detect, healthcheck, list models, and test run
@@ -235,6 +248,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Convert `llmfit` output and runtime/model inventory into the actual recommendation engine users experience.
 
 **Acceptance Criteria**:
+
 - [x] Balanced is the default recommendation mode
 - [x] Fast and Quality presets change ranking and suggested params
 - [x] If no good local model is installed, one opinionated recommendation is produced
@@ -264,6 +278,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 - [x] **2.8 Generate `guide.md`** — write a personalized `guide.md` with the exact launch command, harness, engine, model, and troubleshooting tips.
 
 **Acceptance Criteria**:
+
 - [x] The wizard is idempotent: re-running after a partial failure resumes cleanly
 - [x] Every prompt is skippable via non-interactive flags for scripting
 - [x] Config is written atomically and never touches official Claude/Codex config
@@ -282,8 +297,9 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Make switching explicit and reversible so users can move between local and official backends without setup drama.
 
 **Acceptance Criteria**:
-- [x] Local mode can be activated explicitly *(run `cc`/`cx`)*
-- [x] Official mode can be restored explicitly *(run `claude`/`codex` directly)*
+
+- [x] Local mode can be activated explicitly _(run `cc`/`cx`)_
+- [x] Official mode can be restored explicitly _(run `claude`/`codex` directly)_
 - [x] Switching does not require reinstalling the harness
 - [x] State after switching is visible and understandable to the user
 
@@ -302,6 +318,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Harden the actual bridge layer so both `claude-local` and `codex-local` feel coherent and preserve the harness mental model.
 
 **Acceptance Criteria**:
+
 - [x] Claude-oriented path works cleanly with the local backend bridge
 - [x] Codex-oriented path works cleanly with the local backend bridge
 - [x] Active runtime/model/mode are surfaced consistently
@@ -320,6 +337,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Add a strong diagnosis flow so users can recover from broken runtime/model/config situations without rage-quitting.
 
 **Acceptance Criteria**:
+
 - [x] Doctor checks runtime availability, model availability, config validity, and backend health
 - [x] Doctor returns prioritized recovery actions
 - [x] Common failure states map to clear fixes
@@ -338,6 +356,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Add enough automated coverage to trust the MVP instead of hand-waving it.
 
 **Acceptance Criteria**:
+
 - [x] Adapter-level tests cover supported runtimes with mocks or fixtures
 - [x] Integration tests cover setup, local run, and switch-back flow
 - [x] Regression coverage exists for config separation rules
@@ -356,6 +375,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Make the first-run and recovery experience understandable enough that people can actually adopt the product.
 
 **Acceptance Criteria**:
+
 - [x] README explains what the product is and is not
 - [x] Setup / status / doctor / switching commands are documented
 - [x] Positioning avoids "offline Claude Code" parity claims
@@ -374,6 +394,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Improve setup by recommending one install path when no suitable local coding model exists.
 
 **Acceptance Criteria**:
+
 - [ ] Tool recommends one best-fit model download when necessary
 - [ ] Recommendation varies by hardware profile and preset mode
 - [ ] Download guidance does not overwhelm the user with too many options
@@ -390,6 +411,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Add a lightweight validation mode so users can test whether the recommended local model is actually good enough for coding on their machine.
 
 **Acceptance Criteria**:
+
 - [ ] User can run a lightweight coding-oriented sanity check
 - [ ] Results can compare recommended model/preset combinations
 - [ ] Benchmark mode is optional and not required for setup
@@ -406,6 +428,7 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 **Description**: Prepare the product to be shared beyond internal use.
 
 **Acceptance Criteria**:
+
 - [ ] Packaging/install story is defined and reproducible
 - [ ] Logging and debug modes are stable enough for external users
 - [ ] Error handling is reviewed across setup/run/doctor/switch flows
@@ -420,18 +443,22 @@ Task 1.1 → Task 1.4 → Task 2.2 → Task 3.1 → Task 4.2
 ## Backlog: Future Iterations
 
 ### vLLM / additional runtime support
+
 - Add server-grade runtime support after MVP if justified
 - PRD reference: F14, 8.3 Version 2.0
 
 ### Team/shared machine presets
+
 - Allow reusable hardware/runtime profiles across teams or machines
 - PRD reference: 8.3 Version 2.0
 
 ### Richer editor / workflow integrations
+
 - Expand beyond CLI once the backend-bridge core is stable
 - PRD reference: 1.3 Business Objectives, 8.3 Version 2.0
 
 ### Transparent auto-fallback mode
+
 - Consider optional “switch automatically when cloud fails” later, only after explicit/manual mode is solid
 - PRD reference: 9.2 Assumptions
 
@@ -459,13 +486,13 @@ Alternatives considered:
 
 > The following items from the PRD still need clarification:
 
-| Requirement | What Needs Clarification |
-|-------------|-------------------------|
-| `claude-local` / `codex-local` naming | Should these be standalone CLIs, symlinked wrappers, aliases, or subcommands? |
-| Claude-oriented bridge strategy | What exact integration mechanism is acceptable without breaking official behavior? |
-| Codex-oriented bridge strategy | How much native Codex backend configurability can be reused vs wrapped? |
-| Download behavior | Should model install be integrated, semi-automated, or just recommended? |
-| Telemetry | Is any opt-in telemetry acceptable, or should all analytics be local-only? |
+| Requirement                           | What Needs Clarification                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `claude-local` / `codex-local` naming | Should these be standalone CLIs, symlinked wrappers, aliases, or subcommands?      |
+| Claude-oriented bridge strategy       | What exact integration mechanism is acceptable without breaking official behavior? |
+| Codex-oriented bridge strategy        | How much native Codex backend configurability can be reused vs wrapped?            |
+| Download behavior                     | Should model install be integrated, semi-automated, or just recommended?           |
+| Telemetry                             | Is any opt-in telemetry acceptable, or should all analytics be local-only?         |
 
 ## Technical Notes
 

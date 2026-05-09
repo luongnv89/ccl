@@ -1,6 +1,7 @@
 # Validation: Local Claude/Codex Fallback
 
 ## Quick Verdict
+
 **Build it**
 
 ## Why
@@ -12,6 +13,7 @@ The idea becomes much stronger when the user does **not** have to change how the
 ## Similar Products
 
 Direct/adjacent references:
+
 - Ollama itself
 - LM Studio
 - llama.cpp
@@ -20,8 +22,9 @@ Direct/adjacent references:
 - generic model routers and local LLM managers
 
 But most of these are not focused on the specific promise:
+
 - detect local runtime
-- choose a coding-capable model for *this* machine
+- choose a coding-capable model for _this_ machine
 - configure sane defaults automatically
 - preserve official Claude/Codex setup
 - provide an easy "go local / go back" workflow
@@ -32,6 +35,7 @@ The differentiation is not raw inference.
 It is the **fallback workflow** and **configuration intelligence**.
 
 Key differentiators:
+
 - `llmfit`-driven best-fit model selection
 - coding-focused runtime/model choice rather than generic chat setup
 - explicit support for users of official Claude Code and Codex workflows
@@ -41,6 +45,7 @@ Key differentiators:
 - minimal or zero workflow change for the end user
 
 ## Strengths
+
 - solves a real, recurring pain point
 - narrow enough to explain clearly if framed as fallback, not replacement
 - strong CLI wedge
@@ -48,6 +53,7 @@ Key differentiators:
 - `llmfit` gives the idea a concrete engine instead of hand-wavy “smart selection” marketing
 
 ## Concerns
+
 - local coding quality can still disappoint on weaker machines
 - runtime normalization across Ollama, LM Studio, and llama.cpp is messy
 - users may still expect parity with Claude Code/Codex if naming is sloppy
@@ -55,6 +61,7 @@ Key differentiators:
 - model download UX can become bloated if too many options are exposed
 
 ## Ratings
+
 - Creativity: 7/10
 - Feasibility: 8/10
 - Market Impact: 7/10
@@ -90,10 +97,12 @@ Key differentiators:
 A CLI product that acts as a **local backend bridge for cloud coding agents**.
 
 Naming direction:
+
 - `claude-local`
 - `codex-local`
 
 Example flow:
+
 1. user keeps using Claude Code or Codex in the normal way
 2. local backend mode is configured once
 3. tool detects Ollama / LM Studio / llama.cpp
@@ -106,6 +115,7 @@ Example flow:
 8. later, user can return to official cloud workflow instantly
 
 Future extension:
+
 - support both Claude-oriented and Codex-oriented local backend modes
 - add a doctor command to explain missing runtime/model issues
 - add lightweight coding-benchmark sanity checks for installed models
@@ -113,6 +123,7 @@ Future extension:
 ## Implementation Roadmap
 
 ### Phase 1 — MVP
+
 - support Ollama, LM Studio, llama.cpp detection
 - collect hardware/machine profile
 - integrate `llmfit` for best-fit model scoring
@@ -121,12 +132,14 @@ Future extension:
 - provide setup, status, and run commands
 
 ### Phase 2 — Better fallback UX
+
 - add explicit official/local switching commands
 - recommend one best model download when no fit model is installed
 - cache the last-known-good local config
 - improve error handling and doctor diagnostics
 
 ### Phase 3 — Product polish
+
 - support Codex-oriented launch mode explicitly
 - add optional lightweight benchmark/profile validation
 - expand runtime support if justified (e.g. vLLM)

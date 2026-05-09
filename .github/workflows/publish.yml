@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # required for trusted publishing (OIDC)
+  id-token: write # required for trusted publishing (OIDC)
 
 jobs:
   build:

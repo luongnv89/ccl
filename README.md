@@ -23,14 +23,14 @@ One alias. Claude Code or Codex on a local model. Skills, agents, MCP servers �
 
 ## Features
 
-| Feature | What you get |
-|---|---|
-| Ollama first-class | `ollama launch` — no duplicated config, no custom Modelfiles |
-| Config untouched | All skills, statusline, agents, plugins, and MCP servers carry over |
+| Feature               | What you get                                                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Ollama first-class    | `ollama launch` — no duplicated config, no custom Modelfiles                                                                      |
+| Config untouched      | All skills, statusline, agents, plugins, and MCP servers carry over                                                               |
 | Smart model selection | `llmfit` analyses your hardware and picks the best quantization that fits (optional — wizard prompts to install only when needed) |
-| Resume on failure | Wizard persists progress — `--resume` picks up from the last completed step |
-| Idempotent aliases | Re-running the wizard replaces the existing alias block, never appends |
-| Cloud fallback | Run `claude` / `codex` directly (no prefix) to switch back instantly |
+| Resume on failure     | Wizard persists progress — `--resume` picks up from the last completed step                                                       |
+| Idempotent aliases    | Re-running the wizard replaces the existing alias block, never appends                                                            |
+| Cloud fallback        | Run `claude` / `codex` directly (no prefix) to switch back instantly                                                              |
 
 ---
 
@@ -167,15 +167,15 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 ## Proven Paths
 
-| Harness | Engine | Model | Status |
-|---|---|---|---|
-| Claude Code | Ollama | `gemma4:26b` | Verified end-to-end |
-| Codex CLI | Ollama | `gemma4:26b` | Verified |
-| Claude Code | LM Studio | Qwen3 family | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
-| Any | llama.cpp | any | Inline-env code path exists, no live proof yet |
-| Any | vLLM | any | New in 0.8.0 — adapter shipped with tests |
-| Claude Code | 9router | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cc9` alias; existing `cc` is untouched |
-| Codex CLI | 9router | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cx9` alias; existing `cx` is untouched |
+| Harness     | Engine    | Model                  | Status                                                                  |
+| ----------- | --------- | ---------------------- | ----------------------------------------------------------------------- |
+| Claude Code | Ollama    | `gemma4:26b`           | Verified end-to-end                                                     |
+| Codex CLI   | Ollama    | `gemma4:26b`           | Verified                                                                |
+| Claude Code | LM Studio | Qwen3 family           | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
+| Any         | llama.cpp | any                    | Inline-env code path exists, no live proof yet                          |
+| Any         | vLLM      | any                    | New in 0.8.0 — adapter shipped with tests                               |
+| Claude Code | 9router   | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cc9` alias; existing `cc` is untouched |
+| Codex CLI   | 9router   | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cx9` alias; existing `cx` is untouched |
 
 ---
 
@@ -249,15 +249,15 @@ The wizard:
 
 ### Claude Code → 9router env vars
 
-| Env var | 9router |
-|---|---|
-| `ANTHROPIC_BASE_URL` | `http://localhost:20128/v1` |
-| `ANTHROPIC_AUTH_TOKEN` | `$(cat ~/.claude-codex-local/9router-api-key)` (read at exec) |
-| `ANTHROPIC_API_KEY` | `$(cat ~/.claude-codex-local/9router-api-key)` (read at exec) |
-| `ANTHROPIC_CUSTOM_MODEL_OPTION` | `<tag>` (e.g. `kr/claude-sonnet-4.5`) |
-| `ANTHROPIC_CUSTOM_MODEL_OPTION_NAME` | `9router <tag>` |
-| `CLAUDE_CODE_ATTRIBUTION_HEADER` | `"0"` |
-| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `"1"` |
+| Env var                                    | 9router                                                       |
+| ------------------------------------------ | ------------------------------------------------------------- |
+| `ANTHROPIC_BASE_URL`                       | `http://localhost:20128/v1`                                   |
+| `ANTHROPIC_AUTH_TOKEN`                     | `$(cat ~/.claude-codex-local/9router-api-key)` (read at exec) |
+| `ANTHROPIC_API_KEY`                        | `$(cat ~/.claude-codex-local/9router-api-key)` (read at exec) |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION`            | `<tag>` (e.g. `kr/claude-sonnet-4.5`)                         |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION_NAME`       | `9router <tag>`                                               |
+| `CLAUDE_CODE_ATTRIBUTION_HEADER`           | `"0"`                                                         |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `"1"`                                                         |
 
 For Codex: `OPENAI_BASE_URL=http://localhost:20128/v1`, `OPENAI_API_KEY=$(cat …)`.
 
@@ -290,6 +290,7 @@ Each fence block (`claude` / `codex` / `claude9` / `codex9`) is independent — 
 `ollama launch claude --model <tag>` is an official Ollama subcommand that sets the right env vars internally and execs the user's real `claude` binary against the local daemon — using `~/.claude` as-is.
 
 This means:
+
 - No duplicated `~/.claude` directory
 - No custom Modelfile or `ollama create`
 - No `ANTHROPIC_CUSTOM_MODEL_OPTION` to manage manually
@@ -297,14 +298,14 @@ This means:
 
 ### Claude Code → LM Studio / llama.cpp env vars
 
-| Env var | LM Studio | llama.cpp |
-|---|---|---|
-| `ANTHROPIC_BASE_URL` | `http://localhost:1234` | `http://localhost:8001` |
-| `ANTHROPIC_API_KEY` | `lmstudio` | `sk-local` |
-| `ANTHROPIC_CUSTOM_MODEL_OPTION` | `<tag>` | `<tag>` |
-| `ANTHROPIC_CUSTOM_MODEL_OPTION_NAME` | `Local (lmstudio) <tag>` | `Local (llamacpp) <tag>` |
-| `CLAUDE_CODE_ATTRIBUTION_HEADER` | `"0"` | `"0"` |
-| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `"1"` | `"1"` |
+| Env var                                    | LM Studio                | llama.cpp                |
+| ------------------------------------------ | ------------------------ | ------------------------ |
+| `ANTHROPIC_BASE_URL`                       | `http://localhost:1234`  | `http://localhost:8001`  |
+| `ANTHROPIC_API_KEY`                        | `lmstudio`               | `sk-local`               |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION`            | `<tag>`                  | `<tag>`                  |
+| `ANTHROPIC_CUSTOM_MODEL_OPTION_NAME`       | `Local (lmstudio) <tag>` | `Local (llamacpp) <tag>` |
+| `CLAUDE_CODE_ATTRIBUTION_HEADER`           | `"0"`                    | `"0"`                    |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `"1"`                    | `"1"`                    |
 
 ### Codex CLI → Ollama
 
@@ -313,6 +314,7 @@ ollama launch codex --model <tag> -- --oss --local-provider=ollama
 ```
 
 The `--oss --local-provider=ollama` flags are required after `--` because Codex otherwise tries to route through the ChatGPT account and rejects non-OpenAI model names.
+
 </details>
 
 <details>
@@ -341,15 +343,15 @@ The `--oss --local-provider=ollama` flags are required after `--` because Codex 
 <details>
 <summary>Tech stack</summary>
 
-| Layer | Tool |
-|---|---|
-| Language | Python 3.10+ |
-| UI / prompts | [questionary](https://github.com/tmbo/questionary), [rich](https://github.com/Textualize/rich) |
-| Linting | [ruff](https://github.com/astral-sh/ruff) |
-| Type checking | [mypy](https://mypy-lang.org) |
-| Testing | [pytest](https://pytest.org) + pytest-cov |
-| Security | [bandit](https://github.com/PyCQA/bandit), [detect-secrets](https://github.com/Yelp/detect-secrets) |
-| Pre-commit | [pre-commit](https://pre-commit.com) |
+| Layer         | Tool                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| Language      | Python 3.10+                                                                                        |
+| UI / prompts  | [questionary](https://github.com/tmbo/questionary), [rich](https://github.com/Textualize/rich)      |
+| Linting       | [ruff](https://github.com/astral-sh/ruff)                                                           |
+| Type checking | [mypy](https://mypy-lang.org)                                                                       |
+| Testing       | [pytest](https://pytest.org) + pytest-cov                                                           |
+| Security      | [bandit](https://github.com/PyCQA/bandit), [detect-secrets](https://github.com/Yelp/detect-secrets) |
+| Pre-commit    | [pre-commit](https://pre-commit.com)                                                                |
 
 </details>
 

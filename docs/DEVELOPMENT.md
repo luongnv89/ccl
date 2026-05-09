@@ -90,12 +90,12 @@ pre-commit run --all-files
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `claude_codex_local/wizard.py` | Interactive setup wizard + `ccl` CLI |
-| `claude_codex_local/core.py` | Machine profile, engine adapters, llmfit bindings, doctor |
-| `scripts/e2e_smoke.sh` | End-to-end smoke test for `ccl` + `core` debug CLI |
-| `~/.claude-codex-local/` | Runtime state (override with `CLAUDE_CODEX_LOCAL_STATE_DIR`) |
+| File                           | Purpose                                                      |
+| ------------------------------ | ------------------------------------------------------------ |
+| `claude_codex_local/wizard.py` | Interactive setup wizard + `ccl` CLI                         |
+| `claude_codex_local/core.py`   | Machine profile, engine adapters, llmfit bindings, doctor    |
+| `scripts/e2e_smoke.sh`         | End-to-end smoke test for `ccl` + `core` debug CLI           |
+| `~/.claude-codex-local/`       | Runtime state (override with `CLAUDE_CODEX_LOCAL_STATE_DIR`) |
 
 ## Wizard State
 
