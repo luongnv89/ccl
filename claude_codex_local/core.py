@@ -934,7 +934,8 @@ def vllm_info() -> dict[str, Any]:
 
     Shape:
         {
-            "present": bool,         # vllm CLI installed
+            "present": bool,         # vllm CLI installed AND server reachable
+
             "base_url": str,         # resolved URL (no trailing slash)
             "version": str,          # CLI version or X-VLLM-Version header
             "models": list[dict],    # [{"name": str, "format": "...", "local": True}, ...]
@@ -946,14 +947,17 @@ def vllm_info() -> dict[str, Any]:
     cli_info = command_version("vllm")
     base_url = VLLM_BASE_URL
 
+    # Initialize info with CLI status
     info: dict[str, Any] = {
-        "present": cli_info.get("present", False),
+        "present": False,  # Will be set to True only if both CLI and server are OK
         "base_url": base_url,
         "version": cli_info.get("version", ""),
         "models": [],
+        "server_reachable": False,
     }
 
-    if not info["present"]:
+    if not cli_info.get("present", False):
+
         info["error"] = "vllm CLI not installed"
         return info
 
@@ -965,10 +969,13 @@ def vllm_info() -> dict[str, Any]:
     if detect.get("version"):
         info["version"] = detect.get("version", "")
 
+    # present=True only when BOTH CLI is installed AND server is reachable
     if info["server_reachable"]:
+        info["present"] = True
         info["models"] = adapter.list_models()
     else:
-        info["error"] = f"vLLM server not reachable at {base_url} (but CLI is installed)"
+        info["error"] = f"vLLM server not reachable at {base_url}"
+
 
     return info
 
