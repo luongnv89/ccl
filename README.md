@@ -27,7 +27,7 @@ One alias. Claude Code or Codex on a local model. Skills, agents, MCP servers �
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | Ollama first-class    | `ollama launch` — no duplicated config, no custom Modelfiles                                                                      |
 | Config untouched      | All skills, statusline, agents, plugins, and MCP servers carry over                                                               |
-| Smart model selection | `llmfit` analyses your hardware and picks the best quantization that fits (optional — wizard prompts to install only when needed) |
+| Smart model selection | `llmfit` analyses your hardware and picks the best quantization that fits (lazy hardware scan; pass `--run-llmfit` to refresh) |
 | Resume on failure     | Wizard persists progress — `--resume` picks up from the last completed step                                                       |
 | Idempotent aliases    | Re-running the wizard replaces the existing alias block, never appends                                                            |
 | Cloud fallback        | Run `claude` / `codex` directly (no prefix) to switch back instantly                                                              |
@@ -112,7 +112,7 @@ cx        # Codex CLI → local model
 
 ```mermaid
 graph TD
-    A[1. Discover environment] --> B[2. Install missing components]
+    A[1. Discover environment<br>lazy hardware scan; pass --run-llmfit to refresh] --> B[2. Install missing components]
     B --> C[3. Pick harness + engine]
     C --> D[4. Pick model]
     D --> E[5. Smoke test engine]

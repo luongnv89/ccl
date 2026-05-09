@@ -1033,7 +1033,10 @@ class TestStep24PickerIntegration:
         def fake_select(msg, choices):
             captured_choices.extend(choices)
             for c in choices:
-                if isinstance(c.value, str) and c.value.startswith("installed:"):
+                # Issue #79 renamed the picker key from "installed:" to "merged:"
+                # — both installed and cached llmfit recommendations now share
+                # the same option group.
+                if isinstance(c.value, str) and c.value.startswith("merged:"):
                     return _StubAsk(c.value)
             return _StubAsk(None)
 
@@ -1046,19 +1049,19 @@ class TestStep24PickerIntegration:
         assert state.engine_model_tag == "qwen2.5-coder:7b"
         assert state.model_source == "installed"
         assert "4" in state.completed_steps
-        # Picker surfaced at least the three profile choices + 2 installed models.
+        # Picker surfaced at least the three profile choices + 2 merged models.
         profile_choices = [
             c
             for c in captured_choices
             if isinstance(c.value, str) and c.value.startswith("profile:")
         ]
-        installed_choices = [
+        merged_choices = [
             c
             for c in captured_choices
-            if isinstance(c.value, str) and c.value.startswith("installed:")
+            if isinstance(c.value, str) and c.value.startswith("merged:")
         ]
         assert len(profile_choices) >= 1
-        assert len(installed_choices) >= 1
+        assert len(merged_choices) >= 1
 
     def test_profile_choice_picks_recommended_tag(self, isolated_state, monkeypatch):
         """Picking a Speed/Quality/Balanced profile fills the state with the llmfit tag (#35)."""
@@ -2387,7 +2390,7 @@ class TestRunDoctor9RouterChecks:
         monkeypatch.setattr(
             pb,
             "machine_profile",
-            lambda: {
+            lambda **_kw: {
                 "presence": {"harnesses": ["claude"], "engines": ["9router"]},
                 "ollama": {"models": []},
                 "lmstudio": {"models": []},
@@ -2411,7 +2414,7 @@ class TestRunDoctor9RouterChecks:
         monkeypatch.setattr(
             pb,
             "machine_profile",
-            lambda: {
+            lambda **_kw: {
                 "presence": {"harnesses": ["claude"], "engines": ["9router"]},
                 "ollama": {"models": []},
                 "lmstudio": {"models": []},
@@ -2436,7 +2439,7 @@ class TestRunDoctor9RouterChecks:
         monkeypatch.setattr(
             pb,
             "machine_profile",
-            lambda: {
+            lambda **_kw: {
                 "presence": {"harnesses": ["claude"], "engines": ["9router"]},
                 "ollama": {"models": []},
                 "lmstudio": {"models": []},
@@ -2460,7 +2463,7 @@ class TestRunDoctor9RouterChecks:
         monkeypatch.setattr(
             pb,
             "machine_profile",
-            lambda: {
+            lambda **_kw: {
                 "presence": {"harnesses": ["claude"], "engines": ["9router"]},
                 "ollama": {"models": []},
                 "lmstudio": {"models": []},
@@ -2992,7 +2995,13 @@ class TestVLLMInDiscovery:
         )
         # Block other probes from touching the host.
         monkeypatch.setattr(
-            pb, "command_version", lambda cmd, **kw: {"present": cmd == "vllm", "version": "0.6.0"} if cmd == "vllm" else {"present": False, "version": ""}
+            pb,
+            "command_version",
+            lambda cmd, **kw: (
+                {"present": cmd == "vllm", "version": "0.6.0"}
+                if cmd == "vllm"
+                else {"present": False, "version": ""}
+            ),
         )
         monkeypatch.setattr(
             pb,
@@ -3012,3 +3021,280 @@ class TestVLLMInDiscovery:
         assert profile["vllm"]["models"] == [
             {"name": "loaded/model", "format": "unknown", "local": True}
         ]
+
+
+# ---------------------------------------------------------------------------
+# Issue #79 — lazy-llmfit + cache-aware Step 4 picker + cache invalidation.
+# ---------------------------------------------------------------------------
+
+
+class TestStep1LazyLlmfit:
+    """Step 1 must defer the llmfit hardware scan unless the user opts in."""
+
+    def _seed_cached_profile(self, pb_mod, *, with_llmfit: bool = True) -> dict:
+        """Write a synthetic populated profile cache to disk."""
+        profile = {
+            "host": {
+                "platform": "Darwin-x",
+                "system": "Darwin",
+                "release": "25",
+                "machine": "arm64",
+            },
+            "tools": {
+                "ollama": {"present": True, "version": "0.1.99"},
+                "lmstudio": {"present": False, "version": ""},
+                "llamacpp": {"present": False, "version": ""},
+                "vllm": {"present": False, "version": "", "base_url": "http://localhost:8000"},
+                "huggingface_cli": {"present": False},
+                "claude": {"present": True, "version": "claude 1.0.0"},
+                "codex": {"present": False, "version": ""},
+                "llmfit": {"present": True, "version": "llmfit 1.2.3"},
+                "9router": {"present": False, "version": "", "base_url": ""},
+            },
+            "presence": {
+                "harnesses": ["claude"],
+                "engines": ["ollama"],
+                "llmfit": True,
+                "has_minimum": True,
+            },
+            "ollama": {"models": []},
+            "lmstudio": {"present": False, "models": []},
+            "llamacpp": {"present": False},
+            "vllm": {"present": False},
+            "9router": {"present": False, "base_url": "", "healthcheck": {"ok": False}},
+            "disk": {"free_gib": 100.0, "total_gib": 500.0},
+            "state_dir": str(pb_mod.STATE_DIR),
+        }
+        if with_llmfit:
+            profile["llmfit_system"] = {
+                "system": {
+                    "available_ram_gb": 32,
+                    "total_ram_gb": 32,
+                    "cpu_name": "Apple M2",
+                    "cpu_cores": 8,
+                    "has_gpu": True,
+                    "gpu_name": "Apple",
+                    "gpu_vram_gb": 16,
+                }
+            }
+        else:
+            profile["llmfit_system"] = pb_mod.LLMFIT_SKIPPED_SENTINEL
+
+        # Persist via the real saver so the format matches what _load reads.
+        fp = pb_mod._compute_machine_fingerprint(profile)
+        profile["_fingerprint"] = fp
+        pb_mod.MACHINE_PROFILE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        pb_mod._save_machine_profile_cache(profile, fp)
+        # Reset the in-process cache so the loader is exercised.
+        pb_mod.invalidate_machine_profile_inproc_cache()
+        return profile
+
+    def test_step1_skips_llmfit_on_cache_hit(self, isolated_state, monkeypatch):
+        """If a populated cache is present, llmfit_system must not be re-run."""
+        pb, wiz, _ = isolated_state
+        self._seed_cached_profile(pb, with_llmfit=True)
+
+        def boom():
+            raise AssertionError("llmfit_system must not be invoked on cache hit")
+
+        monkeypatch.setattr(pb, "llmfit_system", boom)
+
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz.step_2_1_discover(state, non_interactive=True) is True
+        # Profile carries the populated llmfit_system from the cache.
+        assert "system" in state.profile["llmfit_system"]
+
+    def test_step1_passes_run_llmfit_false_by_default(self, isolated_state, monkeypatch):
+        """Default discover call must propagate run_llmfit=False to machine_profile."""
+        pb, wiz, _ = isolated_state
+        captured: dict[str, object] = {}
+
+        def fake_machine_profile(run_llmfit: bool = True):
+            captured["run_llmfit"] = run_llmfit
+            return {
+                "tools": {
+                    "ollama": {"present": True, "version": "0.1"},
+                    "lmstudio": {"present": False},
+                    "llamacpp": {"present": False},
+                    "vllm": {"present": False},
+                    "9router": {"present": False},
+                    "huggingface_cli": {"present": False},
+                    "claude": {"present": True, "version": "claude 1"},
+                    "codex": {"present": False},
+                    "llmfit": {"present": True, "version": "llmfit 1.2.3"},
+                },
+                "presence": {
+                    "harnesses": ["claude"],
+                    "engines": ["ollama"],
+                    "llmfit": True,
+                    "has_minimum": True,
+                },
+                "llmfit_system": pb.LLMFIT_SKIPPED_SENTINEL,
+                "disk": {"free_gib": 100.0, "total_gib": 500.0},
+            }
+
+        monkeypatch.setattr(pb, "machine_profile", fake_machine_profile)
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz.step_2_1_discover(state, non_interactive=True) is True
+        assert captured["run_llmfit"] is False
+
+    def test_force_scan_still_runs_llmfit(self, isolated_state, monkeypatch):
+        """--force-scan keeps the existing 'nuke + full rescan' contract."""
+        pb, wiz, _ = isolated_state
+        captured: dict[str, object] = {}
+
+        def fake_machine_profile(run_llmfit: bool = True):
+            captured["run_llmfit"] = run_llmfit
+            return {
+                "tools": {
+                    "ollama": {"present": True, "version": "0.1"},
+                    "lmstudio": {"present": False},
+                    "llamacpp": {"present": False},
+                    "vllm": {"present": False},
+                    "9router": {"present": False},
+                    "huggingface_cli": {"present": False},
+                    "claude": {"present": True, "version": "claude 1"},
+                    "codex": {"present": False},
+                    "llmfit": {"present": True, "version": "llmfit 1.2.3"},
+                },
+                "presence": {
+                    "harnesses": ["claude"],
+                    "engines": ["ollama"],
+                    "llmfit": True,
+                    "has_minimum": True,
+                },
+                "llmfit_system": {"system": {"available_ram_gb": 32}},
+                "disk": {"free_gib": 100.0, "total_gib": 500.0},
+            }
+
+        monkeypatch.setattr(pb, "machine_profile", fake_machine_profile)
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz.step_2_1_discover(state, non_interactive=True, force_scan=True) is True
+        assert captured["run_llmfit"] is True
+
+    def test_run_llmfit_flag_forces_scan(self, isolated_state, monkeypatch):
+        """--run-llmfit (without --force-scan) propagates as run_llmfit=True."""
+        pb, wiz, _ = isolated_state
+        captured: dict[str, object] = {}
+
+        def fake_machine_profile(run_llmfit: bool = True):
+            captured["run_llmfit"] = run_llmfit
+            return {
+                "tools": {
+                    "ollama": {"present": True, "version": "0.1"},
+                    "lmstudio": {"present": False},
+                    "llamacpp": {"present": False},
+                    "vllm": {"present": False},
+                    "9router": {"present": False},
+                    "huggingface_cli": {"present": False},
+                    "claude": {"present": True, "version": "claude 1"},
+                    "codex": {"present": False},
+                    "llmfit": {"present": True, "version": "llmfit 1.2.3"},
+                },
+                "presence": {
+                    "harnesses": ["claude"],
+                    "engines": ["ollama"],
+                    "llmfit": True,
+                    "has_minimum": True,
+                },
+                "llmfit_system": {"system": {"available_ram_gb": 32}},
+                "disk": {"free_gib": 100.0, "total_gib": 500.0},
+            }
+
+        monkeypatch.setattr(pb, "machine_profile", fake_machine_profile)
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz.step_2_1_discover(state, non_interactive=True, run_llmfit_flag=True) is True
+        assert captured["run_llmfit"] is True
+
+
+class TestEnsureToolCacheInvalidation:
+    """Issue #79: _ensure_tool must invalidate the in-proc profile cache after a real install."""
+
+    def test_install_success_invalidates_inproc_cache(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+
+        # Tool not present initially → install path.
+        present_state = {"present": False}
+
+        def fake_command_version(name):
+            return {"present": present_state["present"], "version": "1.0"}
+
+        monkeypatch.setattr(pb, "command_version", fake_command_version)
+
+        # Confirm install dialog returns True.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+
+        # Install command "succeeds" — flip the present flag.
+        def fake_run(cmd, check=True):
+            present_state["present"] = True
+
+            class _R:
+                returncode = 0
+
+            return _R()
+
+        monkeypatch.setattr(wiz.subprocess, "run", fake_run)
+
+        invalidations: list[int] = []
+        monkeypatch.setattr(
+            pb,
+            "invalidate_machine_profile_inproc_cache",
+            lambda: invalidations.append(1),
+        )
+
+        # Hide the install hint output.
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz._ensure_tool("ollama") is True
+        assert invalidations == [1], "must invalidate exactly once after install success"
+
+    def test_user_decline_does_not_invalidate(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+
+        # Tool not present.
+        monkeypatch.setattr(pb, "command_version", lambda name: {"present": False, "version": ""})
+        # User declines install.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+
+        invalidations: list[int] = []
+        monkeypatch.setattr(
+            pb,
+            "invalidate_machine_profile_inproc_cache",
+            lambda: invalidations.append(1),
+        )
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz._ensure_tool("ollama") is False
+        assert invalidations == [], "must not invalidate when the user declined install"
+
+    def test_install_failure_does_not_invalidate(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+
+        # Tool not present.
+        monkeypatch.setattr(pb, "command_version", lambda name: {"present": False, "version": ""})
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+
+        # Install command "fails" → CalledProcessError path.
+        def boom(cmd, check=True):
+            raise wiz.subprocess.CalledProcessError(1, cmd)
+
+        monkeypatch.setattr(wiz.subprocess, "run", boom)
+
+        invalidations: list[int] = []
+        monkeypatch.setattr(
+            pb,
+            "invalidate_machine_profile_inproc_cache",
+            lambda: invalidations.append(1),
+        )
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz._ensure_tool("ollama") is False
+        assert invalidations == []

@@ -109,7 +109,7 @@ def _stub_candidates(*a, **k):
 class TestCoreDebugCli:
     def test_profile_prints_json(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "profile"])
         pb.main()
         out = capsys.readouterr().out
@@ -119,7 +119,7 @@ class TestCoreDebugCli:
 
     def test_recommend_prints_selected_model(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(pb, "llmfit_coding_candidates", _stub_candidates)
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
@@ -135,7 +135,7 @@ class TestCoreDebugCli:
 
     def test_doctor_prints_issues_and_fixes(self, isolated_state, monkeypatch, capsys):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(pb, "llmfit_coding_candidates", _stub_candidates)
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
@@ -152,7 +152,7 @@ class TestCoreDebugCli:
         bad["tools"]["ollama"] = {"present": False, "error": "not found"}
         bad["ollama"]["models"] = []
         bad["presence"]["engines"] = []
-        monkeypatch.setattr(pb, "machine_profile", lambda: bad)
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: bad)
         monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
         monkeypatch.setattr(sys, "argv", ["claude_codex_local.core", "doctor"])
         pb.main()
@@ -204,7 +204,7 @@ def _stub_subprocess_success(*args, **kwargs):
 class TestWizardFullFlow:
     def test_non_interactive_run_completes_all_steps(self, isolated_state, monkeypatch):
         pb, wiz, state_dir = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
@@ -253,7 +253,7 @@ class TestWizardFullFlow:
 
     def test_non_interactive_fails_cleanly_on_smoke_test_failure(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": False, "error": "simulated failure"}
         )
@@ -266,7 +266,7 @@ class TestWizardFullFlow:
 
     def test_doctor_reports_clean_state_after_setup(self, isolated_state, monkeypatch, capsys):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
@@ -278,7 +278,7 @@ class TestWizardFullFlow:
 
     def test_doctor_detects_missing_helper_script(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(pb, "machine_profile", lambda: _installed_profile(pb))
+        monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
@@ -678,7 +678,7 @@ esac"""
         argv_log = tmp_path / "codex-argv.log"
         put_stub(
             "codex",
-            f'echo "$@" > {shlex.quote(str(argv_log))}\n' "exit 0",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\nexit 0',
         )
         self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
         result = self._spawn_ccl(
@@ -696,7 +696,7 @@ esac"""
         argv_log = tmp_path / "codex-argv.log"
         put_stub(
             "codex",
-            f'echo "$@" > {shlex.quote(str(argv_log))}\n' "exit 0",
+            f'echo "$@" > {shlex.quote(str(argv_log))}\nexit 0',
         )
         self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
         result = self._spawn_ccl(
@@ -767,7 +767,7 @@ esac"""
         helper = helper_dir / "cc"
         marker = tmp_path / "helper-was-called"
         helper.write_text(
-            "#!/usr/bin/env bash\n" f"echo invoked > {shlex.quote(str(marker))}\n" "exit 0\n"
+            f"#!/usr/bin/env bash\necho invoked > {shlex.quote(str(marker))}\nexit 0\n"
         )
         helper.chmod(0o755)
         result = self._spawn_ccl(

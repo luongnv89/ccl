@@ -1753,3 +1753,243 @@ def _wiz_temp_pid_path(isolated_state):
     pid_file = pid_dir / "test.pid"
     pid_file.write_text("99999999")
     return pid_file
+
+
+# ---------------------------------------------------------------------------
+# Lazy-llmfit machine_profile (issue #79).
+# ---------------------------------------------------------------------------
+
+
+def _stub_machine_internals(monkeypatch, pb_mod):
+    """
+    Patch the slow / network-touching parts of machine_profile so we can
+    isolate the run_llmfit branch without mocking llmfit_system itself.
+    """
+
+    def fake_command_version(name):
+        return {"present": True, "version": f"{name} 1.0.0"}
+
+    monkeypatch.setattr(pb_mod, "command_version", fake_command_version)
+    monkeypatch.setattr(pb_mod, "lms_info", lambda: {"present": False, "models": []})
+    monkeypatch.setattr(pb_mod, "llamacpp_detect", lambda: {"present": False, "version": ""})
+    monkeypatch.setattr(pb_mod, "huggingface_cli_detect", lambda: {"present": False, "version": ""})
+    monkeypatch.setattr(
+        pb_mod,
+        "vllm_info",
+        lambda: {"present": False, "version": "", "base_url": "http://localhost:8000"},
+    )
+    monkeypatch.setattr(pb_mod, "parse_ollama_list", lambda: [])
+
+    class _StubRouter9:
+        def detect(self):
+            return {"present": False, "version": ""}
+
+        def healthcheck(self):
+            return {"ok": False}
+
+    monkeypatch.setattr(pb_mod, "Router9Adapter", _StubRouter9)
+    monkeypatch.setattr(
+        pb_mod,
+        "disk_usage_for",
+        lambda _path: {
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "free_bytes": 0,
+            "free_gib": 0.0,
+            "total_gib": 0.0,
+        },
+    )
+
+
+class TestMachineProfileLazyLlmfit:
+    """Issue #79: machine_profile must accept run_llmfit and respect lazy/skip semantics."""
+
+    def test_machine_profile_skips_llmfit_when_disabled(self, isolated_state, monkeypatch):
+        pb_mod, _wiz, _state_dir = isolated_state
+        _stub_machine_internals(monkeypatch, pb_mod)
+        calls: list[int] = []
+
+        def fake_llmfit():
+            calls.append(1)
+            return {"system": {"available_ram_gb": 32}}
+
+        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+
+        profile = pb_mod.machine_profile(run_llmfit=False)
+
+        assert calls == [], "llmfit_system must not run when run_llmfit=False"
+        assert pb_mod._is_llmfit_skipped(profile.get("llmfit_system"))
+
+    def test_machine_profile_runs_llmfit_when_force(self, isolated_state, monkeypatch):
+        pb_mod, _wiz, _state_dir = isolated_state
+        _stub_machine_internals(monkeypatch, pb_mod)
+        calls: list[int] = []
+
+        def fake_llmfit():
+            calls.append(1)
+            return {"system": {"available_ram_gb": 32}}
+
+        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+
+        profile = pb_mod.machine_profile(run_llmfit=True)
+
+        assert calls == [1]
+        assert profile.get("llmfit_system") == {"system": {"available_ram_gb": 32}}
+
+    def test_machine_profile_force_with_populated_cache_does_not_re_run(
+        self, isolated_state, monkeypatch
+    ):
+        """Cache holds populated llmfit data; even run_llmfit=True must not re-run."""
+        pb_mod, _wiz, _state_dir = isolated_state
+        _stub_machine_internals(monkeypatch, pb_mod)
+        calls: list[int] = []
+
+        def fake_llmfit():
+            calls.append(1)
+            return {"system": {"available_ram_gb": 32}}
+
+        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+
+        # First call (run_llmfit=True): builds + populates llmfit_system in cache.
+        first = pb_mod.machine_profile(run_llmfit=True)
+        assert calls == [1]
+        assert "system" in first.get("llmfit_system", {})
+
+        # Reset the in-process cache so the next call reads from disk cache.
+        pb_mod.invalidate_machine_profile_inproc_cache()
+
+        # Second call (run_llmfit=True): cache hit with populated llmfit_system
+        # — must NOT re-run llmfit.
+        second = pb_mod.machine_profile(run_llmfit=True)
+        assert calls == [1], "populated cache must not trigger a second llmfit run"
+        assert second.get("llmfit_system") == first.get("llmfit_system")
+
+    def test_machine_profile_skipped_then_force_re_runs(self, isolated_state, monkeypatch):
+        """Cache holds the skip sentinel; forcing run_llmfit must re-run llmfit and persist."""
+        pb_mod, _wiz, _state_dir = isolated_state
+        _stub_machine_internals(monkeypatch, pb_mod)
+        calls: list[int] = []
+
+        def fake_llmfit():
+            calls.append(1)
+            return {"system": {"available_ram_gb": 64}}
+
+        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+
+        # First call: defer the scan — sentinel is persisted.
+        first = pb_mod.machine_profile(run_llmfit=False)
+        assert pb_mod._is_llmfit_skipped(first.get("llmfit_system"))
+        assert calls == []
+
+        # Reset in-process cache so the next call hits the disk cache (which
+        # holds the sentinel) rather than returning the in-memory profile.
+        pb_mod.invalidate_machine_profile_inproc_cache()
+
+        # Second call: ask for llmfit. Even though the disk cache exists, the
+        # sentinel must trigger a fresh llmfit_system() invocation.
+        second = pb_mod.machine_profile(run_llmfit=True)
+        assert calls == [1], "llmfit_system must run on the second call"
+        assert second.get("llmfit_system") == {"system": {"available_ram_gb": 64}}
+
+
+# ---------------------------------------------------------------------------
+# merge_models_for_engine (issue #79).
+# ---------------------------------------------------------------------------
+
+
+class TestMergeModelsForEngine:
+    def test_dedups_installed_over_cached(self, monkeypatch):
+        """Same id in installed + cached → one entry, source='installed'."""
+        profile = {
+            "ollama": {"models": [{"name": "qwen2.5-coder:7b", "local": True, "size": "4.1 GB"}]},
+            "llmfit_system": {"system": {"available_ram_gb": 16}},
+        }
+
+        # Stub llmfit_coding_candidates to return a candidate whose ollama_tag
+        # is already installed.
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda **_kw: [
+                {
+                    "name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+                    "score": 80,
+                    "estimated_tps": 30,
+                    "ollama_tag": "qwen2.5-coder:7b",
+                }
+            ],
+        )
+
+        merged = pb.merge_models_for_engine(profile, "ollama")
+        assert len(merged) == 1
+        assert merged[0]["tag"] == "qwen2.5-coder:7b"
+        assert merged[0]["source"] == "installed"
+
+    def test_tags_cached_when_not_installed(self, monkeypatch):
+        """Cached candidate id NOT in installed list → one entry, source='cached'."""
+        profile = {
+            "ollama": {"models": []},
+            "llmfit_system": {"system": {"available_ram_gb": 32}},
+        }
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda **_kw: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 95,
+                    "estimated_tps": 12,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "ram_gb": 18,
+                }
+            ],
+        )
+
+        merged = pb.merge_models_for_engine(profile, "ollama")
+        assert len(merged) == 1
+        assert merged[0]["tag"] == "qwen3-coder:30b"
+        assert merged[0]["source"] == "cached"
+        assert merged[0]["candidate"]["score"] == 95
+
+    def test_handles_skipped_llmfit(self):
+        """When llmfit_system carries the skip sentinel, only return installed."""
+        profile = {
+            "ollama": {"models": [{"name": "qwen2.5-coder:7b", "local": True}]},
+            "llmfit_system": pb.LLMFIT_SKIPPED_SENTINEL,
+        }
+        merged = pb.merge_models_for_engine(profile, "ollama")
+        assert len(merged) == 1
+        assert merged[0]["tag"] == "qwen2.5-coder:7b"
+        assert merged[0]["source"] == "installed"
+
+    def test_handles_none_llmfit(self):
+        """llmfit_system=None is the not-installed branch — return only installed."""
+        profile = {
+            "ollama": {"models": [{"name": "qwen2.5-coder:7b", "local": True}]},
+            "llmfit_system": None,
+        }
+        merged = pb.merge_models_for_engine(profile, "ollama")
+        assert len(merged) == 1
+        assert merged[0]["source"] == "installed"
+
+    def test_empty_both(self, monkeypatch):
+        """No installed models AND no cached candidates → empty list."""
+        profile = {"ollama": {"models": []}}
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda **_kw: [])
+        # No llmfit_system at all → falls through to return-only-installed branch.
+        assert pb.merge_models_for_engine(profile, "ollama") == []
+
+
+# ---------------------------------------------------------------------------
+# invalidate_machine_profile_inproc_cache (issue #79).
+# ---------------------------------------------------------------------------
+
+
+class TestInvalidateInprocCache:
+    def test_invalidate_clears_inproc_data(self):
+        # Seed the cache and verify it's populated.
+        pb._set_machine_profile_in_process_cache({"foo": "bar"})
+        assert pb._machine_profile_in_process_cache() == {"foo": "bar"}
+
+        pb.invalidate_machine_profile_inproc_cache()
+        assert pb._machine_profile_in_process_cache() is None
