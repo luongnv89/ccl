@@ -49,7 +49,7 @@ A 9-step wizard that runs once (or with `--resume` after a failure):
 
 | Step | Action                                                                     |
 | ---- | -------------------------------------------------------------------------- |
-| 1    | Discover installed harnesses and engines                                   |
+| 1    | Discover installed harnesses and engines (lazy llmfit — see `--run-llmfit`) |
 | 2    | Report missing tools and installation hints                                |
 | 3    | Ask which harness + engine to use                                          |
 | 4    | Ask which model (or auto-pick via `llmfit`, installed on-demand if needed) |

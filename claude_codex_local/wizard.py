@@ -191,7 +191,10 @@ def info(msg: str) -> None:
 
 
 def step_2_1_discover(
-    state: WizardState, non_interactive: bool = False, force_scan: bool = False
+    state: WizardState,
+    non_interactive: bool = False,
+    force_scan: bool = False,
+    run_llmfit_flag: bool = False,
 ) -> bool:
     header("Step 1 — Discover environment")
     if force_scan:
@@ -201,13 +204,19 @@ def step_2_1_discover(
         # Clear in-process cache
         ck = "_inproc_cache"
         setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
-    profile = pb.machine_profile()
+    # Lazy llmfit: skip the hardware capability scan unless the user asks for
+    # it (--run-llmfit or --force-scan, which already wipes the cache and
+    # implies a fresh full scan). The picker can request the scan on demand
+    # later (Step 4 has a "refresh recommendations" entry).
+    profile = pb.machine_profile(run_llmfit=force_scan or run_llmfit_flag)
     state.profile = profile
 
     tools = profile["tools"]
     presence = profile["presence"]
     disk = profile.get("disk", {})
-    llmfit_sys = profile.get("llmfit_system", {})
+    llmfit_sys = profile.get("llmfit_system")
+    llmfit_skipped = pb._is_llmfit_skipped(llmfit_sys)
+    llmfit_present = bool(tools.get("llmfit", {}).get("present"))
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Component")
@@ -228,16 +237,52 @@ def step_2_1_discover(
     row("vllm (engine)", tools.get("vllm", {}))
     row("9router (engine)", tools.get("9router", {}))
     row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
+
+    # Add a dedicated llmfit row that distinguishes "not installed" from
+    # "installed but scan deferred" from "scan cached".
+    if llmfit_skipped:
+        table.add_row(
+            "llmfit (hardware scan)",
+            "[yellow]not yet scanned[/yellow]",
+            "deferred — pass --run-llmfit to refresh",
+        )
+    elif llmfit_present and llmfit_sys:
+        table.add_row(
+            "llmfit (hardware scan)",
+            "[green]cached[/green]",
+            tools.get("llmfit", {}).get("version", "") or "-",
+        )
+    elif llmfit_present:
+        table.add_row(
+            "llmfit (hardware scan)",
+            "[yellow]installed (no scan)[/yellow]",
+            tools.get("llmfit", {}).get("version", "") or "-",
+        )
+    else:
+        table.add_row(
+            "llmfit (hardware scan)",
+            "[red]not installed[/red]",
+            "optional — used for hardware-aware model recommendations",
+        )
+
     console.print(table)
 
-    # Machine specs table
+    # Machine specs table — three branches: scan cached / scan deferred / no llmfit.
     console.print()
     console.print("[bold]Machine Specifications[/bold]")
     spec_table = Table(show_header=True, header_style="bold blue")
     spec_table.add_column("Specification", style="cyan")
     spec_table.add_column("Value", style="green")
 
-    if llmfit_sys:
+    if llmfit_skipped:
+        spec_table.add_row("CPU", "(scan deferred)")
+        spec_table.add_row("RAM", "(scan deferred)")
+        spec_table.add_row("GPU", "(scan deferred)")
+        spec_table.add_row(
+            "Platform",
+            f"{platform.system()} / {platform.machine()}",
+        )
+    elif llmfit_sys:
         sys_info = llmfit_sys.get("system", llmfit_sys)
         cpu_name = sys_info.get("cpu_name", "Unknown")
         cpu_cores = sys_info.get("cpu_cores", "Unknown")
@@ -261,6 +306,12 @@ def step_2_1_discover(
         spec_table.add_row("GPU", "Not available (llmfit not installed)")
 
     console.print(spec_table)
+
+    if llmfit_skipped:
+        info(
+            "Hardware capability scan skipped (cached). Pass --run-llmfit or use "
+            "--force-scan to refresh."
+        )
 
     free_gib = disk.get("free_gib", "?")
     total_gib = disk.get("total_gib", "?")
@@ -486,6 +537,10 @@ def _ensure_tool(key: str) -> bool:
         if not proceed:
             return False
         if pb.Router9Adapter().detect().get("present"):
+            # Tool was just installed — invalidate the in-process profile
+            # cache so the next discover step sees the freshly-installed
+            # engine without forcing a fresh disk scan.
+            pb.invalidate_machine_profile_inproc_cache()
             ok("9router is reachable.")
             return True
         warn(f"9router still not reachable at {pb.ROUTER9_BASE_URL}.")
@@ -524,7 +579,12 @@ def _ensure_tool(key: str) -> bool:
         ).ask()
         if not proceed:
             return False
-        return pb.command_version(detect_cmd).get("present", False)
+        present = pb.command_version(detect_cmd).get("present", False)
+        if present:
+            # Manual install completed — invalidate the in-process cache so
+            # subsequent discover/picker calls see the new engine.
+            pb.invalidate_machine_profile_inproc_cache()
+        return present
 
     # All other tools have a runnable one-liner.
     hint = INSTALL_HINTS.get(key, {})
@@ -549,6 +609,9 @@ def _ensure_tool(key: str) -> bool:
         )
         return False
 
+    # Successful install + re-detect — invalidate in-process profile cache
+    # so subsequent discover/picker calls see the freshly-installed tool.
+    pb.invalidate_machine_profile_inproc_cache()
     ok(f"{key} installed successfully.")
     return True
 
@@ -902,7 +965,11 @@ def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -
     return True
 
 
-def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bool:
+def step_2_4_pick_model(
+    state: WizardState,
+    non_interactive: bool = False,
+    run_llmfit_flag: bool = False,
+) -> bool:
     header("Step 4 — Pick a model")
     engine = state.primary_engine
 
@@ -950,10 +1017,11 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
         state.model_candidate = candidate.get("candidate") or {}
         ok(f"Non-interactive pick: [bold]{state.engine_model_tag}[/bold]")
     else:
-        # Pre-populate discovered local models for the chosen engine (issue #36)
-        # and per-mode llmfit recommendations (issue #35). Both read from the
-        # cached profile captured in step 1 — we never re-probe here.
-        installed_models = pb.installed_models_for_engine(state.profile, engine)
+        # Pre-populate the merged installed-or-cached model list for the chosen
+        # engine (issue #79). Live entries win over cached duplicates. Per-mode
+        # llmfit recommendations (issue #35) still come from the cached profile
+        # — we never re-probe unless the user explicitly chooses "refresh".
+        merged_models = pb.merge_models_for_engine(state.profile, engine)
         profile_recommendations = _build_profile_recommendations(engine, state.profile)
         _show_profile_recommendations_preview(profile_recommendations)
         while True:
@@ -991,24 +1059,51 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                     f"for your {engine} engine."
                 )
 
-            # --- Installed local models for the chosen engine ---
-            installed_entries: list[questionary.Choice] = []
-            for idx, entry in enumerate(installed_models):
+            # --- Merged model list (installed + cached recommendations) ---
+            merged_entries: list[questionary.Choice] = []
+            for idx, entry in enumerate(merged_models):
                 if running_llamacpp_model and entry.get("running"):
                     # Already surfaced as the top "running llama-server" choice.
                     continue
-                key = f"installed:{idx}"
+                key = f"merged:{idx}"
                 items[key] = entry
                 size_suffix = f"  ({entry.get('size')})" if entry.get("size") else ""
-                installed_entries.append(
+                source = entry.get("source", "installed")
+                if source == "installed":
+                    label = f"Use installed model: {entry['display']}{size_suffix}"
+                else:
+                    label = f"Cached — not yet downloaded: {entry['display']}{size_suffix}"
+                merged_entries.append(questionary.Choice(label, value=key))
+            if merged_entries:
+                # Show installed-first ordering (already done by merge_models_for_engine
+                # via installed_models_for_engine's coder-first sort).
+                choices.append(questionary.Separator("── Installed or recommended ──"))
+                choices.extend(merged_entries)
+            else:
+                # Empty state — no installed models, llmfit either absent or skipped.
+                llmfit_skipped = pb._is_llmfit_skipped(state.profile.get("llmfit_system"))
+                if llmfit_skipped:
+                    info(
+                        "No installed models detected and the llmfit hardware scan "
+                        "is deferred. Pick 'Run llmfit now' below or re-run setup "
+                        "with --run-llmfit to populate recommendations."
+                    )
+                else:
+                    info(
+                        "No installed models detected for this engine. Use 'Help me "
+                        "pick' or type a model name directly."
+                    )
+
+            # --- Refresh recommendations on demand (issue #79) ---
+            llmfit_skipped = pb._is_llmfit_skipped(state.profile.get("llmfit_system"))
+            if llmfit_skipped:
+                choices.append(questionary.Separator("── Refresh ──"))
+                choices.append(
                     questionary.Choice(
-                        f"Use installed {entry['source']} model: {entry['display']}{size_suffix}",
-                        value=key,
+                        "Run llmfit now to refresh recommendations",
+                        value="refresh-llmfit",
                     )
                 )
-            if installed_entries:
-                choices.append(questionary.Separator("── Installed on this machine ──"))
-                choices.extend(installed_entries)
 
             choices.append(questionary.Separator("── Other ──"))
             choices.extend(
@@ -1027,6 +1122,24 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
             if mode is None or mode == "cancel":
                 fail("Setup cancelled by user.")
                 return False
+            if mode == "refresh-llmfit":
+                # User asked for a fresh llmfit scan. Drop the in-process
+                # cache so machine_profile() goes back to the disk cache and
+                # detects the skip-sentinel, then re-runs llmfit.
+                pb.invalidate_machine_profile_inproc_cache()
+                refreshed = pb.machine_profile(run_llmfit=True)
+                state.profile = refreshed
+                merged_models = pb.merge_models_for_engine(refreshed, engine)
+                profile_recommendations = _build_profile_recommendations(engine, refreshed)
+                if pb._is_llmfit_skipped(refreshed.get("llmfit_system")):
+                    warn(
+                        "llmfit could not be run (binary missing). "
+                        "Install llmfit or pick a model directly."
+                    )
+                else:
+                    ok("Hardware scan refreshed.")
+                    _show_profile_recommendations_preview(profile_recommendations)
+                continue
             if mode == "running" and running_llamacpp_model:
                 state.model_name = running_llamacpp_model
                 state.engine_model_tag = running_llamacpp_model
@@ -1050,13 +1163,25 @@ def step_2_4_pick_model(state: WizardState, non_interactive: bool = False) -> bo
                 if _handle_model_presence(state):
                     break
                 continue
-            if mode.startswith("installed:"):
+            if mode.startswith("merged:"):
                 entry = items[mode]
                 state.model_name = entry["display"]
                 state.engine_model_tag = entry["tag"]
-                state.model_source = "installed"
-                state.model_candidate = {}
-                ok(f"Using installed model: [bold]{state.engine_model_tag}[/bold]")
+                # Map to the existing model_source vocabulary that downstream
+                # steps (5/6/7) and run_doctor already understand:
+                #   installed model → "installed"
+                #   cached llmfit recommendation needing download → "find-model"
+                # (semantically identical to the "Help me pick" llmfit path —
+                # we still went through llmfit ranking, the user just picked
+                # from the merged inline list).
+                if entry.get("source") == "cached":
+                    state.model_source = "find-model"
+                    state.model_candidate = entry.get("candidate") or {}
+                    ok(f"Picked cached recommendation: [bold]{state.engine_model_tag}[/bold]")
+                else:
+                    state.model_source = "installed"
+                    state.model_candidate = {}
+                    ok(f"Using installed model: [bold]{state.engine_model_tag}[/bold]")
                 if _handle_model_presence(state):
                     break
                 continue
@@ -2836,7 +2961,7 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
                 "system prompt. Stop it, set a larger context, and re-run:"
             )
             console.print(
-                "  [bold]pkill -f llama-server && " "LLAMACPP_CTX_SIZE=131072 ccl --resume[/bold]"
+                "  [bold]pkill -f llama-server && LLAMACPP_CTX_SIZE=131072 ccl --resume[/bold]"
             )
         return False
     ok("End-to-end verify succeeded (got READY).")
@@ -2988,6 +3113,7 @@ def run_wizard(
     force_harness: str | None = None,
     force_engine: str | None = None,
     force_scan: bool = False,
+    run_llmfit_flag: bool = False,
 ) -> int:
     state = WizardState.load() if resume else WizardState()
     if not resume and not non_interactive and sys.stdout.isatty():
@@ -3006,7 +3132,16 @@ def run_wizard(
         if step_id == "2" and state.profile.get("presence", {}).get("has_minimum"):
             continue
         if step_id == "1":
-            ok_step = fn(state, non_interactive, force_scan=force_scan)  # type: ignore[call-arg]
+            ok_step = fn(  # type: ignore[call-arg]
+                state,
+                non_interactive,
+                force_scan=force_scan,
+                run_llmfit_flag=run_llmfit_flag,
+            )
+        elif step_id == "4":
+            ok_step = fn(  # type: ignore[call-arg]
+                state, non_interactive, run_llmfit_flag=run_llmfit_flag
+            )
         else:
             ok_step = fn(state, non_interactive)
         if not ok_step:
@@ -3489,6 +3624,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force a fresh machine spec scan (ignore cached data)",
     )
+    # Lazy-llmfit flag (issue #79). The hardware capability scan is deferred by
+    # default; --run-llmfit forces a refresh. Use --force-scan to wipe the
+    # umbrella machine-profile cache (which always includes llmfit data).
+    setup.add_argument(
+        "--run-llmfit",
+        action="store_true",
+        help="Run the llmfit hardware capability scan (refresh cached data)",
+    )
 
     sub.add_parser(
         "find-model",
@@ -3548,6 +3691,7 @@ def main() -> int:
             force_harness=getattr(args, "harness", None),
             force_engine=getattr(args, "engine", None),
             force_scan=getattr(args, "force_scan", False),
+            run_llmfit_flag=getattr(args, "run_llmfit", False),
         )
     if cmd == "find-model":
         return run_find_model_standalone()

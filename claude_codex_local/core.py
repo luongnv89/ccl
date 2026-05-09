@@ -957,7 +957,6 @@ def vllm_info() -> dict[str, Any]:
     }
 
     if not cli_info.get("present", False):
-
         info["error"] = "vllm CLI not installed"
         return info
 
@@ -975,7 +974,6 @@ def vllm_info() -> dict[str, Any]:
         info["models"] = adapter.list_models()
     else:
         info["error"] = f"vLLM server not reachable at {base_url}"
-
 
     return info
 
@@ -2430,20 +2428,72 @@ def _set_machine_profile_in_process_cache(data: dict) -> None:
     setattr(_machine_profile_in_process_cache, cache_key, {"timestamp": time.time(), "data": data})
 
 
-def machine_profile() -> dict[str, Any]:
+def invalidate_machine_profile_inproc_cache() -> None:
+    """
+    Reset the in-process machine_profile cache so the next call re-checks the
+    disk cache (or re-scans). Disk cache is left untouched — callers can still
+    skip a fresh llmfit scan via `machine_profile(run_llmfit=False)`.
+
+    Use this after an install + successful re-detect so the next discover step
+    sees the freshly installed tool without the user re-running with --force-scan.
+    """
+    cache_key = "_inproc_cache"
+    setattr(_machine_profile_in_process_cache, cache_key, {"timestamp": 0, "data": None})
+
+
+# Sentinel used in `profile["llmfit_system"]` when the wizard skipped the
+# hardware capability scan on a cache-miss. Distinguishable from `None`
+# (llmfit not installed at all) so the UI can render a 3rd state.
+LLMFIT_SKIPPED_SENTINEL: dict[str, Any] = {"_skipped": True}
+
+
+def _is_llmfit_skipped(value: Any) -> bool:
+    """True when llmfit_system contains the deferred-scan sentinel."""
+    return isinstance(value, dict) and value.get("_skipped") is True
+
+
+def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
+    """
+    Build (or fetch from cache) the machine profile.
+
+    `run_llmfit` (default True for backward compat) lets the caller skip the
+    hardware capability scan on a cache miss. When skipped, the persisted
+    profile carries `LLMFIT_SKIPPED_SENTINEL` for `llmfit_system`. A later
+    call with `run_llmfit=True` AND llmfit available will re-run the scan and
+    refresh the cache in place.
+    """
     # Check in-process cache first
     cached = _machine_profile_in_process_cache()
     if cached is not None:
-        return cached
+        # If caller insists on llmfit and the in-proc cache lacks it, fall
+        # through to the disk-cache / scan path so we can refresh.
+        if run_llmfit and _is_llmfit_skipped(cached.get("llmfit_system")):
+            pass
+        else:
+            return cached
 
     # Check file-based cache
     file_cache = _load_machine_profile_cache()
     if file_cache is not None:
+        cached_llmfit = file_cache.get("llmfit_system")
+        # When the caller explicitly asked for llmfit and the cache holds the
+        # skip sentinel, run llmfit now and merge it in (refreshing both
+        # caches). Otherwise, return as-is — including a populated llmfit
+        # block if previously scanned.
+        if run_llmfit and _is_llmfit_skipped(cached_llmfit):
+            llmfit_sys = llmfit_system()
+            if llmfit_sys:
+                file_cache["llmfit_system"] = llmfit_sys
+                fingerprint = _compute_machine_fingerprint(file_cache)
+                file_cache["_fingerprint"] = fingerprint
+                _save_machine_profile_cache(file_cache, fingerprint)
+            # If llmfit binary is not present (llmfit_sys is None), the
+            # sentinel stays in place — callers can decide what to do.
         _set_machine_profile_in_process_cache(file_cache)
         return file_cache
 
     # Full scan — build profile
-    llmfit_sys = llmfit_system()
+    llmfit_sys = llmfit_system() if run_llmfit else None
     lms = lms_info()
     llamacpp = llamacpp_detect()
     hf_cli = huggingface_cli_detect()
@@ -2530,6 +2580,12 @@ def machine_profile() -> dict[str, Any]:
     }
     if llmfit_sys:
         profile["llmfit_system"] = llmfit_sys
+    elif not run_llmfit:
+        # Caller explicitly deferred the hardware capability scan. Persist a
+        # sentinel so a later call with run_llmfit=True can detect this state
+        # and refresh the cache in place. Without this, the second call would
+        # see a normal-looking cache hit and never re-run llmfit.
+        profile["llmfit_system"] = LLMFIT_SKIPPED_SENTINEL
 
     # Persist to file cache for future runs
     fingerprint = _compute_machine_fingerprint(profile)
@@ -2550,9 +2606,11 @@ RECOMMENDATION_MODES: tuple[str, ...] = ("balanced", "fast", "quality")
 
 def _available_ram_gb(profile: dict[str, Any]) -> float | None:
     """Return `available_ram_gb` from the llmfit system block, if present."""
-    sys_block = (
-        (profile.get("llmfit_system") or {}).get("system") or profile.get("llmfit_system") or {}
-    )
+    llmfit_block = profile.get("llmfit_system")
+    # Treat the deferred-scan sentinel as "no llmfit data available".
+    if _is_llmfit_skipped(llmfit_block):
+        return None
+    sys_block = (llmfit_block or {}).get("system") or llmfit_block or {}
     val = sys_block.get("available_ram_gb")
     try:
         return float(val) if val is not None else None
@@ -2942,6 +3000,62 @@ def installed_models_for_engine(profile: dict[str, Any], engine: str) -> list[di
     # Stable sort: coder-likely models first, then alphabetic by display.
     entries.sort(key=lambda e: (0 if _is_coder(e["display"]) else 1, e["display"]))
     return entries
+
+
+def merge_models_for_engine(profile: dict[str, Any], engine: str) -> list[dict[str, Any]]:
+    """
+    Merge installed local models with cached llmfit recommendations into one
+    deduplicated list — `source="installed"` for live entries, `source="cached"`
+    for llmfit-recommended models that are NOT yet on disk.
+
+    Live wins: when the same identifier appears in both lists for the same
+    engine, the installed entry is kept and the cached duplicate is dropped.
+    Returns the existing `installed_models_for_engine` shape (`tag`, `display`,
+    `source`, plus engine-specific metadata) so the picker can render entries
+    without conditional branching.
+
+    Empty input → empty output. Sentinel/missing llmfit_system → only installed
+    list is returned.
+    """
+    installed = installed_models_for_engine(profile, engine)
+    # Mark installed entries with source="installed" — the existing source
+    # value carries engine-name semantics; the picker reads it for labels but
+    # we want a clear discriminator here.
+    merged: list[dict[str, Any]] = []
+    seen_tags: set[str] = set()
+    for entry in installed:
+        tag = entry.get("tag")
+        if not tag:
+            continue
+        seen_tags.add(tag)
+        merged.append({**entry, "source": "installed", "engine_source": entry.get("source")})
+
+    llmfit_block = profile.get("llmfit_system")
+    if not llmfit_block or _is_llmfit_skipped(llmfit_block):
+        return merged
+
+    # Pull cached llmfit candidates for this engine from the persisted profile.
+    candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
+    for candidate in candidates:
+        tag = _candidate_tag_for_engine(candidate, engine)
+        if not tag or tag in seen_tags:
+            continue
+        seen_tags.add(tag)
+        score = candidate.get("score")
+        size_hint = candidate.get("ram_gb") or candidate.get("size_gb")
+        size_label = f"{size_hint} GB" if size_hint else None
+        merged.append(
+            {
+                "tag": tag,
+                "display": candidate.get("name") or tag,
+                "source": "cached",
+                "engine_source": engine,
+                "size": size_label,
+                "score": score,
+                "candidate": candidate,
+            }
+        )
+    return merged
 
 
 def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[str, Any]:
