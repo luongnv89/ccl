@@ -112,8 +112,8 @@ cx        # Codex CLI → local model
 
 ```mermaid
 graph TD
-    A[1. Discover environment<br>lazy hardware scan; pass --run-llmfit to refresh] --> B[2. Install missing components]
-    B --> C[3. Pick harness + engine]
+    A[1. Discover environment<br>cached snapshot; lazy hardware scan] --> B[2. Defer install prompts]
+    B --> C[3. Pick harness + engine<br>selected choices are checked live]
     C --> D[4. Pick model]
     D --> E[5. Smoke test engine]
     E --> F[6. Wire harness]

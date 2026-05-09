@@ -201,10 +201,24 @@ def _stub_subprocess_success(*args, **kwargs):
     )
 
 
+def _stub_targeted_setup_checks(pb, monkeypatch):
+    def fake_command_version(name, *args, **kwargs):
+        present = name in {"claude", "ollama", "llmfit"}
+        return {"present": present, "version": f"{name} 1.0" if present else ""}
+
+    monkeypatch.setattr(pb, "command_version", fake_command_version)
+    monkeypatch.setattr(
+        pb,
+        "parse_ollama_list",
+        lambda: [{"name": "qwen3-coder:30b", "local": True, "size": "19 GB"}],
+    )
+
+
 class TestWizardFullFlow:
     def test_non_interactive_run_completes_all_steps(self, isolated_state, monkeypatch):
         pb, wiz, state_dir = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
+        _stub_targeted_setup_checks(pb, monkeypatch)
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
@@ -254,6 +268,7 @@ class TestWizardFullFlow:
     def test_non_interactive_fails_cleanly_on_smoke_test_failure(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
+        _stub_targeted_setup_checks(pb, monkeypatch)
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": False, "error": "simulated failure"}
         )
@@ -267,6 +282,7 @@ class TestWizardFullFlow:
     def test_doctor_reports_clean_state_after_setup(self, isolated_state, monkeypatch, capsys):
         pb, wiz, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
+        _stub_targeted_setup_checks(pb, monkeypatch)
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
@@ -279,6 +295,7 @@ class TestWizardFullFlow:
     def test_doctor_detects_missing_helper_script(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
         monkeypatch.setattr(pb, "machine_profile", lambda **_kw: _installed_profile(pb))
+        _stub_targeted_setup_checks(pb, monkeypatch)
         monkeypatch.setattr(
             pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
