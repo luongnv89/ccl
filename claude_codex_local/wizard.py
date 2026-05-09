@@ -694,6 +694,20 @@ def _show_selected_harness_status(state: WizardState) -> None:
         info("No existing local helper configuration recorded; setup will wire it later.")
 
 
+def _is_model_compatible_with_engine(state: WizardState, engine: str) -> bool:
+    """Check if the selected model is compatible with the given engine."""
+    if not state.engine_model_tag or not state.model_source:
+        return False
+
+    if state.model_source == "9router-direct":
+        return engine == "9router"
+    if state.model_source == "vllm-loaded":
+        return engine == "vllm"
+    if state.model_source == "running-server":
+        return engine == "llamacpp"
+    return engine in ("ollama", "lmstudio", "llamacpp")
+
+
 def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2 — Select harness")
     presence = _sync_presence_from_tools(state.profile)
@@ -857,6 +871,14 @@ def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> b
         info(
             f"Fallbacks: harnesses={state.secondary_harnesses or '-'} engines={state.secondary_engines or '-'}"
         )
+
+    if not _is_model_compatible_with_engine(state, state.primary_engine):
+        info("Engine changed. Model selection will be required in next step.")
+        state.model_name = ""
+        state.model_source = ""
+        state.engine_model_tag = ""
+        state.model_candidate = {}
+
     state.mark("3")
     return True
 
@@ -2412,6 +2434,14 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
     harness = state.primary_harness
     engine = state.primary_engine
     tag = state.engine_model_tag
+
+    if not _is_model_compatible_with_engine(state, engine):
+        warn(f"Model '{tag}' was selected for a different engine. Please select a new model.")
+        if non_interactive:
+            fail("Model/engine mismatch in non-interactive mode.")
+            return False
+        ok("Returning to model selection to pick a compatible model.")
+        return False
 
     pb.ensure_state_dirs()
 
