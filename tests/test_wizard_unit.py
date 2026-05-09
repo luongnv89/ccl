@@ -956,7 +956,8 @@ class TestForcedPreferenceSelection:
 
         monkeypatch.setattr(pb, "Router9Adapter", lambda: _Router9())
 
-        assert wiz.step_2_3_pick_preferences(state, non_interactive=True) is True
+        assert wiz.step_2_select_harness(state, non_interactive=True) is True
+        assert wiz.step_3_select_engine(state, non_interactive=True) is True
 
         assert state.primary_harness == "claude"
         assert state.primary_engine == "9router"
@@ -995,7 +996,8 @@ class TestForcedPreferenceSelection:
 
         monkeypatch.setattr(pb, "Router9Adapter", lambda: _Router9())
 
-        assert wiz.step_2_3_pick_preferences(state, non_interactive=False) is True
+        assert wiz.step_2_select_harness(state, non_interactive=False) is True
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
 
         assert prompts == ["Which harness do you want as primary?"]
         assert state.primary_engine == "9router"
@@ -1078,7 +1080,7 @@ class TestTargetedPreferenceRefresh:
 
         wiz.console.width = 200
         with wiz.console.capture() as captured:
-            assert wiz.step_2_3_pick_preferences(state, non_interactive=True) is True
+            assert wiz.step_2_select_harness(state, non_interactive=True) is True
 
         output = captured.get()
         assert "claude CLI detected: claude 1.0" in output
