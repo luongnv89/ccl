@@ -2405,7 +2405,7 @@ def _machine_profile_in_process_cache() -> dict | None:
 def _set_machine_profile_in_process_cache(data: dict) -> None:
     cache_key = "_inproc_cache"
     setattr(
-        _set_machine_profile_in_process_cache, cache_key, {"timestamp": time.time(), "data": data}
+        _machine_profile_in_process_cache, cache_key, {"timestamp": time.time(), "data": data}
     )
 
 
@@ -2512,6 +2512,7 @@ def machine_profile() -> dict[str, Any]:
 
     # Persist to file cache for future runs
     fingerprint = _compute_machine_fingerprint(profile)
+    profile["_fingerprint"] = fingerprint
     _save_machine_profile_cache(profile, fingerprint)
     _set_machine_profile_in_process_cache(profile)
 
