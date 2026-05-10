@@ -5,7 +5,7 @@ Interactive first-run wizard for claude-codex-local.
 Implements the 8-step flow from PRD v1.2 §4.1:
 
   1 Discover environment (harnesses, engines, llmfit, disk)
-  2 Install missing components (guided sub-process)
+  2 Defer install prompts until selected component checks
   3 Pick preferences (primary harness + engine)
   4 Pick a model (user-first, optional find-model helper)
   5 Smoke test engine + model
@@ -197,78 +197,20 @@ def step_2_1_discover(
     run_llmfit_flag: bool = False,
 ) -> bool:
     header("Step 1 — Discover environment")
+
     if force_scan:
-        # Clear file-based cache
-        with contextlib.suppress(OSError):
-            pb.MACHINE_PROFILE_CACHE_FILE.unlink(missing_ok=True)
-        # Clear in-process cache
-        ck = "_inproc_cache"
-        setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
-    # Lazy llmfit: skip the hardware capability scan unless the user asks for
-    # it (--run-llmfit or --force-scan, which already wipes the cache and
-    # implies a fresh full scan). The picker can request the scan on demand
-    # later (Step 4 has a "refresh recommendations" entry).
-    profile = pb.machine_profile(run_llmfit=force_scan or run_llmfit_flag)
+        pb.invalidate_machine_profile_inproc_cache()
+
+    profile = pb.machine_profile(run_llmfit=run_llmfit_flag)
     state.profile = profile
 
-    tools = profile["tools"]
-    presence = profile["presence"]
-    disk = profile.get("disk", {})
+    if run_llmfit_flag:
+        _refresh_llmfit_for_profile(profile)
+
     llmfit_sys = profile.get("llmfit_system")
     llmfit_skipped = pb._is_llmfit_skipped(llmfit_sys)
-    llmfit_present = bool(tools.get("llmfit", {}).get("present"))
+    disk = profile.get("disk", {})
 
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Component")
-    table.add_column("Status")
-    table.add_column("Detail", overflow="fold")
-
-    def row(name: str, info: dict[str, Any]) -> None:
-        if info.get("present"):
-            table.add_row(name, "[green]found[/green]", info.get("version", "") or "-")
-        else:
-            table.add_row(name, "[red]missing[/red]", info.get("error", "") or "-")
-
-    row("claude (harness)", tools["claude"])
-    row("codex (harness)", tools["codex"])
-    row("ollama (engine)", tools["ollama"])
-    row("lmstudio (engine)", tools["lmstudio"])
-    row("llama.cpp (engine)", tools["llamacpp"])
-    row("vllm (engine)", tools.get("vllm", {}))
-    row("9router (engine)", tools.get("9router", {}))
-    row("hf / huggingface-cli (model downloader)", tools.get("huggingface_cli", {}))
-
-    # Add a dedicated llmfit row that distinguishes "not installed" from
-    # "installed but scan deferred" from "scan cached".
-    if llmfit_skipped:
-        table.add_row(
-            "llmfit (hardware scan)",
-            "[yellow]not yet scanned[/yellow]",
-            "deferred — pass --run-llmfit to refresh",
-        )
-    elif llmfit_present and llmfit_sys:
-        table.add_row(
-            "llmfit (hardware scan)",
-            "[green]cached[/green]",
-            tools.get("llmfit", {}).get("version", "") or "-",
-        )
-    elif llmfit_present:
-        table.add_row(
-            "llmfit (hardware scan)",
-            "[yellow]installed (no scan)[/yellow]",
-            tools.get("llmfit", {}).get("version", "") or "-",
-        )
-    else:
-        table.add_row(
-            "llmfit (hardware scan)",
-            "[red]not installed[/red]",
-            "optional — used for hardware-aware model recommendations",
-        )
-
-    console.print(table)
-
-    # Machine specs table — three branches: scan cached / scan deferred / no llmfit.
-    console.print()
     console.print("[bold]Machine Specifications[/bold]")
     spec_table = Table(show_header=True, header_style="bold blue")
     spec_table.add_column("Specification", style="cyan")
@@ -307,32 +249,21 @@ def step_2_1_discover(
 
     console.print(spec_table)
 
-    if llmfit_skipped:
-        info(
-            "Hardware capability scan skipped (cached). Pass --run-llmfit or use "
-            "--force-scan to refresh."
-        )
-
     free_gib = disk.get("free_gib", "?")
     total_gib = disk.get("total_gib", "?")
     info(f"Free disk on state dir: {free_gib} GiB of {total_gib} GiB")
 
-    if presence["has_minimum"]:
-        ok(f"Found harnesses: {', '.join(presence['harnesses'])}")
-        ok(f"Found engines: {', '.join(presence['engines'])}")
-        state.mark("1")
-        return True
+    info(
+        "Harness and engine status will be checked when you select them in Step 3. "
+        "Use --run-llmfit to refresh hardware recommendations."
+    )
 
-    # Missing pieces — fall through to step 2
-    if not presence["harnesses"]:
-        warn("No harness found (need claude or codex)")
-    if not presence["engines"]:
-        warn("No engine found (need ollama, lmstudio, llama.cpp, vllm, or 9router)")
-    return False
+    state.mark("1")
+    return True
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — Install missing components
+# Step 2 — Defer install prompts
 # ---------------------------------------------------------------------------
 
 INSTALL_HINTS: dict[str, dict[str, str]] = {
@@ -389,54 +320,10 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
 
 
 def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 2 — Install missing components")
-    presence = state.profile.get("presence", {})
-
-    missing: list[str] = []
-    if not presence.get("harnesses"):
-        missing.append("HARNESS (claude or codex)")
-    if not presence.get("engines"):
-        missing.append("ENGINE (ollama, lmstudio, llamacpp, vllm, or 9router)")
-
-    if not missing:
-        info("Nothing missing.")
-        state.mark("2")
-        return True
-
-    console.print(f"Missing categories: [red]{', '.join(missing)}[/red]")
-
-    # Offer install hints for each missing category
-    if not presence.get("harnesses"):
-        _show_install_hint("claude")
-        _show_install_hint("codex")
-    if not presence.get("engines"):
-        _show_install_hint("ollama")
-        _show_install_hint("lmstudio")
-        _show_install_hint("llamacpp")
-        _show_install_hint("vllm")
-        _show_install_hint("9router")
-
-    if non_interactive:
-        fail("Cannot install missing components in --non-interactive mode.")
-        return False
-
-    console.print()
-    proceed = questionary.confirm(
-        "After installing the missing pieces in another terminal, ready to re-probe?",
-        default=True,
-    ).ask()
-    if not proceed:
-        fail("Setup cancelled by user.")
-        return False
-
-    # Re-probe
-    state.profile = pb.machine_profile()
-    if state.profile["presence"]["has_minimum"]:
-        ok("Minimum requirements now satisfied.")
-        state.mark("2")
-        return True
-    fail("Still missing required components. Install them and re-run the wizard.")
-    return False
+    header("Step 2 — Defer install prompts")
+    info("Install prompts are tied to the harness and engine you choose in Step 3.")
+    state.mark("2")
+    return True
 
 
 def _show_install_hint(key: str) -> None:
@@ -664,18 +551,175 @@ _ALL_HARNESSES = ["claude", "codex"]
 _ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "vllm", "9router"]
 
 
-def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 3 — Pick preferences")
-    presence = state.profile["presence"]
-    harnesses = presence["harnesses"]
-    engines = presence["engines"]
+def _persist_targeted_profile_update(profile: dict[str, Any]) -> None:
+    """Best-effort persistence after a selected-component live probe."""
+    try:
+        fingerprint = pb._compute_machine_fingerprint(profile)
+        profile["_fingerprint"] = fingerprint
+        pb._save_machine_profile_cache(profile, fingerprint)
+        pb._set_machine_profile_in_process_cache(profile)
+    except Exception:
+        # Cache writes are an optimization. A failed targeted refresh must not
+        # block setup; the live probe result remains in WizardState.
+        pass
 
-    # Harness pick
+
+def _sync_presence_from_tools(profile: dict[str, Any]) -> dict[str, Any]:
+    tools = profile.setdefault("tools", {})
+    presence = profile.setdefault("presence", {})
+    # Some tests and older wizard-state snapshots carry only the compact
+    # presence block. Seed equivalent cached tool entries so a targeted refresh
+    # only changes the selected component instead of erasing the rest.
+    for harness in presence.get("harnesses", []) or []:
+        tools.setdefault(harness, {"present": True, "version": ""})
+    for engine in presence.get("engines", []) or []:
+        tools.setdefault(engine, {"present": True, "version": ""})
+    if presence.get("llmfit"):
+        tools.setdefault("llmfit", {"present": True, "version": ""})
+    harnesses = [h for h in _ALL_HARNESSES if tools.get(h, {}).get("present")]
+    engines = [e for e in _ALL_ENGINES if tools.get(e, {}).get("present")]
+    presence.update(
+        {
+            "harnesses": harnesses,
+            "engines": engines,
+            "llmfit": bool(tools.get("llmfit", {}).get("present")),
+            "has_minimum": bool(harnesses) and bool(engines),
+        }
+    )
+    return presence
+
+
+def _refresh_llmfit_for_profile(profile: dict[str, Any]) -> bool:
+    """
+    Refresh only the llmfit system block.
+
+    This is intentionally narrower than rebuilding machine_profile(): --run-llmfit
+    means "refresh recommendations", not "probe every supported backend".
+    """
+    profile.setdefault("tools", {})["llmfit"] = pb.command_version("llmfit")
+    llmfit_sys = pb.llmfit_system()
+    if llmfit_sys:
+        profile["llmfit_system"] = llmfit_sys
+    else:
+        profile.pop("llmfit_system", None)
+    _sync_presence_from_tools(profile)
+    _persist_targeted_profile_update(profile)
+    return bool(llmfit_sys)
+
+
+def _refresh_selected_harness(profile: dict[str, Any], harness: str) -> bool:
+    """Live-check only the selected harness and update the cached snapshot."""
+    if harness not in _ALL_HARNESSES:
+        return False
+    profile.setdefault("tools", {})[harness] = pb.command_version(harness)
+    _sync_presence_from_tools(profile)
+    _persist_targeted_profile_update(profile)
+    return bool(profile["tools"][harness].get("present"))
+
+
+def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
+    """Live-check only the selected engine and update the cached snapshot."""
+    tools = profile.setdefault("tools", {})
+    if engine == "ollama":
+        info = pb.command_version("ollama")
+        tools["ollama"] = info
+        profile["ollama"] = {"models": pb.parse_ollama_list() if info.get("present") else []}
+    elif engine == "lmstudio":
+        lms = pb.lms_info()
+        profile["lmstudio"] = lms
+        tools["lmstudio"] = {
+            "present": bool(lms.get("present")),
+            "version": pb.command_version("lms")["version"] if lms.get("present") else "",
+            "error": lms.get("error", ""),
+        }
+    elif engine == "llamacpp":
+        info = pb.llamacpp_detect()
+        tools["llamacpp"] = info
+        profile["llamacpp"] = info
+    elif engine == "vllm":
+        vllm = pb.vllm_info()
+        profile["vllm"] = vllm
+        tools["vllm"] = {
+            "present": bool(vllm.get("present")),
+            "version": vllm.get("version", ""),
+            "base_url": vllm.get("base_url", pb.VLLM_BASE_URL),
+        }
+    elif engine == "9router":
+        adapter = pb.Router9Adapter()
+        info = adapter.detect()
+        health = (
+            adapter.healthcheck()
+            if info.get("present")
+            else {"ok": False, "detail": "9router endpoint not reachable"}
+        )
+        tools["9router"] = {
+            "present": bool(info.get("present")),
+            "version": info.get("version", ""),
+            "base_url": pb.ROUTER9_BASE_URL,
+        }
+        profile["9router"] = {
+            "present": bool(info.get("present")),
+            "base_url": pb.ROUTER9_BASE_URL,
+            "healthcheck": health,
+        }
+    else:
+        return False
+
+    _sync_presence_from_tools(profile)
+    _persist_targeted_profile_update(profile)
+    return engine in profile["presence"].get("engines", [])
+
+
+def _show_selected_harness_status(state: WizardState) -> None:
+    """Show the live CLI status and any existing local helper wiring."""
+    harness = state.primary_harness
+    if not harness:
+        return
+
+    tool_info = state.profile.get("tools", {}).get(harness, {})
+    if tool_info.get("present"):
+        ok(f"{harness} CLI detected: {tool_info.get('version') or 'found'}")
+    else:
+        warn(f"{harness} CLI is not currently detected.")
+
+    if state.helper_script_path:
+        script_path = Path(state.helper_script_path)
+        if script_path.exists():
+            ok(f"Existing local helper present: {script_path}")
+        else:
+            warn(f"Previous local helper missing: {script_path}; setup will recreate it later.")
+    elif state.wire_result:
+        info("Existing wire configuration found; helper aliases are not installed yet.")
+    else:
+        info("No existing local helper configuration recorded; setup will wire it later.")
+
+
+def _is_model_compatible_with_engine(state: WizardState, engine: str) -> bool:
+    """Check if the selected model is compatible with the given engine."""
+    if not state.engine_model_tag or not state.model_source:
+        return False
+
+    if state.model_source == "9router-direct":
+        return engine == "9router"
+    if state.model_source == "vllm-loaded":
+        return engine == "vllm"
+    if state.model_source == "running-server":
+        return engine == "llamacpp"
+    return engine in ("ollama", "lmstudio", "llamacpp")
+
+
+def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> bool:
+    header("Step 2 — Select harness")
+    presence = _sync_presence_from_tools(state.profile)
+    harnesses = presence["harnesses"]
+
     if state.primary_harness:
         choice = state.primary_harness
         if choice not in _ALL_HARNESSES:
             fail(f"Unknown harness: {choice}")
             return False
+        _refresh_selected_harness(state.profile, choice)
+        harnesses = state.profile["presence"]["harnesses"]
         if choice not in harnesses:
             if non_interactive:
                 fail(f"Forced harness {choice!r} is not installed.")
@@ -683,7 +727,7 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             if not _ensure_tool(choice):
                 fail(f"Forced harness {choice!r} is still not available.")
                 return False
-            state.profile = pb.machine_profile()
+            _refresh_selected_harness(state.profile, choice)
             harnesses = state.profile["presence"]["harnesses"]
         state.primary_harness = choice
         state.secondary_harnesses = [h for h in harnesses if h != choice]
@@ -692,11 +736,19 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
         if not harnesses:
             fail("No harness installed. Cannot continue in non-interactive mode.")
             return False
-        state.primary_harness = harnesses[0]
-        state.secondary_harnesses = harnesses[1:]
+        live_harness = None
+        for candidate in harnesses:
+            if _refresh_selected_harness(state.profile, candidate):
+                live_harness = candidate
+                break
+        if live_harness is None:
+            fail("Cached harness data is stale; no configured harness is currently installed.")
+            return False
+        harnesses = state.profile["presence"]["harnesses"]
+        state.primary_harness = live_harness
+        state.secondary_harnesses = [h for h in harnesses if h != live_harness]
         ok(f"Non-interactive: picking [bold]{state.primary_harness}[/bold] as primary harness")
     else:
-        # Show all known harnesses; mark uninstalled ones.
         harness_choices = [
             questionary.Choice(
                 h if h in harnesses else f"{h}  [not installed]",
@@ -712,25 +764,42 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             ).ask()
             if choice is None:
                 return False
+            _refresh_selected_harness(state.profile, choice)
+            harnesses = state.profile["presence"]["harnesses"]
             if choice not in harnesses:
                 if not _ensure_tool(choice):
                     warn(
                         f"{choice} is still not available. Please pick another or install it first."
                     )
                     continue
-                # Refresh presence after install.
-                state.profile = pb.machine_profile()
+                _refresh_selected_harness(state.profile, choice)
                 harnesses = state.profile["presence"]["harnesses"]
+                if choice not in harnesses:
+                    warn(
+                        f"{choice} is still not available. Please pick another or install it first."
+                    )
+                    continue
             state.primary_harness = choice
             state.secondary_harnesses = [h for h in harnesses if h != choice]
             break
 
-    # Engine pick
+    _show_selected_harness_status(state)
+    state.mark("2")
+    return True
+
+
+def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> bool:
+    header("Step 3 — Select engine")
+    presence = _sync_presence_from_tools(state.profile)
+    engines = presence["engines"]
+
     if state.primary_engine:
         choice = state.primary_engine
         if choice not in _ALL_ENGINES:
             fail(f"Unknown engine: {choice}")
             return False
+        _refresh_selected_engine(state.profile, choice)
+        engines = state.profile["presence"]["engines"]
         if choice not in engines:
             if non_interactive:
                 fail(f"Forced engine {choice!r} is not installed or reachable.")
@@ -738,7 +807,7 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             if not _ensure_tool(choice):
                 fail(f"Forced engine {choice!r} is still not available.")
                 return False
-            state.profile = pb.machine_profile()
+            _refresh_selected_engine(state.profile, choice)
             engines = state.profile["presence"]["engines"]
         state.primary_engine = choice
         state.secondary_engines = [e for e in engines if e != choice]
@@ -748,11 +817,20 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             fail("No engine installed. Cannot continue in non-interactive mode.")
             return False
         default_engine = _default_engine(engines, state.profile)
-        state.primary_engine = default_engine
-        state.secondary_engines = [e for e in engines if e != default_engine]
+        engine_candidates = [default_engine, *(e for e in engines if e != default_engine)]
+        live_engine = None
+        for candidate in engine_candidates:
+            if _refresh_selected_engine(state.profile, candidate):
+                live_engine = candidate
+                break
+        if live_engine is None:
+            fail("Cached engine data is stale; no configured engine is currently installed.")
+            return False
+        engines = state.profile["presence"]["engines"]
+        state.primary_engine = live_engine
+        state.secondary_engines = [e for e in engines if e != live_engine]
         ok(f"Non-interactive: picking [bold]{state.primary_engine}[/bold] as primary engine")
     else:
-        # Show all known engines; mark uninstalled ones.
         engine_choices = [
             questionary.Choice(
                 e if e in engines else f"{e}  [not installed]",
@@ -769,24 +847,38 @@ def step_2_3_pick_preferences(state: WizardState, non_interactive: bool = False)
             ).ask()
             if choice is None:
                 return False
+            _refresh_selected_engine(state.profile, choice)
+            engines = state.profile["presence"]["engines"]
             if choice not in engines:
                 if not _ensure_tool(choice):
                     warn(
                         f"{choice} is still not available. Please pick another or install it first."
                     )
                     continue
-                # Refresh presence after install.
-                state.profile = pb.machine_profile()
+                _refresh_selected_engine(state.profile, choice)
                 engines = state.profile["presence"]["engines"]
+                if choice not in engines:
+                    warn(
+                        f"{choice} is still not available. Please pick another or install it first."
+                    )
+                    continue
             state.primary_engine = choice
             state.secondary_engines = [e for e in engines if e != choice]
             break
 
-    ok(f"Primary: [bold]{state.primary_harness}[/bold] + [bold]{state.primary_engine}[/bold]")
+    ok(f"Selected: [bold]{state.primary_harness}[/bold] + [bold]{state.primary_engine}[/bold]")
     if state.secondary_harnesses or state.secondary_engines:
         info(
             f"Fallbacks: harnesses={state.secondary_harnesses or '-'} engines={state.secondary_engines or '-'}"
         )
+
+    if not _is_model_compatible_with_engine(state, state.primary_engine):
+        info("Engine changed. Model selection will be required in next step.")
+        state.model_name = ""
+        state.model_source = ""
+        state.engine_model_tag = ""
+        state.model_candidate = {}
+
     state.mark("3")
     return True
 
@@ -2343,6 +2435,14 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
     engine = state.primary_engine
     tag = state.engine_model_tag
 
+    if not _is_model_compatible_with_engine(state, engine):
+        warn(f"Model '{tag}' was selected for a different engine. Please select a new model.")
+        if non_interactive:
+            fail("Model/engine mismatch in non-interactive mode.")
+            return False
+        ok("Returning to model selection to pick a compatible model.")
+        return False
+
     pb.ensure_state_dirs()
 
     if harness == "claude":
@@ -2806,7 +2906,7 @@ def _install_shell_aliases(
 
 
 def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 6.5 — Install helper script + shell aliases")
+    header("Step 7 — Install helper script + shell aliases")
     if not state.wire_result:
         fail("No wire result on state — run step 6 first.")
         return False
@@ -2837,7 +2937,7 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
 
 
 def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 7 — Verify launch command end-to-end")
+    header("Step 8 — Verify launch command end-to-end")
     harness = state.primary_harness
     engine = state.primary_engine
     tag = state.engine_model_tag
@@ -3048,7 +3148,7 @@ To wipe every ccl install (all fence-tagged blocks):
 
 
 def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -> bool:
-    header("Step 8 — Generate personalized guide.md")
+    header("Step 9 — Generate personalized guide.md")
     fence_tag = _fence_tag_for(state.primary_harness, state.primary_engine)
     alias_names = state.alias_names or _alias_names_for(fence_tag)
     alias_short = alias_names[0]
@@ -3094,14 +3194,14 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
 
 STEPS: list[tuple[str, str, Callable[[WizardState, bool], bool]]] = [
     ("1", "Discover environment", step_2_1_discover),
-    ("2", "Install missing components", step_2_2_install_missing),
-    ("3", "Pick preferences", step_2_3_pick_preferences),
+    ("2", "Select harness", step_2_select_harness),
+    ("3", "Select engine", step_3_select_engine),
     ("4", "Pick a model", step_2_4_pick_model),
     ("5", "Smoke test engine + model", step_2_5_smoke_test),
     ("6", "Wire up harness", step_2_6_wire_harness),
-    ("6.5", "Install helper script + shell aliases", step_2_65_install_aliases),
-    ("7", "Verify launch command", step_2_7_verify),
-    ("8", "Generate guide.md", step_2_8_generate_guide),
+    ("7", "Install helper script + shell aliases", step_2_65_install_aliases),
+    ("8", "Verify launch command", step_2_7_verify),
+    ("9", "Generate guide.md", step_2_8_generate_guide),
 ]
 
 
@@ -3127,9 +3227,6 @@ def run_wizard(
 
     for step_id, title, fn in STEPS:
         if resume and step_id in state.completed_steps and step_id != start_step:
-            continue
-        # Step 2 is conditional: only run if step 1 failed presence check.
-        if step_id == "2" and state.profile.get("presence", {}).get("has_minimum"):
             continue
         if step_id == "1":
             ok_step = fn(  # type: ignore[call-arg]
@@ -3622,11 +3719,10 @@ def _build_parser() -> argparse.ArgumentParser:
     setup.add_argument(
         "--force-scan",
         action="store_true",
-        help="Force a fresh machine spec scan (ignore cached data)",
+        help="Ignore the in-process setup snapshot; selected harness/engine are checked live",
     )
     # Lazy-llmfit flag (issue #79). The hardware capability scan is deferred by
-    # default; --run-llmfit forces a refresh. Use --force-scan to wipe the
-    # umbrella machine-profile cache (which always includes llmfit data).
+    # default; --run-llmfit refreshes only llmfit recommendations.
     setup.add_argument(
         "--run-llmfit",
         action="store_true",

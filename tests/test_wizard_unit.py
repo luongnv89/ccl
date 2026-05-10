@@ -931,8 +931,10 @@ class _StubAsk:
 class TestForcedPreferenceSelection:
     """CLI --harness/--engine values must be honored independently."""
 
-    def test_non_interactive_forced_engine_survives_default_picker(self, isolated_state):
-        _, wiz, _ = isolated_state
+    def test_non_interactive_forced_engine_survives_default_picker(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
         state = wiz.WizardState(primary_engine="9router")
         state.profile = {
             "presence": {
@@ -943,15 +945,26 @@ class TestForcedPreferenceSelection:
             "ollama": {"models": [{"name": "qwen2.5-coder:7b"}]},
             "lmstudio": {"server_running": False, "models": []},
         }
+        monkeypatch.setattr(pb, "command_version", lambda name: {"present": name == "claude"})
 
-        assert wiz.step_2_3_pick_preferences(state, non_interactive=True) is True
+        class _Router9:
+            def detect(self):
+                return {"present": True, "version": "9router 1.0"}
+
+            def healthcheck(self):
+                return {"ok": True}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _Router9())
+
+        assert wiz.step_2_select_harness(state, non_interactive=True) is True
+        assert wiz.step_3_select_engine(state, non_interactive=True) is True
 
         assert state.primary_harness == "claude"
         assert state.primary_engine == "9router"
         assert state.secondary_engines == ["ollama"]
 
     def test_interactive_forced_engine_skips_engine_prompt(self, isolated_state, monkeypatch):
-        _, wiz, _ = isolated_state
+        pb, wiz, _ = isolated_state
         state = wiz.WizardState(primary_engine="9router")
         state.profile = {
             "presence": {
@@ -972,11 +985,106 @@ class TestForcedPreferenceSelection:
             raise AssertionError("--engine 9router should skip the engine picker")
 
         monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(pb, "command_version", lambda name: {"present": name == "claude"})
 
-        assert wiz.step_2_3_pick_preferences(state, non_interactive=False) is True
+        class _Router9:
+            def detect(self):
+                return {"present": True, "version": "9router 1.0"}
+
+            def healthcheck(self):
+                return {"ok": True}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _Router9())
+
+        assert wiz.step_2_select_harness(state, non_interactive=False) is True
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
 
         assert prompts == ["Which harness do you want as primary?"]
         assert state.primary_engine == "9router"
+
+
+class TestTargetedPreferenceRefresh:
+    """Issue #79: selected components are rechecked live instead of trusting stale cache."""
+
+    def test_selected_harness_refresh_corrects_stale_missing_cache(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
+        profile = {
+            "tools": {"claude": {"present": False}, "codex": {"present": False}},
+            "presence": {"harnesses": [], "engines": [], "has_minimum": False},
+        }
+        monkeypatch.setattr(
+            pb,
+            "command_version",
+            lambda name: {"present": name == "claude", "version": "claude 1.0"},
+        )
+
+        assert wiz._refresh_selected_harness(profile, "claude") is True
+        assert profile["tools"]["claude"]["present"] is True
+        assert profile["presence"]["harnesses"] == ["claude"]
+
+    def test_selected_engine_refresh_updates_only_chosen_engine_models(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
+        profile = {
+            "tools": {"ollama": {"present": False}, "lmstudio": {"present": False}},
+            "presence": {"harnesses": ["claude"], "engines": [], "has_minimum": False},
+        }
+        calls: list[str] = []
+
+        def fake_command_version(name):
+            calls.append(name)
+            return {"present": name == "ollama", "version": "ollama 0.1"}
+
+        monkeypatch.setattr(pb, "command_version", fake_command_version)
+        monkeypatch.setattr(
+            pb,
+            "parse_ollama_list",
+            lambda: [{"name": "qwen2.5-coder:7b", "local": True}],
+        )
+        monkeypatch.setattr(
+            pb,
+            "lms_info",
+            lambda: (_ for _ in ()).throw(AssertionError("lmstudio must not be probed")),
+        )
+
+        assert wiz._refresh_selected_engine(profile, "ollama") is True
+        assert calls == ["ollama"]
+        assert profile["presence"]["engines"] == ["ollama"]
+        assert profile["ollama"]["models"][0]["name"] == "qwen2.5-coder:7b"
+
+    def test_selected_harness_status_is_reported_after_live_check(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude", primary_engine="ollama")
+        state.profile = {
+            "tools": {"claude": {"present": False}, "ollama": {"present": False}},
+            "presence": {"harnesses": [], "engines": [], "has_minimum": False},
+        }
+
+        def fake_command_version(name):
+            return {
+                "present": name in {"claude", "ollama"},
+                "version": f"{name} 1.0",
+            }
+
+        monkeypatch.setattr(pb, "command_version", fake_command_version)
+        monkeypatch.setattr(
+            pb,
+            "parse_ollama_list",
+            lambda: [{"name": "qwen2.5-coder:7b", "local": True}],
+        )
+
+        wiz.console.width = 200
+        with wiz.console.capture() as captured:
+            assert wiz.step_2_select_harness(state, non_interactive=True) is True
+
+        output = captured.get()
+        assert "claude CLI detected: claude 1.0" in output
+        assert "No existing local helper configuration recorded" in output
 
 
 class TestStep24PickerIntegration:
@@ -3142,10 +3250,11 @@ class TestStep1LazyLlmfit:
             assert wiz.step_2_1_discover(state, non_interactive=True) is True
         assert captured["run_llmfit"] is False
 
-    def test_force_scan_still_runs_llmfit(self, isolated_state, monkeypatch):
-        """--force-scan keeps the existing 'nuke + full rescan' contract."""
+    def test_force_scan_does_not_run_llmfit(self, isolated_state, monkeypatch):
+        """--force-scan does not imply the expensive llmfit hardware scan."""
         pb, wiz, _ = isolated_state
         captured: dict[str, object] = {}
+        invalidations: list[int] = []
 
         def fake_machine_profile(run_llmfit: bool = True):
             captured["run_llmfit"] = run_llmfit
@@ -3172,11 +3281,17 @@ class TestStep1LazyLlmfit:
             }
 
         monkeypatch.setattr(pb, "machine_profile", fake_machine_profile)
+        monkeypatch.setattr(
+            pb,
+            "invalidate_machine_profile_inproc_cache",
+            lambda: invalidations.append(1),
+        )
         state = wiz.WizardState()
         wiz.console.width = 200
         with wiz.console.capture():
             assert wiz.step_2_1_discover(state, non_interactive=True, force_scan=True) is True
-        assert captured["run_llmfit"] is True
+        assert captured["run_llmfit"] is False
+        assert invalidations == [1]
 
     def test_run_llmfit_flag_forces_scan(self, isolated_state, monkeypatch):
         """--run-llmfit (without --force-scan) propagates as run_llmfit=True."""
@@ -3208,11 +3323,21 @@ class TestStep1LazyLlmfit:
             }
 
         monkeypatch.setattr(pb, "machine_profile", fake_machine_profile)
+        monkeypatch.setattr(pb, "command_version", lambda name: {"present": name == "llmfit"})
+        llmfit_calls: list[int] = []
+
+        def fake_llmfit_system():
+            llmfit_calls.append(1)
+            return {"system": {"available_ram_gb": 64}}
+
+        monkeypatch.setattr(pb, "llmfit_system", fake_llmfit_system)
         state = wiz.WizardState()
         wiz.console.width = 200
         with wiz.console.capture():
             assert wiz.step_2_1_discover(state, non_interactive=True, run_llmfit_flag=True) is True
         assert captured["run_llmfit"] is True
+        assert llmfit_calls == [1]
+        assert state.profile["llmfit_system"] == {"system": {"available_ram_gb": 64}}
 
 
 class TestEnsureToolCacheInvalidation:

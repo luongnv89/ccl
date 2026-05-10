@@ -1,0 +1,48 @@
+{
+  "issue": 79,
+  "title": "Optimize setup workflow for faster configuration",
+  "type": "improvement",
+  "selected_option": "targeted-recheck",
+  "scope_decisions": {
+    "step1_snapshot": "Step 1 loads the cached machine profile as an advisory snapshot. It no longer blocks setup when cached data says a harness or engine category is missing.",
+    "step2_gate": "The category-level install gate is removed. Install prompts happen only after the user chooses a specific harness or engine.",
+    "stale_cache_fix": "Step 3 live-checks the selected harness and selected engine before trusting cache data, correcting stale missing/present status without probing unrelated components.",
+    "force_scan_semantics": "--force-scan clears only the in-process machine-profile snapshot during setup. It does not delete the file cache, rebuild every backend, or imply llmfit.",
+    "llmfit_refresh": "--run-llmfit refreshes only the llmfit system block and recommendations. It is separate from selected harness/engine checks.",
+    "non_interactive": "Non-interactive mode live-checks the cached default harness/engine candidates and fails clearly if the cache is stale and no candidate is currently available."
+  },
+  "approach_summary": "Restore the issue #79 flow by making broad discovery advisory and moving authoritative checks to the user's selected components. This prevents stale cache decisions while avoiding a full rescan of every supported backend when only one harness and one engine matter.",
+  "ac_mapping": {
+    "AC1_harness_first": "Step 1 no longer routes into a category-level install gate; Step 3 remains the harness-first picker.",
+    "AC2_detect_status": "The selected harness/engine are live-checked via targeted refresh helpers before setup proceeds.",
+    "AC3_install_only_when_missing": "_ensure_tool is called only after the selected component fails its live check.",
+    "AC4_lazy_llmfit": "Step 1 still skips llmfit by default. --run-llmfit refreshes only llmfit data, and Step 4 can still request recommendations on demand.",
+    "AC5_combined_model_list": "The existing Step 4 merged installed/cached picker is preserved; selected engine model data is refreshed before the picker reads it."
+  },
+  "files_changed": [
+    "claude_codex_local/wizard.py",
+    "tests/test_wizard_unit.py",
+    "tests/test_e2e.py",
+    "tests/test_supplementary.py",
+    "README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/poc-wizard.md",
+    ".gitissue/analysis-79.json"
+  ],
+  "tests_added_or_updated": [
+    "tests/test_wizard_unit.py::TestTargetedPreferenceRefresh",
+    "tests/test_wizard_unit.py::TestStep1LazyLlmfit::test_force_scan_does_not_run_llmfit",
+    "tests/test_supplementary.py::TestMachineProfileCache::test_force_scan_keeps_file_cache_and_clears_inproc_only",
+    "tests/test_e2e.py::TestWizardFullFlow targeted setup stubs"
+  ],
+  "constraints_honored": [
+    "No new cache file",
+    "No broad scan on setup --force-scan when a file cache exists",
+    "No llmfit scan unless --run-llmfit or an explicit model recommendation path needs it",
+    "STEPS IDs remain unchanged for existing WizardState migration"
+  ],
+  "risks": [
+    "Fallback harness/engine lists still reflect cached non-selected components; they are validated only if later selected.",
+    "If there is no file cache at all, machine_profile still builds an initial broad snapshot. This change focuses on avoiding broad rescans after cache exists."
+  ]
+}
