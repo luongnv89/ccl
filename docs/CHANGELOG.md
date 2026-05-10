@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.10.0 — 2026-05-10
+
+### Features
+
+- **Non-interactive CLI**: Add `ccl run` subcommand with `-p/--prompt` flag for non-interactive sessions, enabling scripted and automated workflows (#70, #71)
+- **vLLM Wizard Integration**: Wire vLLM into the setup wizard as a selectable backend option (#66)
+- **9router Auto-install**: Wizard now offers to install 9router via npm when user selects it as their routing backend (#67)
+- **Machine Profile Caching**: Cache machine specifications to avoid re-scanning hardware on subsequent setup runs, significantly improving wizard startup time (#58, #75)
+- **llama.cpp Enhancements**: Upgrade to 128k context support, add reasoning model smoke test, implement `ccl serve` command, and enable automatic server restart on crashes (#60)
+
+### Bug Fixes
+
+- **Wizard Component Recheck**: Fix wizard to recheck selected setup components after user modifications, ensuring configuration consistency (#79, #81)
+- **vLLM Detection**: vLLM detection now checks for CLI installation rather than just server reachability, preventing false positives (#78)
+- **llama.cpp Model Matching**: Fix HuggingFace tag matching to use existing `_llamacpp_models_match` helper for consistent model resolution (#64)
+- **Machine Profile Cache**: Write in-process machine profile cache to the correct symbol, fixing cache persistence issues (#77)
+
+### Performance
+
+- **Lazy llmfit Loading**: Optimize setup workflow with lazy llmfit initialization and cache-aware model picker, reducing unnecessary hardware scans (#79, #80)
+
+### Tests
+
+- **vLLM E2E Coverage**: Add comprehensive end-to-end test against a live vLLM server instance (#63)
+
+### Documentation
+
+- Refresh documentation and brand assets for improved clarity and visual consistency (#76)
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.9.0...v0.10.0
+
 ## v0.9.0 — 2026-05-05
 
 ### Features
