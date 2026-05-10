@@ -746,7 +746,7 @@ def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> 
             return False
         harnesses = state.profile["presence"]["harnesses"]
         state.primary_harness = live_harness
-        state.secondary_harnesses = harnesses[1:]
+        state.secondary_harnesses = [h for h in harnesses if h != live_harness]
         ok(f"Non-interactive: picking [bold]{state.primary_harness}[/bold] as primary harness")
     else:
         harness_choices = [
