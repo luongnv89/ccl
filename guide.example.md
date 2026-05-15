@@ -11,7 +11,8 @@
 - **Harness**: `<harness>`
 - **Engine**: `<engine>`
 - **Model**: `<model>:<size>`
-- **Aliases**: `cc`, `claude-local` (installed in `~/.zshrc`)
+- **Aliases**: `cc`, `claude-local` (or `cp`, `pi-local` for Pi)
+  (installed in `~/.zshrc`)
 - **Helper script**: `<REPO_ROOT>/.claude-codex-local/bin/cc`
 
 ## Daily use
@@ -26,12 +27,14 @@ Then run:
 cc
 ```
 
-That's it. The alias execs `<REPO_ROOT>/.claude-codex-local/bin/cc`, which
-either runs `ollama launch <harness>` (Ollama path) or sets the right env
-vars and execs `<harness>` directly (LM Studio / llama.cpp path).
+That's it. The alias execs `<REPO_ROOT>/.claude-codex-local/bin/cc`. Claude
+and Codex helpers either run `ollama launch <harness>` (Ollama path) or set
+the right env vars (LM Studio / llama.cpp / vLLM). Pi helpers set
+`PI_CODING_AGENT_DIR` and launch `pi --provider ccl-<engine> --model <model>`.
 
-Your real `~/.claude` and `~/.codex` are used as-is, so all your skills,
-statusline, agents, plugins, and MCP servers keep working.
+Your real `~/.claude` and `~/.codex` are used as-is for those harnesses.
+For Pi, CCL uses an isolated `PI_CODING_AGENT_DIR` and writes a custom
+`models.json` provider for the selected engine/model.
 
 You can still pass extra args: `cc -p "what does foo.py do?"`.
 
@@ -50,13 +53,15 @@ You can still pass extra args: `cc -p "what does foo.py do?"`.
 
 ## Return to official mode
 
-Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
-`codex` directly (without `cc`) to use the cloud backend.
+Your global `~/.claude`, `~/.codex`, and default `~/.pi/agent` are unchanged.
+Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`cp`) to use the
+official backend/config.
 
 ## Rollback
 
-Each harness (claude / codex) has its own fenced block, so you can remove
-just one harness without touching any other you may have set up.
+Each harness (claude / codex / pi, plus 9router variants) has its own fenced
+block, so you can remove just one harness without touching any other you may
+have set up.
 
 To wipe only the claude harness:
 

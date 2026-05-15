@@ -5,6 +5,7 @@ logic, presence checks, and the Claude/Codex wiring helpers.
 
 from __future__ import annotations
 
+import json
 import os
 
 # ---------------------------------------------------------------------------
@@ -368,6 +369,57 @@ class TestWireCodex:
         assert str(pb.ROUTER9_KEY_FILE) in result.raw_env["OPENAI_API_KEY"]
         # Plain env must NOT carry a literal API key; only the URL.
         assert "OPENAI_API_KEY" not in result.env
+
+
+# ---------------------------------------------------------------------------
+# _wire_pi — writes isolated Pi custom-provider config.
+# ---------------------------------------------------------------------------
+
+
+class TestWirePi:
+    def test_ollama_writes_models_json_and_argv(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        result = wiz._wire_pi("ollama", "qwen2.5-coder:7b")
+        assert result.argv == ["pi", "--provider", "ccl-ollama", "--model", "qwen2.5-coder:7b"]
+        assert result.env["PI_CODING_AGENT_DIR"] == str(pb.STATE_DIR / "pi-agent")
+
+        models = json.loads((pb.STATE_DIR / "pi-agent" / "models.json").read_text())
+        provider = models["providers"]["ccl-ollama"]
+        assert provider["baseUrl"] == "http://localhost:11434/v1"
+        assert provider["api"] == "openai-completions"
+        assert provider["apiKey"] == "ollama"
+        assert provider["compat"]["supportsDeveloperRole"] is False
+        assert provider["models"][0]["id"] == "qwen2.5-coder:7b"
+
+    def test_lmstudio_uses_openai_compatible_port(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        result = wiz._wire_pi("lmstudio", "qwen/qwen2.5-coder-7b")
+        assert result.argv[:3] == ["pi", "--provider", "ccl-lmstudio"]
+        models = json.loads((pb.STATE_DIR / "pi-agent" / "models.json").read_text())
+        assert (
+            models["providers"]["ccl-lmstudio"]["baseUrl"]
+            == f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
+        )
+        assert models["providers"]["ccl-lmstudio"]["apiKey"] == "lmstudio"
+
+    def test_9router_uses_keyfile_command_not_literal_key(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        pb.ensure_state_dirs()
+        pb.ROUTER9_KEY_FILE.write_text("router9-test-key\n")  # pragma: allowlist secret
+        result = wiz._wire_pi("9router", "kr/claude-sonnet-4.5")
+        assert result.argv == ["pi", "--provider", "ccl-9router", "--model", "kr/claude-sonnet-4.5"]
+        models_path = pb.STATE_DIR / "pi-agent" / "models.json"
+        body = models_path.read_text()
+        assert "router9-test-key" not in body  # pragma: allowlist secret
+        models = json.loads(body)
+        provider = models["providers"]["ccl-9router"]
+        assert provider["baseUrl"] == pb.ROUTER9_BASE_URL
+        assert provider["apiKey"].startswith("!cat ")
+        assert str(pb.ROUTER9_KEY_FILE) in provider["apiKey"]
+
+    def test_unknown_engine_returns_none(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._wire_pi("bogus", "tag") is None
 
 
 # ---------------------------------------------------------------------------

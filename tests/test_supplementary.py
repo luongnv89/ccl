@@ -225,7 +225,7 @@ class TestMachineProfileAggregation:
         assert profile["presence"]["has_minimum"] is True
         assert "ollama" in profile["presence"]["engines"]
         assert "lmstudio" in profile["presence"]["engines"]
-        assert set(profile["presence"]["harnesses"]) == {"claude", "codex"}
+        assert set(profile["presence"]["harnesses"]) == {"claude", "codex", "pi"}
         assert profile["llmfit_system"] == {"system": {"ram_gb": 64}}
 
 

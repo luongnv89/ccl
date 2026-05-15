@@ -2502,12 +2502,13 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     ollama_info = command_version("ollama")
     claude_info = command_version("claude")
     codex_info = command_version("codex")
+    pi_info = command_version("pi")
     llmfit_info = command_version("llmfit")
 
     # Presence summary used by the wizard's discover step.
     harnesses_present = [
         name
-        for name, info in (("claude", claude_info), ("codex", codex_info))
+        for name, info in (("claude", claude_info), ("codex", codex_info), ("pi", pi_info))
         if info.get("present")
     ]
     engines_present = []
@@ -2553,6 +2554,7 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
             "huggingface_cli": hf_cli,
             "claude": claude_info,
             "codex": codex_info,
+            "pi": pi_info,
             "llmfit": llmfit_info,
             "9router": {
                 "present": bool(router9_info.get("present")),
