@@ -2040,6 +2040,517 @@
             </div>
           </div>
 
+          <!-- v0.10.0 -->
+          <div
+            class="reveal"
+            style="
+              background: var(--bg-card);
+              border: 1px solid var(--border);
+              border-radius: var(--radius-lg);
+              padding: 28px 32px;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 20px;
+              "
+            >
+              <span
+                style="
+                  font-family: var(--mono);
+                  font-size: 15px;
+                  font-weight: 700;
+                  color: var(--cyan);
+                "
+                >v0.10.0</span
+              >
+              <span
+                style="
+                  font-size: 12px;
+                  color: var(--text-dim);
+                  font-family: var(--mono);
+                "
+                >2026-05-10</span
+              >
+            </div>
+            <div style="margin-bottom: 12px">
+              <div
+                style="
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.1em;
+                  text-transform: uppercase;
+                  color: var(--green);
+                  margin-bottom: 8px;
+                "
+              >
+                Added
+              </div>
+              <ul
+                style="
+                  list-style: none;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <strong>Non-interactive CLI</strong>: Add <code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">ccl run</code> subcommand with <code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">-p/--prompt</code> flag for scripted workflows (#70, #71)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <strong>vLLM Wizard Integration</strong>: Wire vLLM into the setup wizard as a selectable backend option (#66)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <strong>9router Auto-install</strong>: Wizard offers to install 9router via npm when selected (#67)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <strong>Machine Profile Caching</strong>: Cache machine specs to avoid re-scanning hardware, improving wizard startup time (#58, #75)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <strong>llama.cpp Enhancements</strong>: 128k context, reasoning model smoke test, <code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">ccl serve</code>, auto-restart (#60)
+                </li>
+              </ul>
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.1em;
+                  text-transform: uppercase;
+                  color: var(--red);
+                  margin-bottom: 8px;
+                "
+              >
+                Fixed
+              </div>
+              <ul
+                style="
+                  list-style: none;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Wizard component recheck after user modifications (#79, #81)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  vLLM detection checks CLI installation, not just server reachability (#78)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  llama.cpp HuggingFace tag matching uses existing helper (#64)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Machine profile cache persistence (#77)
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- v0.9.0 -->
+          <div
+            class="reveal"
+            style="
+              background: var(--bg-card);
+              border: 1px solid var(--border);
+              border-radius: var(--radius-lg);
+              padding: 28px 32px;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 20px;
+              "
+            >
+              <span
+                style="
+                  font-family: var(--mono);
+                  font-size: 15px;
+                  font-weight: 700;
+                  color: var(--cyan);
+                "
+                >v0.9.0</span
+              >
+              <span
+                style="
+                  font-size: 12px;
+                  color: var(--text-dim);
+                  font-family: var(--mono);
+                "
+                >2026-05-05</span
+              >
+            </div>
+            <div style="margin-bottom: 12px">
+              <div
+                style="
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.1em;
+                  text-transform: uppercase;
+                  color: var(--green);
+                  margin-bottom: 8px;
+                "
+              >
+                Added
+              </div>
+              <ul
+                style="
+                  list-style: none;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <strong>9router Integration</strong>: Cloud-routing backend for alternative providers (OpenAI, DeepSeek) (#51, #52)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  <code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">cc9</code>/<code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">cx9</code> aliases for 9router alongside <code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">cc</code>/<code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">cx</code>
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
+                  >
+                  Wizard extended with 9router setup flow and API key management
+                </li>
+              </ul>
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.1em;
+                  text-transform: uppercase;
+                  color: var(--red);
+                  margin-bottom: 8px;
+                "
+              >
+                Fixed
+              </div>
+              <ul
+                style="
+                  list-style: none;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Wizard honors forced setup preferences (#51)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Updated DeepSeek model hub paths
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- v0.8.3 -->
+          <div
+            class="reveal"
+            style="
+              background: var(--bg-card);
+              border: 1px solid var(--border);
+              border-radius: var(--radius-lg);
+              padding: 28px 32px;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 20px;
+              "
+            >
+              <span
+                style="
+                  font-family: var(--mono);
+                  font-size: 15px;
+                  font-weight: 700;
+                  color: var(--cyan);
+                "
+                >v0.8.3</span
+              >
+              <span
+                style="
+                  font-size: 12px;
+                  color: var(--text-dim);
+                  font-family: var(--mono);
+                "
+                >2026-04-24</span
+              >
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.1em;
+                  text-transform: uppercase;
+                  color: var(--red);
+                  margin-bottom: 8px;
+                "
+              >
+                Fixed
+              </div>
+              <ul
+                style="
+                  list-style: none;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Retired qwen2.5-coder 0.5b verified path (#49)
+                </li>
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Bootstrap docs now point to <code style="font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 3px;">ccl find-model</code> (#49)
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- v0.8.2 -->
+          <div
+            class="reveal"
+            style="
+              background: var(--bg-card);
+              border: 1px solid var(--border);
+              border-radius: var(--radius-lg);
+              padding: 28px 32px;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 20px;
+              "
+            >
+              <span
+                style="
+                  font-family: var(--mono);
+                  font-size: 15px;
+                  font-weight: 700;
+                  color: var(--cyan);
+                "
+                >v0.8.2</span
+              >
+              <span
+                style="
+                  font-size: 12px;
+                  color: var(--text-dim);
+                  font-family: var(--mono);
+                "
+                >2026-04-20</span
+              >
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 11px;
+                  font-weight: 700;
+                  letter-spacing: 0.1em;
+                  text-transform: uppercase;
+                  color: var(--red);
+                  margin-bottom: 8px;
+                "
+              >
+                Fixed
+              </div>
+              <ul
+                style="
+                  list-style: none;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <li
+                  style="
+                    font-size: 14px;
+                    color: var(--text-muted);
+                    padding-left: 16px;
+                    position: relative;
+                  "
+                >
+                  <span style="position: absolute; left: 0; color: var(--red)"
+                    >✓</span
+                  >
+                  Wizard step IDs renumbered to sequential integers (1–8) for consistent progress indicators (#47)
+                </li>
+              </ul>
+            </div>
+          </div>
+
           <!-- v0.8.1 -->
           <div
             class="reveal"
