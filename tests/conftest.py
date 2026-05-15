@@ -63,7 +63,7 @@ def isolated_state(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Fake bin directory — stub executables for ollama/lms/claude/codex/llmfit.
+# Fake bin directory — stub executables for ollama/lms/claude/codex/pi/llmfit.
 # ---------------------------------------------------------------------------
 
 
@@ -96,6 +96,7 @@ def fake_bin(tmp_path, monkeypatch):
     )
     _write_stub(bdir / "claude", 'echo "claude 1.0.0"')
     _write_stub(bdir / "codex", 'echo "codex 0.1.0"')
+    _write_stub(bdir / "pi", 'echo "pi 0.1.0"')
     _write_stub(
         bdir / "llmfit",
         """case "$1" in

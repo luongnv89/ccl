@@ -77,7 +77,7 @@ class WizardState:
     # full machine profile from last discover pass
     profile: dict[str, Any] = field(default_factory=dict)
     # user's primary + secondary selections
-    primary_harness: str = ""  # "claude" | "codex"
+    primary_harness: str = ""  # "claude" | "codex" | "pi"
     secondary_harnesses: list[str] = field(default_factory=list)
     primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp" | "vllm" | "9router"
     secondary_engines: list[str] = field(default_factory=list)
@@ -277,6 +277,11 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
         "cmd": "npm install -g @openai/codex",
         "url": "https://github.com/openai/codex",
     },
+    "pi": {
+        "name": "Pi coding agent",
+        "cmd": "npm install -g @earendil-works/pi-coding-agent",
+        "url": "https://pi.dev/",
+    },
     "ollama": {
         "name": "Ollama",
         "cmd": "curl -fsSL https://ollama.com/install.sh | sh",
@@ -371,7 +376,7 @@ def _ensure_tool(key: str) -> bool:
     """
     Offer to install a tool by key (matching INSTALL_HINTS).
     For tools with a runnable install command (ollama, llamacpp, claude, codex,
-    huggingface-cli) the command is executed directly.
+    pi, huggingface-cli) the command is executed directly.
     For 9router the npm package is installed, but the long-running daemon
     must be started manually by the user.  For tools requiring manual steps
     (lmstudio, vllm) the hint is shown
@@ -448,6 +453,7 @@ def _ensure_tool(key: str) -> bool:
     detect_cmd = {
         "claude": "claude",
         "codex": "codex",
+        "pi": "pi",
         "ollama": "ollama",
         "lmstudio": "lms",
         "llamacpp": "llama-server",
@@ -547,7 +553,7 @@ def _ensure_llmfit() -> bool:
 # ---------------------------------------------------------------------------
 
 
-_ALL_HARNESSES = ["claude", "codex"]
+_ALL_HARNESSES = ["claude", "codex", "pi"]
 _ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "vllm", "9router"]
 
 
@@ -2449,6 +2455,8 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
         result = _wire_claude(engine, tag)
     elif harness == "codex":
         result = _wire_codex(engine, tag)
+    elif harness == "pi":
+        result = _wire_pi(engine, tag)
     else:
         fail(f"Unknown harness: {harness}")
         return False
@@ -2651,6 +2659,98 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
     return None
 
 
+def _pi_agent_dir() -> Path:
+    """Isolated Pi config dir managed by CCL for local-provider models."""
+    return pb.STATE_DIR / "pi-agent"
+
+
+def _pi_provider_for_engine(engine: str) -> str:
+    return f"ccl-{engine}"
+
+
+def _pi_base_url_for_engine(engine: str) -> str | None:
+    if engine == "ollama":
+        return "http://localhost:11434/v1"
+    if engine == "lmstudio":
+        return f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
+    if engine == "llamacpp":
+        return f"http://localhost:{pb.LLAMACPP_SERVER_PORT}/v1"
+    if engine == "vllm":
+        return f"{pb.VLLM_BASE_URL.rstrip('/')}/v1"
+    if engine == "9router":
+        return pb.ROUTER9_BASE_URL
+    return None
+
+
+def _pi_api_key_for_engine(engine: str) -> str:
+    if engine == "ollama":
+        return "ollama"
+    if engine == "lmstudio":
+        return "lmstudio"
+    if engine in {"llamacpp", "vllm"}:
+        if engine == "vllm" and pb.VLLM_KEY_FILE.exists():
+            return f"!cat {shlex.quote(str(pb.VLLM_KEY_FILE))}"
+        return "sk-local"  # pragma: allowlist secret
+    if engine == "9router":
+        return f"!cat {shlex.quote(str(pb.ROUTER9_KEY_FILE))}"
+    return "sk-local"  # pragma: allowlist secret
+
+
+def _write_pi_models_config(engine: str, tag: str) -> Path:
+    """
+    Write the Pi custom-provider entry used by the CCL helper.
+
+    Pi reads OpenAI-compatible local backends from models.json rather than
+    OPENAI_BASE_URL-style env vars. Keep this file under CCL's isolated
+    PI_CODING_AGENT_DIR so setup is reversible and does not rewrite the user's
+    normal ~/.pi/agent/models.json.
+    """
+    base_url = _pi_base_url_for_engine(engine)
+    if base_url is None:
+        raise ValueError(f"Unknown engine for Pi wire-up: {engine!r}")
+
+    agent_dir = _pi_agent_dir()
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    models_path = agent_dir / "models.json"
+    provider = _pi_provider_for_engine(engine)
+    data: dict[str, Any] = {"providers": {}}
+    if models_path.exists():
+        try:
+            loaded = json.loads(models_path.read_text())
+            if isinstance(loaded, dict):
+                data = loaded
+        except json.JSONDecodeError:
+            data = {"providers": {}}
+    providers = data.setdefault("providers", {})
+    providers[provider] = {
+        "baseUrl": base_url,
+        "api": "openai-completions",
+        "apiKey": _pi_api_key_for_engine(engine),
+        "compat": {
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": False,
+        },
+        "models": [{"id": tag, "name": f"CCL {engine} {tag}"}],
+    }
+    models_path.write_text(json.dumps(data, indent=2) + "\n")
+    return models_path
+
+
+def _wire_pi(engine: str, tag: str) -> WireResult | None:
+    """Build a WireResult for Pi against a CCL-supported local/provider engine."""
+    try:
+        _write_pi_models_config(engine, tag)
+    except ValueError:
+        fail(f"Unknown engine for Pi wire-up: {engine}")
+        return None
+    provider = _pi_provider_for_engine(engine)
+    return WireResult(
+        argv=["pi", "--provider", provider, "--model", tag],
+        env={"PI_CODING_AGENT_DIR": str(_pi_agent_dir())},
+        effective_tag=tag,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Step 6.5 — Helper script + shell aliases
 # ---------------------------------------------------------------------------
@@ -2734,16 +2834,18 @@ def _helper_script_basename(harness: str) -> str:
     Map a fence tag to the helper-script filename.
 
     Valid harness values are the four fence tags supported by the
-    install: "claude" / "codex" (existing harnesses) and "claude9" /
-    "codex9" (their 9router variants from issue #51). The script names
-    must stay distinct so the cc/cx (local) and cc9/cx9 (9router)
-    install paths can coexist on the same machine.
+    install: "claude" / "codex" / "pi" (existing local harnesses) and
+    "claude9" / "codex9" / "pi9" (their 9router variants). The script
+    names must stay distinct so the cc/cx/cp (local) and cc9/cx9/cp9
+    (9router) install paths can coexist on the same machine.
     """
     mapping = {
         "claude": "cc",
         "codex": "cx",
+        "pi": "cp",
         "claude9": "cc9",
         "codex9": "cx9",
+        "pi9": "cp9",
     }
     if harness not in mapping:
         raise ValueError(f"Unknown harness fence tag: {harness!r}")
@@ -2755,15 +2857,17 @@ def _alias_names_for(harness: str) -> list[str]:
     Map a fence tag to the alias names installed in the user's shell rc.
 
     The 9router variants intentionally expose ONLY the short alias
-    (cc9 / cx9). The long forms (claude-local / codex-local) are reserved
-    for the original local-only paths so existing shell aliases keep
-    pointing where users expect.
+    (cc9 / cx9 / cp9). The long forms (claude-local / codex-local /
+    pi-local) are reserved for the original local-only paths so existing
+    shell aliases keep pointing where users expect.
     """
     mapping = {
         "claude": ["cc", "claude-local"],
         "codex": ["cx", "codex-local"],
+        "pi": ["cp", "pi-local"],
         "claude9": ["cc9"],
         "codex9": ["cx9"],
+        "pi9": ["cp9"],
     }
     if harness not in mapping:
         raise ValueError(f"Unknown harness fence tag: {harness!r}")
@@ -2775,8 +2879,8 @@ def _write_helper_script(harness: str, result: WireResult, *, engine: str | None
     Write a small bash helper that exports any inline env and execs the
     wire-result argv. Returns the absolute path to the helper.
 
-    `harness` is a fence tag — one of "claude", "codex", "claude9",
-    "codex9" — and selects the helper-script filename.
+    `harness` is a fence tag — one of "claude", "codex", "pi",
+    "claude9", "codex9", "pi9" — and selects the helper-script filename.
 
     When `engine == "llamacpp"`, the helper grows a pre-flight stanza that
     probes the configured llama-server `/health` endpoint and runs
@@ -3019,6 +3123,8 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
                 tag,
                 "Reply with exactly READY",
             ]
+    elif harness == "pi":
+        cmd = list(state.wire_result["argv"]) + ["-p", "Reply with exactly READY"]
     else:
         fail(f"Unknown harness: {harness}")
         return False
@@ -3098,12 +3204,14 @@ Then run:
 {alias_short}
 ```
 
-That's it. The alias execs `{helper_script}`, which either runs
-`ollama launch {harness}` (Ollama path) or sets the right env vars and
-execs `{harness}` directly (LM Studio / llama.cpp path).
+That's it. The alias execs `{helper_script}`. Claude/Codex helpers either
+run `ollama launch {harness}` (Ollama path) or export the engine env vars
+(LM Studio / llama.cpp / vLLM). Pi helpers set `PI_CODING_AGENT_DIR` and
+launch `pi --provider ccl-{engine} --model {model}`.
 
-Your real `~/.claude` and `~/.codex` are used as-is, so all your skills,
-statusline, agents, plugins, and MCP servers keep working.
+Your real `~/.claude` and `~/.codex` are used as-is for those harnesses.
+For Pi, CCL uses an isolated `PI_CODING_AGENT_DIR` under `{state_dir}` and
+writes a custom `models.json` provider for the selected engine/model.
 
 You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 {codex_limitation}
@@ -3127,8 +3235,9 @@ Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
 
 ## Rollback
 
-Each install (claude / codex / claude9 / codex9) has its own fenced block,
-so you can remove just this one without touching any other install.
+Each install (claude / codex / pi / claude9 / codex9 / pi9) has its own
+fenced block, so you can remove just this one without touching any other
+install.
 
 To wipe only this install:
 
@@ -3482,6 +3591,8 @@ def _build_oneshot_cmd(
                 prompt,
             ]
         return ["codex", "exec", "--skip-git-repo-check", "-m", tag, prompt]
+    if harness == "pi":
+        return list(wire_result.get("argv", [])) + ["-p", prompt]
     return None
 
 
@@ -3710,10 +3821,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Auto-pick defaults (for CI and scripted installs)",
     )
-    setup.add_argument("--harness", choices=("claude", "codex"), help="Force the primary harness")
+    setup.add_argument(
+        "--harness", choices=("claude", "codex", "pi"), help="Force the primary harness"
+    )
     setup.add_argument(
         "--engine",
-        choices=("ollama", "lmstudio", "llamacpp", "9router"),
+        choices=("ollama", "lmstudio", "llamacpp", "vllm", "9router"),
         help="Force the primary engine",
     )
     setup.add_argument(
@@ -3754,7 +3867,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "run",
         help="Launch the configured harness, optionally with an initial prompt",
         description=(
-            "Launch the configured Claude Code or Codex session. With "
+            "Launch the configured Claude Code, Codex, or Pi session. With "
             "-p/--prompt PROMPT, the prompt is submitted as the first user "
             "message and the harness runs in one-shot mode (Claude's `-p`, "
             "Codex's `exec`) — useful when calling CCL from another agent or "

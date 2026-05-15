@@ -1,0 +1,39 @@
+{
+  "issue": 59,
+  "title": "Add Pi as a supported harness",
+  "decision_record": {
+    "selected_option": "Balanced sibling harness integration",
+    "rationale": [
+      "Pi supports OpenAI-compatible local backends through models.json custom providers rather than the Claude/Codex env-only paths.",
+      "An isolated PI_CODING_AGENT_DIR under the CCL state directory keeps the user's default ~/.pi/agent config untouched and makes rollback consistent with existing CCL state isolation.",
+      "Pi is wired as a first-class harness in detection, picker, helper aliases, verify, ccl run, documentation, and tests."
+    ],
+    "alternatives_considered": [
+      "Reuse OPENAI_BASE_URL against Pi's built-in OpenAI provider; rejected because Pi documents custom endpoints via models.json.",
+      "Write directly to ~/.pi/agent/models.json; rejected to avoid clobbering user-managed Pi configuration."
+    ]
+  },
+  "files_changed": [
+    "claude_codex_local/core.py",
+    "claude_codex_local/wizard.py",
+    "tests/conftest.py",
+    "tests/test_supplementary.py",
+    "tests/test_wizard_unit.py",
+    "README.md",
+    "guide.example.md",
+    "docs/ARCHITECTURE.md",
+    "docs/DEVELOPMENT.md",
+    "pyproject.toml"
+  ],
+  "tests": [
+    "python -m pytest -q",
+    "python -m ruff check ."
+  ],
+  "acceptance_criteria": {
+    "Pi appears as primary harness option": "Implemented via _ALL_HARNESSES, CLI choices, picker, aliases.",
+    "Detection and install hint": "Implemented via core.machine_profile command_version('pi') and Pi install hint pointing to pi.dev/npm package.",
+    "Wizard run completes smoke and verify": "Implemented via _wire_pi, step_2_7_verify, _build_oneshot_cmd, helper script support; covered by unit and e2e-style test infrastructure.",
+    "guide.md launch docs": "Guide template documents PI_CODING_AGENT_DIR, ccl provider, model flags.",
+    "Pi docs/install hint references": "README and install hints reference https://pi.dev and model-agnostic positioning."
+  }
+}

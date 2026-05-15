@@ -54,7 +54,7 @@ pytest -m "not local"                            # skip tests needing real binar
 pytest --cov=. --cov-report=term-missing         # with coverage
 ```
 
-Tests requiring real binaries (ollama, lm-studio, claude, codex, llmfit) are marked `@pytest.mark.local` and auto-skipped in CI.
+Tests requiring real binaries (ollama, lm-studio, claude, codex, pi, llmfit) are marked `@pytest.mark.local` and auto-skipped in CI.
 
 End-to-end smoke test (requires a real engine):
 

@@ -11,7 +11,7 @@
 
 # Hit your limit? Need privacy? Just swap the model.
 
-One alias. Claude Code or Codex on a local model. Skills, agents, MCP servers — all intact.
+One alias. Claude Code, Codex, or [Pi](https://pi.dev/) on a local model. Skills, agents, MCP servers — all intact.
 
 > **Quota hit mid-session?** `cc` keeps you going on a local model, no context lost.
 > **Code that can't leave your machine?** Everything runs offline after model download.
@@ -30,7 +30,7 @@ One alias. Claude Code or Codex on a local model. Skills, agents, MCP servers �
 | Smart model selection | `llmfit` analyses your hardware and picks the best quantization that fits (lazy hardware scan; pass `--run-llmfit` to refresh) |
 | Resume on failure     | Wizard persists progress — `--resume` picks up from the last completed step                                                       |
 | Idempotent aliases    | Re-running the wizard replaces the existing alias block, never appends                                                            |
-| Cloud fallback        | Run `claude` / `codex` directly (no prefix) to switch back instantly                                                              |
+| Cloud fallback        | Run `claude` / `codex` / `pi` directly (no prefix) to switch back instantly                                                       |
 
 ---
 
@@ -104,6 +104,7 @@ Then run:
 ```bash
 cc        # Claude Code → local model
 cx        # Codex CLI → local model
+cp        # Pi → local model
 ```
 
 ---
@@ -131,6 +132,7 @@ See [`guide.example.md`](guide.example.md) for the personalized daily-use guide 
 ```bash
 ccl                                             # run the interactive first-run wizard
 ccl setup --harness claude --engine ollama      # skip the prefs picker
+ccl setup --harness pi --engine ollama          # Pi (https://pi.dev/) + local model
 ccl setup --non-interactive                     # CI-friendly install
 ccl setup --resume                              # resume after a failure
 ccl find-model                                  # standalone model recommendation
@@ -141,9 +143,9 @@ ccl --version                                   # print version and exit
 ```
 
 `ccl run -p "<prompt>"` runs the harness in non-interactive mode (Claude
-Code's `-p`, Codex's `exec`) so external agents and CI scripts can drive a
-local model end-to-end without keystrokes. Without `-p`, behavior matches the
-`cc` / `cx` alias and the session starts interactively.
+Code's `-p`, Codex's `exec`, Pi's `--print`) so external agents and CI scripts
+can drive a local model end-to-end without keystrokes. Without `-p`, behavior
+matches the `cc` / `cx` / `cp` alias and the session starts interactively.
 
 Advanced / debug (no user binary — run as a Python module):
 
@@ -159,7 +161,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 - macOS or Linux with zsh or bash
 - Python 3.10+
-- At least one harness: [Claude Code](https://claude.ai/code) or [Codex CLI](https://github.com/openai/codex)
+- At least one harness: [Claude Code](https://claude.ai/code), [Codex CLI](https://github.com/openai/codex), or [Pi](https://pi.dev/) (`npm install -g @earendil-works/pi-coding-agent`) — Pi is the model-agnostic terminal coding harness whose tagline is “There are many agent harnesses, but this one is yours.”
 - At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), llama.cpp, or [9router](https://github.com/decolua/9router) (cloud-routing proxy)
 - [`llmfit`](https://github.com/luongnv89/llmfit) on `PATH` (optional — for automatic model selection)
 
@@ -171,17 +173,19 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 | ----------- | --------- | ---------------------- | ----------------------------------------------------------------------- |
 | Claude Code | Ollama    | `gemma4:26b`           | Verified end-to-end                                                     |
 | Codex CLI   | Ollama    | `gemma4:26b`           | Verified                                                                |
+| Pi          | Ollama    | any local tag          | Supported via isolated Pi `models.json` and `cp` alias                  |
 | Claude Code | LM Studio | Qwen3 family           | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
 | Any         | llama.cpp | any                    | Inline-env code path exists, no live proof yet                          |
 | Any         | vLLM      | any                    | New in 0.8.0 — adapter shipped with tests                               |
 | Claude Code | 9router   | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cc9` alias; existing `cc` is untouched |
 | Codex CLI   | 9router   | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cx9` alias; existing `cx` is untouched |
+| Pi          | 9router   | `kr/claude-sonnet-4.5` | Cloud-routed via `cp9`; existing `cp` is untouched                      |
 
 ---
 
 ## 9router quick-start
 
-[9router](https://github.com/decolua/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude) or `cx9` (Codex) alias and leaves your existing `cc` / `cx` aliases untouched.
+[9router](https://github.com/decolua/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude), `cx9` (Codex), or `cp9` (Pi) alias and leaves your existing `cc` / `cx` / `cp` aliases untouched.
 
 ### Installing and running 9router
 

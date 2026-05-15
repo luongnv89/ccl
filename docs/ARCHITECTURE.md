@@ -4,7 +4,7 @@ This document describes the system design of `claude-codex-local`.
 
 ## Overview
 
-`claude-codex-local` is a **local backend bridge** that sits between the Claude Code / Codex CLI harness (the AI coding tool the user already knows) and a locally-running LLM server. It does not replace or modify the harness — it teaches the harness to talk to a local model instead of the Anthropic / OpenAI cloud.
+`claude-codex-local` is a **local backend bridge** that sits between Claude Code, Codex CLI, or Pi (the AI coding harness the user already knows) and a locally-running LLM server. It does not replace or modify the harness — it teaches the harness to talk to a local model instead of the Anthropic / OpenAI cloud.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -55,7 +55,7 @@ A 9-step wizard that runs once (or with `--resume` after a failure):
 | 4    | Ask which model (or auto-pick via `llmfit`, installed on-demand if needed) |
 | 5    | Smoke-test the engine with the chosen model                                |
 | 6    | Wire up the harness                                                        |
-| 7    | Install helper script + shell aliases (`cc` / `cx`)                        |
+| 7    | Install helper script + shell aliases (`cc` / `cx` / `cp`)                 |
 | 8    | End-to-end verification                                                    |
 | 9    | Generate personalized `guide.md`                                           |
 
@@ -65,8 +65,8 @@ State is persisted to `.claude-codex-local/wizard-state.json` so a failed run ca
 
 The user-facing surface after setup:
 
-- `.claude-codex-local/bin/cc` / `cx` / `cc9` / `cx9` — a short bash wrapper that invokes the configured launch command. The `cc9` / `cx9` helpers are installed when the user picks the 9router engine (issue #51); they coexist with the local-engine `cc` / `cx` so a single machine can run both backends.
-- `~/.zshrc` / `~/.bashrc` — one fenced block per **install** (`# >>> claude-codex-local:claude >>>` for Claude+local-engine, `# >>> claude-codex-local:claude9 >>>` for Claude+9router, etc.). Fence tags are derived at the alias-emission site as `f"{harness}9"` for 9router and `harness` otherwise, so `state.primary_harness` stays semantic ("claude" / "codex") while the fence-tag stays presentational. Each block is idempotently replaced on re-run of its own install, and all four blocks coexist. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
+- `.claude-codex-local/bin/cc` / `cx` / `cp` / `cc9` / `cx9` / `cp9` — a short bash wrapper that invokes the configured launch command. The `*9` helpers are installed when the user picks the 9router engine; they coexist with the local-engine helpers so a single machine can run both backends.
+- `~/.zshrc` / `~/.bashrc` — one fenced block per **install** (`# >>> claude-codex-local:claude >>>` for Claude+local-engine, `# >>> claude-codex-local:pi9 >>>` for Pi+9router, etc.). Fence tags are derived at the alias-emission site as `f"{harness}9"` for 9router and `harness` otherwise, so `state.primary_harness` stays semantic ("claude" / "codex" / "pi") while the fence-tag stays presentational. Each block is idempotently replaced on re-run of its own install, and all blocks coexist. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
 
 ### `WireResult.raw_env` — deferred-secret pattern
 
@@ -87,7 +87,7 @@ Uses `ollama launch claude --model <tag>`, an official Ollama subcommand that:
 
 ### LM Studio / llama.cpp (secondary)
 
-Uses an inline-env approach: the helper script exports `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and related vars, then execs the harness. This works because both Claude Code and Codex CLI support OpenAI-compatible endpoints.
+Uses an inline-env approach for Claude Code and Codex: the helper script exports `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and related vars, then execs the harness. Pi uses its documented custom-provider mechanism instead: CCL writes an isolated `{STATE_DIR}/pi-agent/models.json`, sets `PI_CODING_AGENT_DIR`, and launches `pi --provider ccl-<engine> --model <tag>`.
 
 ### 9router (cloud-routing proxy, optional)
 
@@ -100,13 +100,13 @@ Uses an inline-env approach: the helper script exports `OPENAI_BASE_URL`, `OPENA
 
 ## Isolation Rule
 
-**The wizard never writes to `~/.claude` or `~/.codex`.**
+**The wizard never writes to `~/.claude`, `~/.codex`, or the default `~/.pi/agent`.**
 
-All state is isolated under `.claude-codex-local/` (or `$CLAUDE_CODEX_LOCAL_STATE_DIR`). The user's global config is always used read-only.
+All state is isolated under `.claude-codex-local/` (or `$CLAUDE_CODEX_LOCAL_STATE_DIR`). The user's global config is always used read-only; Pi's CCL-specific model config lives under `.claude-codex-local/pi-agent/models.json`.
 
 ## Rollback
 
-Remove the alias block from `~/.zshrc` / `~/.bashrc` and delete `.claude-codex-local/`. The original `claude` / `codex` commands are unaffected.
+Remove the alias block from `~/.zshrc` / `~/.bashrc` and delete `.claude-codex-local/`. The original `claude` / `codex` / `pi` commands are unaffected.
 
 ## Related docs
 

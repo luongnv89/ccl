@@ -1,12 +1,12 @@
 [project]
 name = "claude-codex-local"
 version = "0.10.0"
-description = "Local backend bridge for Claude Code and Codex."
+description = "Local backend bridge for Claude Code, Codex, and Pi."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-keywords = ["claude", "codex", "llm", "local", "ollama", "lm-studio", "bridge", "cli"]
+keywords = ["claude", "codex", "pi", "llm", "local", "ollama", "lm-studio", "bridge", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -55,7 +55,7 @@ include = ["claude_codex_local*"]
 testpaths = ["tests"]
 addopts = "-ra -q --strict-markers"
 markers = [
-  "local: tests that exercise real ollama/lms/claude/codex/llmfit binaries; auto-skipped if the tool is missing",
+  "local: tests that exercise real ollama/lms/claude/codex/pi/llmfit binaries; auto-skipped if the tool is missing",
   "real_llamacpp: tests that require a real llama-server binary and a downloaded GGUF model; skipped in CI",
   "real_vllm: tests that require a real `vllm serve` process and a downloaded HF model; skipped in CI",
 ]
