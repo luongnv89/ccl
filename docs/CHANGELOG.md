@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.11.0 — 2026-05-16
+
+### Features
+
+- **Pi Harness Support**: Add Pi as a supported harness alongside Claude Code and Codex CLI, enabling model-agnostic terminal coding workflows (#59, #82)
+  - Wire Pi into the wizard setup flow with dedicated configuration
+  - Add `cp` alias for Pi + local model sessions
+  - Support Pi-specific `models.json` configuration
+  - Update documentation and guide generation for Pi workflows
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.10.0...v0.11.0
+
 ## v0.10.0 — 2026-05-10
 
 ### Features
