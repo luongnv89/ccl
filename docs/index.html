@@ -1208,7 +1208,7 @@
           <div class="hero-left">
             <div class="hero-badge reveal">
               <span class="hero-badge-dot"></span>
-              v0.10.0 · Open Source · <span id="star-count">⭐ Loading...</span>
+              v0.11.0 · Open Source · <span id="star-count">⭐ Loading...</span>
             </div>
 
             <h1 class="hero-headline reveal">
@@ -1882,7 +1882,7 @@
             gap: 32px;
           "
         >
-          <!-- v0.10.0 -->
+          <!-- v0.11.0 -->
           <div
             class="reveal"
             style="
@@ -1907,7 +1907,7 @@
                   font-weight: 700;
                   color: var(--green);
                 "
-                >v0.10.0</span
+                >v0.11.0</span
               >
               <span
                 style="
@@ -1915,7 +1915,7 @@
                   color: var(--text-dim);
                   font-family: var(--mono);
                 "
-                >2026-05-05</span
+                >2026-05-16</span
               >
               <span
                 style="
@@ -1966,9 +1966,7 @@
                   <span style="position: absolute; left: 0; color: var(--green)"
                     >+</span
                   >
-                  <strong>9router Integration</strong>: Cloud-routing backend
-                  provider for alternative cloud models (OpenAI, DeepSeek, etc.)
-                  (#51, #52)
+                  <strong>Pi Harness Support</strong>: Add Pi as a supported harness alongside Claude Code and Codex CLI, enabling model-agnostic terminal coding workflows (#59, #82)
                 </li>
                 <li
                   style="
@@ -1981,46 +1979,7 @@
                   <span style="position: absolute; left: 0; color: var(--green)"
                     >+</span
                   >
-                  <code
-                    style="
-                      font-family: var(--mono);
-                      font-size: 12px;
-                      background: rgba(255, 255, 255, 0.06);
-                      padding: 1px 5px;
-                      border-radius: 3px;
-                    "
-                    >cc9</code
-                  >/<code
-                    style="
-                      font-family: var(--mono);
-                      font-size: 12px;
-                      background: rgba(255, 255, 255, 0.06);
-                      padding: 1px 5px;
-                      border-radius: 3px;
-                    "
-                    >cx9</code
-                  >
-                  aliases for 9router alongside existing
-                  <code
-                    style="
-                      font-family: var(--mono);
-                      font-size: 12px;
-                      background: rgba(255, 255, 255, 0.06);
-                      padding: 1px 5px;
-                      border-radius: 3px;
-                    "
-                    >cc</code
-                  >/<code
-                    style="
-                      font-family: var(--mono);
-                      font-size: 12px;
-                      background: rgba(255, 255, 255, 0.06);
-                      padding: 1px 5px;
-                      border-radius: 3px;
-                    "
-                    >cx</code
-                  >
-                  local aliases
+                  Wire Pi into the wizard setup flow with dedicated configuration
                 </li>
                 <li
                   style="
@@ -2033,7 +1992,15 @@
                   <span style="position: absolute; left: 0; color: var(--green)"
                     >+</span
                   >
-                  Wizard extended with 9router setup flow and API key management
+                  Add <code
+                    style="
+                      font-family: var(--mono);
+                      font-size: 12px;
+                      background: rgba(255, 255, 255, 0.06);
+                      padding: 1px 5px;
+                      border-radius: 3px;
+                    "
+                    >cp</code> alias for Pi + local model sessions
                 </li>
                 <li
                   style="
@@ -2046,43 +2013,15 @@
                   <span style="position: absolute; left: 0; color: var(--green)"
                     >+</span
                   >
-                  Fence-tag derivation and doctor checks for 9router coexistence
-                </li>
-              </ul>
-            </div>
-            <div>
-              <div
-                style="
-                  font-size: 11px;
-                  font-weight: 700;
-                  letter-spacing: 0.1em;
-                  text-transform: uppercase;
-                  color: var(--red);
-                  margin-bottom: 8px;
-                "
-              >
-                Fixed
-              </div>
-              <ul
-                style="
-                  list-style: none;
-                  display: flex;
-                  flex-direction: column;
-                  gap: 6px;
-                "
-              >
-                <li
-                  style="
-                    font-size: 14px;
-                    color: var(--text-muted);
-                    padding-left: 16px;
-                    position: relative;
-                  "
-                >
-                  <span style="position: absolute; left: 0; color: var(--red)"
-                    >✓</span
-                  >
-                  Wizard now honors forced setup preferences (#51)
+                  Support Pi-specific <code
+                    style="
+                      font-family: var(--mono);
+                      font-size: 12px;
+                      background: rgba(255, 255, 255, 0.06);
+                      padding: 1px 5px;
+                      border-radius: 3px;
+                    "
+                    >models.json</code> configuration
                 </li>
                 <li
                   style="
@@ -2092,23 +2031,10 @@
                     position: relative;
                   "
                 >
-                  <span style="position: absolute; left: 0; color: var(--red)"
-                    >✓</span
+                  <span style="position: absolute; left: 0; color: var(--green)"
+                    >+</span
                   >
-                  Updated DeepSeek model hub paths
-                </li>
-                <li
-                  style="
-                    font-size: 14px;
-                    color: var(--text-muted);
-                    padding-left: 16px;
-                    position: relative;
-                  "
-                >
-                  <span style="position: absolute; left: 0; color: var(--red)"
-                    >✓</span
-                  >
-                  Step 2 install-hint loop now shows 9router URL (#51)
+                  Update documentation and guide generation for Pi workflows
                 </li>
               </ul>
             </div>
@@ -4380,7 +4306,7 @@
               stroke-linecap="round"
             />
           </svg>
-          <strong>claude-codex-local</strong> · v0.10.0
+          <strong>claude-codex-local</strong> · v0.11.0
         </div>
         <ul class="footer-links">
           <li>
