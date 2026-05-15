@@ -3230,8 +3230,9 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 
 ## Return to official mode
 
-Your global `~/.claude` and `~/.codex` are unchanged. Run `claude` or
-`codex` directly (without `{alias_short}`) to use the cloud backend.
+Your global `~/.claude`, `~/.codex`, and default `~/.pi/agent` are unchanged.
+Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`cp`) to use the
+official backend/config.
 
 ## Rollback
 
