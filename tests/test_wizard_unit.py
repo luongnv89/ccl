@@ -3767,6 +3767,18 @@ class TestStep4PickOpenRouter:
         state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
         assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
 
+    def test_variant_suffix_model_accepted(self, isolated_state, monkeypatch):
+        """OpenRouter publishes :free / :nitro / :beta variant IDs that must validate."""
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+        monkeypatch.setenv("CCL_OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "google/gemma-4-31b-it:free"
+
 
 class TestRunDoctorOpenRouterChecks:
     """Issue #83 — run_doctor surfaces openrouter-specific health checks."""

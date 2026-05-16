@@ -1053,6 +1053,12 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
 
 _OPENROUTER_DEFAULT_MODEL = "anthropic/claude-sonnet-4.6"
 
+# OpenRouter publishes variant IDs of the form `provider/model:variant`
+# (e.g. `google/gemma-4-31b-it:free`, `mistralai/mistral-7b-instruct:nitro`).
+# The trailing `:variant` suffix is mandatory for the free-tier catalog —
+# we admit `:` in the model segment in addition to the 9router charset.
+_OPENROUTER_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9._:-]+$")
+
 
 def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = False) -> bool:
     """Step 4 specialisation for engine=openrouter.
@@ -1114,10 +1120,11 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
             return False
         model_name = model_input.strip()
 
-    if len(model_name) > 256 or not _ROUTER9_MODEL_RE.match(model_name):
+    if len(model_name) > 256 or not _OPENROUTER_MODEL_RE.match(model_name):
         fail(
             f"Invalid OpenRouter model name: {model_name!r}. Expected "
-            "<provider>/<model-id> (e.g. anthropic/claude-sonnet-4.6)."
+            "<provider>/<model-id>[:variant] (e.g. anthropic/claude-sonnet-4.6 "
+            "or google/gemma-4-31b-it:free)."
         )
         return False
 
@@ -3772,11 +3779,11 @@ def run_doctor() -> int:
             )
         if state.engine_model_tag:
             valid_model = len(state.engine_model_tag) <= 256 and bool(
-                _ROUTER9_MODEL_RE.match(state.engine_model_tag)
+                _OPENROUTER_MODEL_RE.match(state.engine_model_tag)
             )
             add_row(
                 "openrouter model name",
-                "<provider>/<model-id>",
+                "<provider>/<model-id>[:variant]",
                 valid_model,
                 state.engine_model_tag if valid_model else "invalid — re-run step 4",
             )
