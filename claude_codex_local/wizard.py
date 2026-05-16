@@ -1178,7 +1178,7 @@ def _step_4_openrouter_model_browser(env_model: str) -> str | None:
 
     free_models: list[dict[str, Any]] = result.get("models", [])
     if not free_models:
-        warn("OpenRouter returned zero free models. " "Falling back to manual model entry.")
+        warn("OpenRouter returned zero free models. Falling back to manual model entry.")
         return None
 
     ok(f"Found {len(free_models)} free models.")
