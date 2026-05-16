@@ -2488,10 +2488,14 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
         # cloud quota. We verify reachability by re-checking /v1/models.
         result = pb.smoke_test_router9_models()
     elif engine == "openrouter":
-        # CRITICAL: never call /chat/completions for OpenRouter — same
-        # paid-cloud-quota constraint as 9router. We verify reachability
-        # by re-checking /models on the hosted endpoint.
-        result = pb.smoke_test_openrouter_models()
+        # Step 5 is an explicit user-requested smoke test: send a minimal
+        # request through the selected OpenRouter model, not just /models.
+        api_key = ""
+        if pb.OPENROUTER_KEY_FILE.exists():
+            api_key = pb.OPENROUTER_KEY_FILE.read_text().strip()
+        if not api_key:
+            api_key = os.environ.get("CCL_OPENROUTER_API_KEY", "")
+        result = pb.smoke_test_openrouter_model(tag, api_key=api_key)
     else:
         warn(f"Smoke test for engine '{engine}' not implemented — skipping.")
         result = {"ok": True, "response": "(skipped)"}

@@ -3925,21 +3925,25 @@ class TestRunDoctorOpenRouterChecks:
 
 
 class TestStep5SmokeTestOpenRouter:
-    """Issue #83 — Step 5 smoke test must use /models, NOT /chat/completions."""
+    """Issue #85 — Step 5 smoke test sends a request to the selected model."""
 
-    def test_step5_calls_smoke_test_openrouter_models(self, isolated_state, monkeypatch):
+    def test_step5_calls_smoke_test_openrouter_selected_model(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        seen: dict[str, bool] = {"called": False}
+        seen: dict[str, str] = {}
 
-        def fake_models(*a, **kw):
-            seen["called"] = True
+        def fake_smoke(model, **kw):
+            seen["model"] = model
+            seen["api_key"] = kw.get("api_key", "")
             return {
                 "ok": True,
-                "models": ["anthropic/claude-sonnet-4.6"],
-                "response": "1 models",
+                "model": model,
+                "response": "READY",
             }
 
-        monkeypatch.setattr(pb, "smoke_test_openrouter_models", fake_models)
+        pb.OPENROUTER_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        pb.OPENROUTER_KEY_FILE.write_text("openrouter-test-key\n")  # pragma: allowlist secret
+        pb.OPENROUTER_KEY_FILE.chmod(0o600)
+        monkeypatch.setattr(pb, "smoke_test_openrouter_model", fake_smoke)
         # Hard-fail if any other smoke test is called for openrouter.
         for forbidden in (
             "smoke_test_ollama_model",
@@ -3947,6 +3951,7 @@ class TestStep5SmokeTestOpenRouter:
             "smoke_test_llamacpp_model",
             "smoke_test_vllm_model",
             "smoke_test_router9_models",
+            "smoke_test_openrouter_models",
         ):
             monkeypatch.setattr(
                 pb,
@@ -3962,8 +3967,10 @@ class TestStep5SmokeTestOpenRouter:
             engine_model_tag="anthropic/claude-sonnet-4.6",
         )
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
-        assert seen["called"] is True
+        assert seen["model"] == "anthropic/claude-sonnet-4.6"
+        assert seen["api_key"] == "openrouter-test-key"
         assert state.smoke_test_result["ok"] is True
+        assert state.smoke_test_result["model"] == "anthropic/claude-sonnet-4.6"
 
 
 class TestStep7VerifyOpenRouter:

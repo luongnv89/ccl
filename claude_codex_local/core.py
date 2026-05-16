@@ -478,9 +478,8 @@ class OpenRouterAdapter:
     OpenRouter is a hosted SaaS cloud-routing service that exposes an
     OpenAI-compatible API at https://openrouter.ai/api/v1 and forwards
     calls to cloud models like `anthropic/claude-sonnet-4.6` or
-    `openai/gpt-4o`. Because every chat call costs paid quota, this
-    adapter NEVER calls /chat/completions for detection or smoke tests;
-    we use /models reachability instead.
+    `openai/gpt-4o`. Detection and model listing use /models, while
+    run_test() performs the wizard's explicit selected-model smoke test.
 
     Unlike Router9Adapter there is nothing to install — OpenRouter is
     hosted, so detect() probes the public HTTPS endpoint directly. On
@@ -527,10 +526,10 @@ class OpenRouterAdapter:
         ]
 
     def run_test(self, model: str) -> dict[str, Any]:
-        # CRITICAL: this routes to paid cloud models. We deliberately do
-        # NOT call /chat/completions; we only verify the endpoint is
-        # reachable. See smoke_test_openrouter_models for the rationale.
-        return smoke_test_openrouter_models()
+        api_key = os.environ.get("CCL_OPENROUTER_API_KEY", "").strip()
+        if not api_key and OPENROUTER_KEY_FILE.exists():
+            api_key = OPENROUTER_KEY_FILE.read_text().strip()
+        return smoke_test_openrouter_model(model, api_key=api_key)
 
     def recommend_params(self, mode: str) -> dict[str, Any]:
         return {"provider": "openrouter", "extra_flags": []}
@@ -1008,9 +1007,9 @@ def smoke_test_openrouter_models(base_url: str | None = None) -> dict[str, Any]:
     """
     Reachability + presence check for the OpenRouter endpoint.
 
-    Issues GET {base_url}/models. NEVER calls /chat/completions — that
-    would burn paid quota since OpenRouter routes to cloud models like
-    anthropic/claude-sonnet-4.6.
+    Issues GET {base_url}/models. This metadata probe does not validate
+    that the selected model can answer; use smoke_test_openrouter_model()
+    for the Step 5 selected-model inference check.
 
     OpenRouter's /models endpoint is publicly reachable without auth, so
     no API key is required for the probe.
@@ -1032,6 +1031,67 @@ def smoke_test_openrouter_models(base_url: str | None = None) -> dict[str, Any]:
         return {"ok": False, "error": f"OpenRouter unreachable at {url}: {exc}"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def smoke_test_openrouter_model(
+    model: str,
+    base_url: str | None = None,
+    api_key: str | None = "",
+    timeout: int = 60,
+    max_tokens: int = 16,
+) -> dict[str, Any]:
+    """
+    Smoke-test a selected OpenRouter model via the OpenAI-compatible chat API.
+
+    This is intentionally different from smoke_test_openrouter_models(): the
+    wizard's Step 5 must prove the chosen model can answer a minimal request,
+    not only that OpenRouter's model catalog is reachable.
+    """
+    import urllib.error
+    import urllib.request
+
+    url = f"{(base_url or OPENROUTER_BASE_URL).rstrip('/')}/chat/completions"
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with exactly READY"}],
+            "max_tokens": max_tokens,
+            "temperature": 0,
+        }
+    ).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/luongnv89/ccl",
+        "X-Title": "claude-codex-local",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib.request.Request(url, data=payload, headers=headers)
+    start = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+        duration_seconds = max(time.time() - start, 1e-6)
+        text = body["choices"][0]["message"]["content"].strip()
+        usage = body.get("usage") or {}
+        raw_completion = usage.get("completion_tokens")
+        completion_tokens = int(raw_completion) if isinstance(raw_completion, int) else None
+        tokens_per_second: float | None = None
+        if completion_tokens is not None and completion_tokens > 0:
+            tokens_per_second = completion_tokens / duration_seconds
+        return {
+            "ok": "READY" in text.upper(),
+            "model": model,
+            "response": text,
+            "tokens_per_second": tokens_per_second,
+            "completion_tokens": completion_tokens,
+            "duration_seconds": duration_seconds,
+        }
+    except urllib.error.URLError as exc:
+        return {"ok": False, "model": model, "error": f"OpenRouter model {model} failed: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "model": model, "error": f"OpenRouter model {model} failed: {exc}"}
 
 
 # ---------------------------------------------------------------------------
