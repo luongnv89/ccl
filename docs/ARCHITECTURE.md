@@ -106,7 +106,7 @@ Uses an inline-env approach for Claude Code and Codex: the helper script exports
 - **Network detection.** `OpenRouterAdapter.detect()` hits the real HTTPS endpoint at `https://openrouter.ai/api/v1/models` with a 5-second timeout. It tolerates URL errors, timeouts, and non-2xx responses gracefully (returns `present=False` rather than raising) so the wizard's discover step works on machines without internet access.
 - **Attribution headers.** The wire env sets `HTTP_REFERER=https://github.com/luongnv89/ccl` and `X_TITLE=claude-codex-local` per OpenRouter convention. These are decorative — the harness may or may not forward them as actual HTTP headers — but they are not secrets and live in plain `env`, not `raw_env`.
 
-Everything else (key file at `~/.claude-codex-local/openrouter-api-key` chmod 0600, deferred-secret pattern, Step 7 chat skip, fence tags `claudeo` / `codexo` / `pio`, helper aliases `cco` / `cxo` / `cpo`) follows the 9router shape exactly.
+Everything else (key file at `~/.claude-codex-local/openrouter-api-key` chmod 0600, deferred-secret pattern, Step 7 chat skip, fence tags `claudeo` / `codexo` / `pio`, helper aliases `cco` / `cxo` / `cpo`) follows the 9router shape. Step 5 is the deliberate exception: after the user selects an OpenRouter model, CCL sends a minimal chat request to that exact model so the smoke test validates inference, not just catalog reachability.
 
 ## Isolation Rule
 

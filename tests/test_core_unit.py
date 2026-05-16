@@ -9,6 +9,7 @@ fixture defined in conftest.py.
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import patch
 
 import claude_codex_local.core as pb
@@ -1149,6 +1150,29 @@ class _FakeModelsResp:
         pass
 
 
+class _FakeOpenRouterChatResp:
+    """Minimal fake OpenAI-compatible chat completion response."""
+
+    status = 200
+
+    def __init__(self, content: str, completion_tokens: int = 1):
+        self._body = json.dumps(
+            {
+                "choices": [{"message": {"content": content}}],
+                "usage": {"completion_tokens": completion_tokens},
+            }
+        ).encode()
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+
 class TestRouter9Adapter:
     def test_name_and_recommend_params(self):
         adapter = pb.Router9Adapter()
@@ -1435,15 +1459,19 @@ class TestOpenRouterAdapter:
         adapter = pb.OpenRouterAdapter()
         assert adapter.list_models() == []
 
-    def test_run_test_delegates_to_smoke_test_models(self, monkeypatch):
+    def test_run_test_delegates_to_selected_model_smoke_test(self, monkeypatch):
         sentinel = {
             "ok": True,
-            "models": ["anthropic/claude-sonnet-4.6"],
-            "response": "1 models",
+            "model": "anthropic/anything",
+            "response": "READY",
         }
-        monkeypatch.setattr(pb, "smoke_test_openrouter_models", lambda *a, **kw: sentinel)
+
+        def fake_smoke(model, **kw):
+            assert model == "anthropic/anything"
+            return sentinel
+
+        monkeypatch.setattr(pb, "smoke_test_openrouter_model", fake_smoke)
         adapter = pb.OpenRouterAdapter()
-        # run_test deliberately ignores the model arg; it only probes /models.
         assert adapter.run_test("anthropic/anything") == sentinel
 
 
@@ -1487,12 +1515,10 @@ class TestSmokeTestOpenRouterModels:
         pb.smoke_test_openrouter_models("http://other-host:9999/api/v1")
         assert seen["url"] == "http://other-host:9999/api/v1/models"
 
-    def test_source_does_not_call_chat_completions(self):
-        """Mechanical pin: smoke_test_openrouter_models source must NOT reference chat/completions.
+    def test_catalog_probe_source_does_not_call_chat_completions(self):
+        """The /models catalog probe stays metadata-only.
 
-        OpenRouter routes to paid cloud models — we can never call a chat
-        endpoint as part of detection or smoke testing, even by mistake.
-        Mirrors the same pin used for smoke_test_router9_models.
+        The selected-model smoke test lives in smoke_test_openrouter_model().
         """
         from pathlib import Path
 
@@ -1506,10 +1532,47 @@ class TestSmokeTestOpenRouterModels:
             first = body.index('"""')
             second = body.index('"""', first + 3)
             body = body[:first] + body[second + 3 :]
-        assert "chat/completions" not in body, (
-            "smoke_test_openrouter_models must never call /chat/completions — "
-            "that would burn paid quota."
+        assert "chat/completions" not in body
+
+
+class TestSmokeTestOpenRouterModel:
+    def test_posts_minimal_prompt_to_selected_model(self, monkeypatch):
+        import urllib.request
+
+        seen: dict[str, Any] = {}
+
+        def fake_urlopen(req, timeout):
+            seen["url"] = req.full_url
+            seen["payload"] = json.loads(req.data)
+            seen["headers"] = dict(req.headers)
+            return _FakeOpenRouterChatResp("READY", completion_tokens=4)
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        result = pb.smoke_test_openrouter_model(
+            "anthropic/claude-sonnet-4.6",
+            api_key="openrouter-test-key",  # pragma: allowlist secret
         )
+
+        assert result["ok"] is True
+        assert result["model"] == "anthropic/claude-sonnet-4.6"
+        assert seen["url"] == f"{pb.OPENROUTER_BASE_URL}/chat/completions"
+        assert seen["payload"]["model"] == "anthropic/claude-sonnet-4.6"
+        assert seen["payload"]["messages"][0]["content"] == "Reply with exactly READY"
+        assert seen["headers"].get("Authorization") == "Bearer openrouter-test-key"
+
+    def test_failure_mentions_selected_model(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("bad request")),
+        )
+        result = pb.smoke_test_openrouter_model("anthropic/bad-model")
+        assert result["ok"] is False
+        assert result["model"] == "anthropic/bad-model"
+        assert "anthropic/bad-model" in result["error"]
 
 
 # ---------------------------------------------------------------------------

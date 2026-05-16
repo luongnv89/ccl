@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Helper scripts `cco` / `cxo` / `cpo` (Claude / Codex / Pi via OpenRouter)
   - Default model `anthropic/claude-sonnet-4.6`; override via `CCL_OPENROUTER_MODEL`
   - Deferred-secret API key storage (chmod 0600) reused from the 9router pattern
-  - Smoke test and verify use `/models` only — never `/chat/completions` — to avoid burning paid quota
+  - Smoke test sends a minimal request to the selected OpenRouter model; verify still uses `/models` only to avoid an extra chat call
   - Doctor checks for OpenRouter key file mode, content, and model name validity
 
 ## v0.11.0 — 2026-05-16
