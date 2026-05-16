@@ -1575,6 +1575,286 @@ class TestSmokeTestOpenRouterModel:
         assert "anthropic/bad-model" in result["error"]
 
 
+class TestFetchOpenRouterFreeModels:
+    """Tests for fetch_openrouter_free_models — catalog fetch + free-tier filter."""
+
+    def _fake_response(self, models: list[dict[str, Any]]) -> _FakeModelsResp:
+        """Build a fake /models response with full model objects."""
+        return _FakeModelsResp.__new__(_FakeModelsResp)
+
+    def _make_free_model(self, **overrides) -> dict[str, Any]:
+        """Build a single free-tier model dict matching the OpenRouter schema."""
+        base = {
+            "id": "google/gemma-4-31b-it:free",
+            "context_length": 131072,
+            "pricing": {"prompt": "0", "completion": "0"},
+            "architecture": {
+                "tokenizer": "gemini",
+                "modality": "text->text",
+            },
+            "supported_parameters": ["tools", "response_format"],
+            "description": "A free model by Google.",
+        }
+        base.update(overrides)
+        return base
+
+    def _make_paid_model(self, **overrides) -> dict[str, Any]:
+        """Build a paid-tier model dict."""
+        base = {
+            "id": "anthropic/claude-sonnet-4.6",
+            "context_length": 200000,
+            "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+            "architecture": {
+                "tokenizer": "claude",
+                "modality": "text->text",
+            },
+            "supported_parameters": ["tools"],
+            "description": "A paid model.",
+        }
+        base.update(overrides)
+        return base
+
+    def _fake_urlopen_factory(self, models: list[dict[str, Any]]):
+        """Return a urlopen replacement that serves the given model list."""
+
+        body = json.dumps({"data": models}).encode()
+
+        class _Resp:
+            status = 200
+
+            def read(self):
+                return body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        return lambda *a, **kw: _Resp()
+
+    def test_returns_only_free_models(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            self._make_free_model(id="google/gemma-4-31b-it:free"),
+            self._make_paid_model(id="anthropic/claude-sonnet-4.6"),
+            self._make_free_model(
+                id="mistralai/mistral-7b-instruct:free",
+                context_length=32768,
+                architecture={"tokenizer": "mistral", "modality": "text->text"},
+                supported_parameters=[],
+            ),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        assert result["ok"] is True
+        ids = [m["id"] for m in result["models"]]
+        assert "google/gemma-4-31b-it:free" in ids
+        assert "mistralai/mistral-7b-instruct:free" in ids
+        assert "anthropic/claude-sonnet-4.6" not in ids
+
+    def test_sorts_by_context_length_descending(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            self._make_free_model(id="small-model:free", context_length=8192),
+            self._make_free_model(id="large-model:free", context_length=262144),
+            self._make_free_model(id="mid-model:free", context_length=32768),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        ids = [m["id"] for m in result["models"]]
+        assert ids == ["large-model:free", "mid-model:free", "small-model:free"]
+
+    def test_derived_capabilities_include_function_calling(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            self._make_free_model(
+                id="google/gemma-4-31b-it:free",
+                supported_parameters=["tools", "response_format"],
+            ),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        caps = result["models"][0]["capabilities"]
+        assert "function-calling" in caps
+        assert "structured-output" in caps
+
+    def test_derived_capabilities_text_only(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            self._make_free_model(
+                id="simple-model:free",
+                supported_parameters=["temperature"],
+            ),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        caps = result["models"][0]["capabilities"]
+        assert "text" in caps
+        assert "function-calling" not in caps
+
+    def test_image_modality(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            self._make_free_model(
+                id="vision-model:free",
+                architecture={"tokenizer": "clip", "modality": "text+image->text"},
+            ),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        caps = result["models"][0]["capabilities"]
+        assert "image" in caps
+
+    def test_returns_error_on_connection_failure(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("Connection refused")),
+        )
+        result = pb.fetch_openrouter_free_models()
+        assert result["ok"] is False
+        assert len(result["models"]) == 0
+        assert "error" in result
+
+    def test_truncates_long_descriptions(self, monkeypatch):
+        import urllib.request
+
+        long_desc = "A" * 200
+        models = [
+            self._make_free_model(
+                id="verbose-model:free",
+                description=long_desc,
+            ),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        desc = result["models"][0]["description"]
+        assert len(desc) <= 80
+        assert desc.endswith("...")
+
+    def test_handles_zero_context_length(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            self._make_free_model(id="noctx:free", context_length=0),
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        assert result["ok"] is True
+        assert result["models"][0]["context_length"] == 0
+
+    def test_handles_missing_context_length(self, monkeypatch):
+        import urllib.request
+
+        m = self._make_free_model(id="nolen:free")
+        del m["context_length"]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory([m]),
+        )
+        result = pb.fetch_openrouter_free_models()
+        assert result["ok"] is True
+        assert result["models"][0]["context_length"] == 0
+
+    def test_empty_catalog_returns_ok_with_empty_list(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory([]),
+        )
+        result = pb.fetch_openrouter_free_models()
+        assert result["ok"] is True
+        assert result["models"] == []
+
+    def test_paid_models_with_zero_prompt_but_nonzero_completion_excluded(self, monkeypatch):
+        import urllib.request
+
+        models = [
+            {
+                "id": "partial-free",
+                "context_length": 8192,
+                "pricing": {"prompt": "0", "completion": "0.001"},
+                "architecture": {"tokenizer": "x", "modality": "text->text"},
+                "supported_parameters": [],
+                "description": "",
+            },
+        ]
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            self._fake_urlopen_factory(models),
+        )
+        result = pb.fetch_openrouter_free_models()
+        assert result["ok"] is True
+        assert len(result["models"]) == 0
+
+    def test_uses_custom_base_url(self, monkeypatch):
+        import urllib.request
+
+        seen: dict[str, str] = {}
+
+        def fake_urlopen(req, *a, **kw):
+            seen["url"] = req.full_url
+
+            class _Resp:
+                status = 200
+
+                def read(self):
+                    return json.dumps({"data": []}).encode()
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    pass
+
+            return _Resp()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        pb.fetch_openrouter_free_models("http://custom:9999/api/v1")
+        assert seen["url"] == "http://custom:9999/api/v1/models"
+
+
 # ---------------------------------------------------------------------------
 # llama.cpp server lifecycle helpers (issue #53).
 # ---------------------------------------------------------------------------

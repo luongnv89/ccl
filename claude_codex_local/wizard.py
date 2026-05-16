@@ -1060,17 +1060,26 @@ _OPENROUTER_DEFAULT_MODEL = "anthropic/claude-sonnet-4.6"
 _OPENROUTER_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9._:-]+$")
 
 
+def _format_context_length(ctx_len: int) -> str:
+    """Format a context-length integer as a human-readable string."""
+    if ctx_len >= 1_000_000:
+        return f"{ctx_len // 1_000_000}M"
+    if ctx_len >= 1000:
+        return f"{ctx_len // 1000}k"
+    return str(ctx_len)
+
+
 def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = False) -> bool:
     """Step 4 specialisation for engine=openrouter.
 
     Skips llmfit/disk/download entirely — OpenRouter routes to cloud models
     that aren't downloaded locally. Asks the user for an API key (or reads
     CCL_OPENROUTER_API_KEY from env) and writes it to OPENROUTER_KEY_FILE
-    with chmod 0o600. Then asks for a model name with default
-    anthropic/claude-sonnet-4.6.
-
-    Reuses the 9router model regex — both backends use `<provider>/<model-id>`
-    slugs (kr/claude-sonnet-4.5 and anthropic/claude-sonnet-4.6 both match).
+    with chmod 0o600. Then offers an interactive free-model browser that
+    fetches the OpenRouter catalog, filters to free-tier entries, and
+    displays a rich table (provider/model ID, context length, capabilities).
+    Falls back to the text-input flow if the user declines or the API call
+    fails (offline, rate-limited, empty response).
     """
     pb.ensure_state_dirs()
 
@@ -1105,20 +1114,25 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
     pb.OPENROUTER_KEY_FILE.chmod(0o600)
     ok(f"Wrote OpenRouter API key to [bold]{pb.OPENROUTER_KEY_FILE}[/bold] (chmod 0600).")
 
-    # --- Model name ---
+    # --- Model selection ---
     env_model = os.environ.get("CCL_OPENROUTER_MODEL", "").strip()
     if non_interactive:
         model_name = env_model or _OPENROUTER_DEFAULT_MODEL
     else:
-        prompt_default = env_model or _OPENROUTER_DEFAULT_MODEL
-        model_input = questionary.text(
-            "OpenRouter model name:",
-            default=prompt_default,
-        ).ask()
-        if not model_input:
-            fail("No model name provided.")
-            return False
-        model_name = model_input.strip()
+        browser_result = _step_4_openrouter_model_browser(env_model)
+        if browser_result is None:
+            # Browser was declined or failed — fall through to text input.
+            prompt_default = env_model or _OPENROUTER_DEFAULT_MODEL
+            model_input = questionary.text(
+                "OpenRouter model name:",
+                default=prompt_default,
+            ).ask()
+            if not model_input:
+                fail("No model name provided.")
+                return False
+            model_name = model_input.strip()
+        else:
+            model_name = browser_result
 
     if len(model_name) > 256 or not _OPENROUTER_MODEL_RE.match(model_name):
         fail(
@@ -1135,6 +1149,79 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
     ok(f"Picked OpenRouter model: [bold]{model_name}[/bold]")
     state.mark("4")
     return True
+
+
+def _step_4_openrouter_model_browser(env_model: str) -> str | None:
+    """Interactive free-model browser for OpenRouter.
+
+    Asks the user whether they want to browse free models. If yes, fetches
+    the catalog, filters to free-tier, displays a rich table, and returns
+    the selected model ID. Returns None if the user declines or the fetch
+    fails (caller falls back to text input).
+    """
+    browse = questionary.confirm(
+        "Would you like to browse free models from OpenRouter before entering a model name?",
+        default=True,
+    ).ask()
+    if not browse:
+        return None
+
+    info("Fetching free models from OpenRouter...")
+    result = pb.fetch_openrouter_free_models()
+
+    if not result.get("ok"):
+        warn(
+            f"Could not fetch free model list: {result.get('error', 'unknown error')}. "
+            "Falling back to manual model entry."
+        )
+        return None
+
+    free_models: list[dict[str, Any]] = result.get("models", [])
+    if not free_models:
+        warn("OpenRouter returned zero free models. Falling back to manual model entry.")
+        return None
+
+    ok(f"Found {len(free_models)} free models.")
+
+    # --- Display table ---
+    table = Table(
+        title="OpenRouter Free Models",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Provider / Model ID", style="green", width=42)
+    table.add_column("Context", style="yellow", width=8)
+    table.add_column("Capabilities", style="magenta", width=30)
+
+    for idx, model in enumerate(free_models, 1):
+        ctx_str = _format_context_length(model.get("context_length", 0))
+        caps = ", ".join(model.get("capabilities", ["text"]))
+        table.add_row(str(idx), model["id"], ctx_str, caps)
+
+    console.print(table)
+    console.print()
+
+    # --- Build choices ---
+    choices: list[questionary.Choice] = []
+    for idx, model in enumerate(free_models, 1):
+        ctx_str = _format_context_length(model.get("context_length", 0))
+        caps = ", ".join(model.get("capabilities", ["text"]))
+        label = f"{idx:>3}. {model['id']:<42s}  ctx={ctx_str:<6s}  [{caps}]"
+        choices.append(questionary.Choice(label, value=idx - 1))
+
+    choices.append(questionary.Separator())
+    choices.append(questionary.Choice("Enter a model name manually instead", value=-1))
+
+    selected = questionary.select(
+        "Select a free model (or choose manual entry):",
+        choices=choices,
+    ).ask()
+
+    if selected is None or selected == -1:
+        return None
+
+    return free_models[selected]["id"]
 
 
 def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -> bool:

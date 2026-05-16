@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
+
+import questionary
 
 # ---------------------------------------------------------------------------
 # WizardState persistence — roundtrip + mark + resilience to a missing file.
@@ -1501,9 +1504,9 @@ class TestStep24PickerIntegration:
         for _mode, rec in recs.items():
             if rec is None:
                 continue
-            assert (
-                ":" not in rec["engine_tag"]
-            ), f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            assert ":" not in rec["engine_tag"], (
+                f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            )
 
         wiz.step_2_4_pick_model(state, non_interactive=False)
 
@@ -2961,7 +2964,6 @@ class TestEnsureTool9Router:
                 AssertionError("must not subprocess.run when npm is missing")
             ),
         )
-        import questionary
 
         monkeypatch.setattr(
             questionary,
@@ -3076,7 +3078,6 @@ class TestEnsureToolVLLM:
                 AssertionError("must not subprocess.run for vllm")
             ),
         )
-        import questionary
 
         monkeypatch.setattr(
             questionary,
@@ -3799,6 +3800,171 @@ class TestStep4PickOpenRouter:
         assert state.engine_model_tag == "google/gemma-4-31b-it:free"
 
 
+class TestStep4OpenRouterModelBrowser:
+    """Issue #87 — interactive free-model browser for OpenRouter."""
+
+    def _free_models(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "google/gemma-4-31b-it:free",
+                "context_length": 131072,
+                "architecture": "gemini",
+                "capabilities": ["text", "function-calling"],
+                "description": "Gemma free tier.",
+            },
+            {
+                "id": "mistralai/mistral-7b-instruct:free",
+                "context_length": 32768,
+                "architecture": "mistral",
+                "capabilities": ["text"],
+                "description": "Mistral free tier.",
+            },
+        ]
+
+    def test_user_declines_browser_falls_back_to_text_input(self, isolated_state, monkeypatch):
+        """When user says no to browsing, falls back to manual text input."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+
+        # User declines the browser prompt, then types a model name.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(
+            wiz.questionary, "text", lambda *a, **kw: _StubAsk("anthropic/claude-sonnet-4.6")
+        )
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz._step_4_pick_model_openrouter(state, non_interactive=False) is True
+        assert state.engine_model_tag == "anthropic/claude-sonnet-4.6"
+        assert state.model_source == "openrouter-direct"
+
+    def test_user_selects_model_from_browser(self, isolated_state, monkeypatch):
+        """User accepts browser, selects a model, it populates state."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+
+        free_models = self._free_models()
+        monkeypatch.setattr(
+            pb,
+            "fetch_openrouter_free_models",
+            lambda: {"ok": True, "models": free_models, "error": None},
+        )
+
+        # User accepts browser (confirm=True), selects first model (select=0).
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk(0))
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz._step_4_pick_model_openrouter(state, non_interactive=False) is True
+        assert state.engine_model_tag == "google/gemma-4-31b-it:free"
+        assert state.model_name == "google/gemma-4-31b-it:free"
+        assert state.model_source == "openrouter-direct"
+
+    def test_api_fetch_failure_falls_back_to_text_input(self, isolated_state, monkeypatch):
+        """When fetch returns ok=False, falls back to manual text input."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+
+        monkeypatch.setattr(
+            pb,
+            "fetch_openrouter_free_models",
+            lambda: {"ok": False, "models": [], "error": "Connection refused"},
+        )
+
+        # User accepts browser (confirm=True), then types model after fallback.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+        monkeypatch.setattr(
+            wiz.questionary, "text", lambda *a, **kw: _StubAsk("anthropic/claude-sonnet-4.6")
+        )
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz._step_4_pick_model_openrouter(state, non_interactive=False) is True
+        assert state.engine_model_tag == "anthropic/claude-sonnet-4.6"
+
+    def test_empty_free_models_falls_back_to_text_input(self, isolated_state, monkeypatch):
+        """When fetch returns zero free models, falls back to manual text input."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+
+        monkeypatch.setattr(
+            pb,
+            "fetch_openrouter_free_models",
+            lambda: {"ok": True, "models": [], "error": None},
+        )
+
+        # User accepts browser (confirm=True), then types model after fallback.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("openai/gpt-4o"))
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz._step_4_pick_model_openrouter(state, non_interactive=False) is True
+        assert state.engine_model_tag == "openai/gpt-4o"
+
+    def test_user_chooses_manual_entry_from_browser(self, isolated_state, monkeypatch):
+        """User opens browser but picks 'Enter manually' option."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+
+        free_models = self._free_models()
+        monkeypatch.setattr(
+            pb,
+            "fetch_openrouter_free_models",
+            lambda: {"ok": True, "models": free_models, "error": None},
+        )
+
+        # User accepts browser (confirm=True), picks manual entry (select=-1),
+        # then types a model name.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk(-1))
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("my/custom-model"))
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz._step_4_pick_model_openrouter(state, non_interactive=False) is True
+        assert state.engine_model_tag == "my/custom-model"
+
+    def test_non_interactive_skips_browser_entirely(self, isolated_state, monkeypatch):
+        """In non-interactive mode, browser is skipped; env/default model is used."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+        monkeypatch.setenv("CCL_OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz._step_4_pick_model_openrouter(state, non_interactive=True) is True
+        assert state.engine_model_tag == "google/gemma-4-31b-it:free"
+
+    def test_format_context_length_millions(self, isolated_state):
+        """_format_context_length formats >= 1M correctly."""
+        _, wiz, _ = isolated_state
+        assert wiz._format_context_length(2_000_000) == "2M"
+
+    def test_format_context_length_thousands(self, isolated_state):
+        """_format_context_length formats >= 1k correctly."""
+        _, wiz, _ = isolated_state
+        assert wiz._format_context_length(131072) == "131k"
+
+    def test_format_context_length_small(self, isolated_state):
+        """_format_context_length passes through small values."""
+        _, wiz, _ = isolated_state
+        assert wiz._format_context_length(512) == "512"
+
+
 class TestRunDoctorOpenRouterChecks:
     """Issue #83 — run_doctor surfaces openrouter-specific health checks."""
 
@@ -4082,7 +4248,6 @@ class TestEnsureToolOpenRouter:
             ),
         )
         # questionary.confirm must NEVER be prompted either.
-        import questionary
 
         monkeypatch.setattr(
             questionary,

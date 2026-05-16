@@ -1094,6 +1094,89 @@ def smoke_test_openrouter_model(
         return {"ok": False, "model": model, "error": f"OpenRouter model {model} failed: {exc}"}
 
 
+def fetch_openrouter_free_models(
+    base_url: str | None = None,
+    timeout: int = 15,
+) -> dict[str, Any]:
+    """Fetch and filter the OpenRouter model catalog to free-tier entries.
+
+    Queries GET {base_url}/models, filters to models where both
+    ``pricing.prompt`` and ``pricing.completion`` are ``"0"``, and returns
+    a list of enriched model dicts suitable for display.
+
+    Each returned entry contains:
+      - ``id``: full model ID (e.g. ``google/gemma-4-31b-it:free``)
+      - ``context_length``: int (tokens)
+      - ``architecture``: tokenizer name or ``"unknown"``
+      - ``capabilities``: list[str] derived from ``architecture.modality``
+        and ``supported_parameters``
+      - ``description``: truncated description string
+
+    Returns:
+      ``{"ok": bool, "models": list[dict], "error": str | None}``
+    """
+    import urllib.error
+    import urllib.request
+
+    url = f"{(base_url or OPENROUTER_BASE_URL).rstrip('/')}/models"
+    req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.URLError as exc:
+        return {"ok": False, "models": [], "error": f"OpenRouter unreachable: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "models": [], "error": str(exc)}
+
+    raw_models = body.get("data", [])
+    free_models: list[dict[str, Any]] = []
+    for model in raw_models:
+        pricing = model.get("pricing", {})
+        prompt_price = pricing.get("prompt", "1")
+        completion_price = pricing.get("completion", "1")
+        if prompt_price != "0" or completion_price != "0":
+            continue
+
+        arch = model.get("architecture", {})
+        supported = model.get("supported_parameters", [])
+
+        capabilities: list[str] = []
+        modality = arch.get("modality", "")
+        if "text" in modality or modality == "":
+            capabilities.append("text")
+        if "image" in modality:
+            capabilities.append("image")
+        if "function_call" in supported or "tools" in supported:
+            capabilities.append("function-calling")
+        if "response_format" in supported or "structured_outputs" in supported:
+            capabilities.append("structured-output")
+        if not capabilities:
+            capabilities.append("text")
+
+        ctx_len = model.get("context_length", 0)
+        if not isinstance(ctx_len, int):
+            ctx_len = 0
+
+        desc = model.get("description", "") or ""
+        if len(desc) > 80:
+            desc = desc[:77] + "..."
+
+        free_models.append(
+            {
+                "id": model.get("id", ""),
+                "context_length": ctx_len,
+                "architecture": arch.get("tokenizer", "unknown"),
+                "capabilities": capabilities,
+                "description": desc,
+            }
+        )
+
+    # Sort by context length descending so the most capable models surface first.
+    free_models.sort(key=lambda m: m["context_length"], reverse=True)
+
+    return {"ok": True, "models": free_models, "error": None}
+
+
 # ---------------------------------------------------------------------------
 # vLLM helpers
 # ---------------------------------------------------------------------------
