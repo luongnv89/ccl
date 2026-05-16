@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.12.0 — 2026-05-16
+
 ### Features
 
 - **OpenRouter Integration**: Add OpenRouter as a hosted-SaaS cloud-routing backend alongside 9router (#83)
@@ -16,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Deferred-secret API key storage (chmod 0600) reused from the 9router pattern
   - Smoke test sends a minimal request to the selected OpenRouter model; verify still uses `/models` only to avoid an extra chat call
   - Doctor checks for OpenRouter key file mode, content, and model name validity
+
+### Bug Fixes
+
+- **OpenRouter smoke test**: Smoke test now targets the selected OpenRouter model (#85)
+
+### Documentation
+
+- Update landing page release history for recent versions
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.11.0...v0.12.0
 
 ## v0.11.0 — 2026-05-16
 
