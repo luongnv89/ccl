@@ -420,6 +420,25 @@ class TestWireCodex:
         # Plain env must NOT carry a literal API key; only URL + attribution.
         assert "OPENAI_API_KEY" not in result.env
 
+    def test_openrouter_codex_helper_script_does_not_embed_key_value(self, isolated_state):
+        """Pin: codexo helper script must contain $(cat ...) and NOT the real key.
+
+        Mirrors the claude/9router pins. Closes the coverage matrix so all
+        three OpenRouter helper-script paths (claude/codex/pi) have a
+        sentinel-based assertion that the API key value is never embedded
+        in the generated script body.
+        """
+        pb, wiz, _ = isolated_state
+        pb.ensure_state_dirs()
+        pb.OPENROUTER_KEY_FILE.write_text("openrouter-test-key\n")  # pragma: allowlist secret
+        pb.OPENROUTER_KEY_FILE.chmod(0o600)
+        result = wiz._wire_codex("openrouter", "anthropic/claude-sonnet-4.6")
+        path = wiz._write_helper_script("codexo", result)
+        body = path.read_text()
+        assert "openrouter-test-key" not in body  # pragma: allowlist secret
+        assert "$(cat" in body
+        assert str(pb.OPENROUTER_KEY_FILE) in body
+
 
 # ---------------------------------------------------------------------------
 # _wire_pi — writes isolated Pi custom-provider config.

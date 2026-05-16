@@ -1096,10 +1096,10 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
             api_key_input = questionary.password(
                 "Paste your OpenRouter API key (kept locally, chmod-600):",
             ).ask()
-            if not api_key_input:
+            api_key = (api_key_input or "").strip()
+            if not api_key:
                 fail("No API key provided. Cannot continue.")
                 return False
-            api_key = api_key_input.strip()
 
     pb.OPENROUTER_KEY_FILE.write_text(api_key + "\n")
     pb.OPENROUTER_KEY_FILE.chmod(0o600)
@@ -2740,6 +2740,10 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         # file, never embedding it. HTTP_REFERER and X_TITLE are
         # OpenRouter's optional attribution headers; harmless when ignored
         # by the harness, useful in OpenRouter's dashboard analytics.
+        # Env-var names use underscores (HTTP_REFERER, X_TITLE) because
+        # POSIX env-var names cannot contain hyphens; the harness is
+        # responsible for translating them into the hyphenated HTTP
+        # headers (HTTP-Referer, X-Title) on the wire.
         base_url = pb.OPENROUTER_BASE_URL
         key_file = pb.OPENROUTER_KEY_FILE
         key_expr = f'"$(cat {shlex.quote(str(key_file))})"'
