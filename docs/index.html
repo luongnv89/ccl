@@ -1270,6 +1270,8 @@
               <span>vLLM</span>
               <span class="trust-sep">·</span>
               <span>9router</span>
+              <span class="trust-sep">·</span>
+              <span>OpenRouter</span>
             </div>
           </div>
 
@@ -1510,6 +1512,17 @@
               Claude Code/Codex workflow intact.
             </p>
           </div>
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon">🌐</div>
+            <h3>Hosted SaaS (OpenRouter)</h3>
+            <p>
+              Want a hosted alternative to running your own router? OpenRouter
+              forwards calls to dozens of cloud models (Claude, GPT-4o, Llama,
+              Mistral, ...). Use <code>cco</code>/<code>cxo</code>/<code>cpo</code>
+              aliases — your local <code>cc</code>/<code>cx</code>/<code>cp</code>
+              are untouched.
+            </p>
+          </div>
         </div>
       </div>
     </section>
@@ -1693,6 +1706,9 @@
             <span class="check">✓</span> Claude Code + 9router + OpenAI/DeepSeek
           </div>
           <div class="proof-pill">
+            <span class="check">✓</span> Claude Code + OpenRouter + anthropic/claude-sonnet-4.6
+          </div>
+          <div class="proof-pill">
             <span class="warn">⚠</span> Claude Code + LM Studio + Qwen3
           </div>
           <div class="proof-pill">
@@ -1752,11 +1768,17 @@
                 downloaded directly from <strong>Hugging Face</strong> via the
                 built-in <code>huggingface-cli</code> integration.<br /><br />
                 <strong>Cloud routing:</strong> <strong>9router</strong> — a
-                cloud-routing proxy that lets you use alternative providers
+                local cloud-routing proxy that lets you use alternative providers
                 (OpenAI, DeepSeek, etc.) while keeping your Claude Code/Codex
                 workflow. The wizard sets up <code>cc9</code>/<code>cx9</code>
                 aliases that route to cloud models while keeping your existing
-                <code>cc</code>/<code>cx</code> local aliases intact.
+                <code>cc</code>/<code>cx</code> local aliases intact.<br /><br />
+                <strong>Hosted SaaS:</strong> <strong>OpenRouter</strong> — a
+                hosted alternative to 9router with an OpenAI-compatible API at
+                <code>openrouter.ai/api/v1</code>. No daemon to install, just an
+                API key. The wizard sets up <code>cco</code>/<code>cxo</code>/<code>cpo</code>
+                aliases routing to OpenRouter while leaving your local aliases
+                untouched.
               </div>
             </div>
           </div>

@@ -648,9 +648,9 @@ class TestAdapters:
         assert result["ok"] is True
         assert "2" in result["detail"]
 
-    def test_all_adapters_registry_contains_all_five(self):
+    def test_all_adapters_registry_contains_all_six(self):
         names = {a.name for a in pb.ALL_ADAPTERS}
-        assert names == {"ollama", "lmstudio", "llamacpp", "vllm", "9router"}
+        assert names == {"ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"}
 
 
 # ---------------------------------------------------------------------------
@@ -1306,6 +1306,208 @@ class TestSmokeTestRouter9Models:
             body = body[:first] + body[second + 3 :]
         assert "chat/completions" not in body, (
             "smoke_test_router9_models must never call /chat/completions — "
+            "that would burn paid quota."
+        )
+
+
+# ---------------------------------------------------------------------------
+# OpenRouterAdapter — OpenRouter hosted-SaaS runtime adapter (issue #83).
+# ---------------------------------------------------------------------------
+
+
+class TestOpenRouterAdapter:
+    def test_name_and_recommend_params(self):
+        adapter = pb.OpenRouterAdapter()
+        assert adapter.name == "openrouter"
+        assert adapter.recommend_params("balanced") == {
+            "provider": "openrouter",
+            "extra_flags": [],
+        }
+        assert adapter.recommend_params("fast") == {
+            "provider": "openrouter",
+            "extra_flags": [],
+        }
+
+    def test_detect_present_when_models_endpoint_responds(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["anthropic/claude-sonnet-4.6"]),
+        )
+        adapter = pb.OpenRouterAdapter()
+        result = adapter.detect()
+        assert result["present"] is True
+        assert result["base_url"] == pb.OPENROUTER_BASE_URL
+
+    def test_detect_returns_not_present_on_url_error(self, monkeypatch):
+        """Offline machines must not crash detect() — wizard discover step
+        runs unconditionally and a raised exception would abort it."""
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("dns failure")),
+        )
+        adapter = pb.OpenRouterAdapter()
+        result = adapter.detect()
+        assert result["present"] is False
+
+    def test_detect_returns_not_present_on_timeout(self, monkeypatch):
+        """Network timeout (5s budget) must NOT propagate."""
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(TimeoutError("timed out")),
+        )
+        adapter = pb.OpenRouterAdapter()
+        result = adapter.detect()
+        assert result["present"] is False
+
+    def test_detect_returns_not_present_on_non_2xx(self, monkeypatch):
+        """Non-2xx response (e.g. 503) must not be treated as present."""
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp([], status=503),
+        )
+        adapter = pb.OpenRouterAdapter()
+        result = adapter.detect()
+        assert result["present"] is False
+
+    def test_healthcheck_ok_when_models_listed(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["anthropic/claude-sonnet-4.6", "openai/gpt-4o"]),
+        )
+        adapter = pb.OpenRouterAdapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is True
+        assert "2" in result["detail"]
+
+    def test_healthcheck_fails_when_unreachable(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        adapter = pb.OpenRouterAdapter()
+        result = adapter.healthcheck()
+        assert result["ok"] is False
+
+    def test_list_models_returns_cloud_routed_entries(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["anthropic/claude-sonnet-4.6"]),
+        )
+        adapter = pb.OpenRouterAdapter()
+        models = adapter.list_models()
+        assert len(models) == 1
+        assert models[0]["name"] == "anthropic/claude-sonnet-4.6"
+        assert models[0]["local"] is False
+        assert models[0]["format"] == "cloud-routed"
+
+    def test_list_models_empty_on_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        adapter = pb.OpenRouterAdapter()
+        assert adapter.list_models() == []
+
+    def test_run_test_delegates_to_smoke_test_models(self, monkeypatch):
+        sentinel = {
+            "ok": True,
+            "models": ["anthropic/claude-sonnet-4.6"],
+            "response": "1 models",
+        }
+        monkeypatch.setattr(pb, "smoke_test_openrouter_models", lambda *a, **kw: sentinel)
+        adapter = pb.OpenRouterAdapter()
+        # run_test deliberately ignores the model arg; it only probes /models.
+        assert adapter.run_test("anthropic/anything") == sentinel
+
+
+class TestSmokeTestOpenRouterModels:
+    def test_returns_ok_with_model_ids(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _FakeModelsResp(["anthropic/claude-sonnet-4.6", "openai/gpt-4o"]),
+        )
+        result = pb.smoke_test_openrouter_models()
+        assert result["ok"] is True
+        assert "anthropic/claude-sonnet-4.6" in result["models"]
+        assert "openai/gpt-4o" in result["models"]
+
+    def test_returns_ok_false_on_connection_error(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        result = pb.smoke_test_openrouter_models()
+        assert result["ok"] is False
+        assert "error" in result
+
+    def test_uses_custom_base_url(self, monkeypatch):
+        import urllib.request
+
+        seen: dict[str, str] = {}
+
+        def fake_urlopen(req, *a, **kw):
+            seen["url"] = req.full_url
+            return _FakeModelsResp([])
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        pb.smoke_test_openrouter_models("http://other-host:9999/api/v1")
+        assert seen["url"] == "http://other-host:9999/api/v1/models"
+
+    def test_source_does_not_call_chat_completions(self):
+        """Mechanical pin: smoke_test_openrouter_models source must NOT reference chat/completions.
+
+        OpenRouter routes to paid cloud models — we can never call a chat
+        endpoint as part of detection or smoke testing, even by mistake.
+        Mirrors the same pin used for smoke_test_router9_models.
+        """
+        from pathlib import Path
+
+        source = Path(pb.__file__).read_text()
+        marker = "def smoke_test_openrouter_models("
+        start = source.index(marker)
+        rest = source[start + len(marker) :]
+        end_idx = rest.find("\ndef ")
+        body = rest[:end_idx] if end_idx != -1 else rest
+        if '"""' in body:
+            first = body.index('"""')
+            second = body.index('"""', first + 3)
+            body = body[:first] + body[second + 3 :]
+        assert "chat/completions" not in body, (
+            "smoke_test_openrouter_models must never call /chat/completions — "
             "that would burn paid quota."
         )
 

@@ -44,6 +44,13 @@ LLAMACPP_PID_DIR = STATE_DIR / "run"
 ROUTER9_BASE_URL = os.environ.get("CCL_9ROUTER_BASE_URL", "http://localhost:20128/v1")
 ROUTER9_KEY_FILE = STATE_DIR / "9router-api-key"
 
+# OpenRouter is hosted SaaS with an OpenAI-compatible API — no daemon to
+# install, just an API key from https://openrouter.ai/keys. The key sits
+# in ~/.claude-codex-local/openrouter-api-key (chmod 600), the same
+# secret-on-disk boundary the 9router/vllm paths use.
+OPENROUTER_BASE_URL = os.environ.get("CCL_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_KEY_FILE = STATE_DIR / "openrouter-api-key"
+
 # vLLM exposes an OpenAI-compatible API. Unlike ollama / llama.cpp the wizard
 # does not start the server (vllm needs a Python venv with CUDA/ROCm wheels);
 # we only probe reachability. The optional API key sits in a chmod-600 file
@@ -464,15 +471,86 @@ class Router9Adapter:
         return {"provider": "9router", "extra_flags": []}
 
 
+@dataclass
+class OpenRouterAdapter:
+    """RuntimeAdapter implementation for OpenRouter.
+
+    OpenRouter is a hosted SaaS cloud-routing service that exposes an
+    OpenAI-compatible API at https://openrouter.ai/api/v1 and forwards
+    calls to cloud models like `anthropic/claude-sonnet-4.6` or
+    `openai/gpt-4o`. Because every chat call costs paid quota, this
+    adapter NEVER calls /chat/completions for detection or smoke tests;
+    we use /models reachability instead.
+
+    Unlike Router9Adapter there is nothing to install — OpenRouter is
+    hosted, so detect() probes the public HTTPS endpoint directly. On
+    offline machines detect() must return present=False without raising
+    so the wizard's discover step keeps working.
+    """
+
+    name: str = "openrouter"
+
+    def detect(self) -> dict[str, Any]:
+        import urllib.error
+        import urllib.request
+
+        url = f"{OPENROUTER_BASE_URL.rstrip('/')}/models"
+        req = urllib.request.Request(
+            url, headers={"Content-Type": "application/json"}, method="GET"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if 200 <= resp.status < 300:
+                    return {"present": True, "version": "", "base_url": OPENROUTER_BASE_URL}
+        except urllib.error.URLError:
+            pass
+        except Exception:
+            pass
+        return {"present": False, "version": ""}
+
+    def healthcheck(self) -> dict[str, Any]:
+        result = smoke_test_openrouter_models()
+        if result.get("ok"):
+            count = len(result.get("models", []))
+            return {
+                "ok": True,
+                "detail": f"endpoint up at {OPENROUTER_BASE_URL}, {count} model(s) available",
+            }
+        return {"ok": False, "detail": result.get("error", "unreachable")}
+
+    def list_models(self) -> list[dict[str, Any]]:
+        result = smoke_test_openrouter_models()
+        if not result.get("ok"):
+            return []
+        return [
+            {"name": m, "format": "cloud-routed", "local": False} for m in result.get("models", [])
+        ]
+
+    def run_test(self, model: str) -> dict[str, Any]:
+        # CRITICAL: this routes to paid cloud models. We deliberately do
+        # NOT call /chat/completions; we only verify the endpoint is
+        # reachable. See smoke_test_openrouter_models for the rationale.
+        return smoke_test_openrouter_models()
+
+    def recommend_params(self, mode: str) -> dict[str, Any]:
+        return {"provider": "openrouter", "extra_flags": []}
+
+
 # Registry of adapters in preference order (LM Studio MLX first on Apple Silicon).
 ALL_ADAPTERS: list[
-    OllamaAdapter | LMStudioAdapter | LlamaCppAdapter | VLLMAdapter | Router9Adapter
+    OllamaAdapter
+    | LMStudioAdapter
+    | LlamaCppAdapter
+    | VLLMAdapter
+    | Router9Adapter
+    | OpenRouterAdapter
 ] = [
     LMStudioAdapter(),
     OllamaAdapter(),
     LlamaCppAdapter(),
     VLLMAdapter(),
     Router9Adapter(),
+    OpenRouterAdapter(),
 ]
 
 
@@ -917,6 +995,41 @@ def smoke_test_router9_models(base_url: str | None = None) -> dict[str, Any]:
         return {"ok": True, "models": models, "response": f"{len(models)} models"}
     except urllib.error.URLError as exc:
         return {"ok": False, "error": f"9router unreachable at {url}: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter helpers
+# ---------------------------------------------------------------------------
+
+
+def smoke_test_openrouter_models(base_url: str | None = None) -> dict[str, Any]:
+    """
+    Reachability + presence check for the OpenRouter endpoint.
+
+    Issues GET {base_url}/models. NEVER calls /chat/completions — that
+    would burn paid quota since OpenRouter routes to cloud models like
+    anthropic/claude-sonnet-4.6.
+
+    OpenRouter's /models endpoint is publicly reachable without auth, so
+    no API key is required for the probe.
+
+    Returns: {"ok": bool, "models": list[str], "response"?: str, "error"?: str}
+    """
+    import urllib.error
+    import urllib.request
+
+    base = (base_url or OPENROUTER_BASE_URL).rstrip("/")
+    url = f"{base}/models"
+    req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read())
+        models = [m.get("id", "") for m in body.get("data", [])]
+        return {"ok": True, "models": models, "response": f"{len(models)} models"}
+    except urllib.error.URLError as exc:
+        return {"ok": False, "error": f"OpenRouter unreachable at {url}: {exc}"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -2531,6 +2644,17 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     )
     if router9_info.get("present"):
         engines_present.append("9router")
+    openrouter_info = OpenRouterAdapter().detect()
+    openrouter_health = (
+        OpenRouterAdapter().healthcheck()
+        if openrouter_info.get("present")
+        else {
+            "ok": False,
+            "detail": "OpenRouter endpoint not reachable",
+        }
+    )
+    if openrouter_info.get("present"):
+        engines_present.append("openrouter")
 
     profile: dict[str, Any] = {
         "host": {
@@ -2561,6 +2685,11 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
                 "version": router9_info.get("version", ""),
                 "base_url": ROUTER9_BASE_URL,
             },
+            "openrouter": {
+                "present": bool(openrouter_info.get("present")),
+                "version": openrouter_info.get("version", ""),
+                "base_url": OPENROUTER_BASE_URL,
+            },
         },
         "presence": {
             "harnesses": harnesses_present,
@@ -2576,6 +2705,11 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
             "present": bool(router9_info.get("present")),
             "base_url": ROUTER9_BASE_URL,
             "healthcheck": router9_health,
+        },
+        "openrouter": {
+            "present": bool(openrouter_info.get("present")),
+            "base_url": OPENROUTER_BASE_URL,
+            "healthcheck": openrouter_health,
         },
         "disk": disk_usage_for(STATE_DIR),
         "state_dir": str(STATE_DIR),

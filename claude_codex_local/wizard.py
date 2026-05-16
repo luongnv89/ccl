@@ -79,7 +79,8 @@ class WizardState:
     # user's primary + secondary selections
     primary_harness: str = ""  # "claude" | "codex" | "pi"
     secondary_harnesses: list[str] = field(default_factory=list)
-    primary_engine: str = ""  # "ollama" | "lmstudio" | "llamacpp" | "vllm" | "9router"
+    # "ollama" | "lmstudio" | "llamacpp" | "vllm" | "9router" | "openrouter"
+    primary_engine: str = ""
     secondary_engines: list[str] = field(default_factory=list)
     # model pick
     model_name: str = ""  # raw user input or find-model selection
@@ -311,6 +312,11 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
         "cmd": "npm install -g 9router  # OpenAI-compatible API at http://localhost:20128/v1",
         "url": "https://github.com/decolua/9router",
     },
+    "openrouter": {
+        "name": "OpenRouter",
+        "cmd": "Get an API key at https://openrouter.ai/keys (no install required — hosted SaaS)",
+        "url": "https://openrouter.ai/docs",
+    },
     "huggingface-cli": {
         "name": "Hugging Face CLI",
         "cmd": "pip install 'huggingface_hub[cli]'",
@@ -381,8 +387,27 @@ def _ensure_tool(key: str) -> bool:
     must be started manually by the user.  For tools requiring manual steps
     (lmstudio, vllm) the hint is shown
     and the user is asked to confirm when done, then the profile is re-probed.
+    OpenRouter is hosted SaaS — nothing to install, just an API key in step 4.
     Returns True when the tool is detected as present after the attempt.
     """
+    # OpenRouter is hosted SaaS at https://openrouter.ai/api/v1 — there is
+    # no binary to install and no daemon to start. We only inform the user
+    # that the API key prompt happens in step 4 and return True so the
+    # wizard does not block here on offline machines (the key check
+    # happens later regardless).
+    if key == "openrouter":
+        if pb.OpenRouterAdapter().detect().get("present"):
+            ok("OpenRouter endpoint reachable.")
+            pb.invalidate_machine_profile_inproc_cache()
+            return True
+        info(
+            "OpenRouter is hosted at https://openrouter.ai. Make sure your "
+            "network can reach it and that you have an API key "
+            "(https://openrouter.ai/keys). The wizard will prompt for the "
+            "key in step 4."
+        )
+        return True
+
     # 9router ships as an npm package (`npm install -g 9router`) but the
     # detection check is HTTP-based — the server has to be running too.
     # We can install for the user, but the long-running `9router` daemon
@@ -554,7 +579,7 @@ def _ensure_llmfit() -> bool:
 
 
 _ALL_HARNESSES = ["claude", "codex", "pi"]
-_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "vllm", "9router"]
+_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"]
 
 
 def _persist_targeted_profile_update(profile: dict[str, Any]) -> None:
@@ -651,7 +676,7 @@ def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
             "base_url": vllm.get("base_url", pb.VLLM_BASE_URL),
         }
     elif engine == "9router":
-        adapter = pb.Router9Adapter()
+        adapter: pb.Router9Adapter | pb.OpenRouterAdapter = pb.Router9Adapter()
         info = adapter.detect()
         health = (
             adapter.healthcheck()
@@ -666,6 +691,24 @@ def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
         profile["9router"] = {
             "present": bool(info.get("present")),
             "base_url": pb.ROUTER9_BASE_URL,
+            "healthcheck": health,
+        }
+    elif engine == "openrouter":
+        adapter = pb.OpenRouterAdapter()
+        info = adapter.detect()
+        health = (
+            adapter.healthcheck()
+            if info.get("present")
+            else {"ok": False, "detail": "OpenRouter endpoint not reachable"}
+        )
+        tools["openrouter"] = {
+            "present": bool(info.get("present")),
+            "version": info.get("version", ""),
+            "base_url": pb.OPENROUTER_BASE_URL,
+        }
+        profile["openrouter"] = {
+            "present": bool(info.get("present")),
+            "base_url": pb.OPENROUTER_BASE_URL,
             "healthcheck": health,
         }
     else:
@@ -707,6 +750,9 @@ def _is_model_compatible_with_engine(state: WizardState, engine: str) -> bool:
 
     if state.model_source == "9router-direct":
         return engine == "9router"
+
+    if state.model_source == "openrouter-direct":
+        return engine == "openrouter"
     if state.model_source == "vllm-loaded":
         return engine == "vllm"
     if state.model_source == "running-server":
@@ -1005,6 +1051,92 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     return True
 
 
+_OPENROUTER_DEFAULT_MODEL = "anthropic/claude-sonnet-4.6"
+
+# OpenRouter publishes variant IDs of the form `provider/model:variant`
+# (e.g. `google/gemma-4-31b-it:free`, `mistralai/mistral-7b-instruct:nitro`).
+# The trailing `:variant` suffix is mandatory for the free-tier catalog —
+# we admit `:` in the model segment in addition to the 9router charset.
+_OPENROUTER_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9._:-]+$")
+
+
+def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = False) -> bool:
+    """Step 4 specialisation for engine=openrouter.
+
+    Skips llmfit/disk/download entirely — OpenRouter routes to cloud models
+    that aren't downloaded locally. Asks the user for an API key (or reads
+    CCL_OPENROUTER_API_KEY from env) and writes it to OPENROUTER_KEY_FILE
+    with chmod 0o600. Then asks for a model name with default
+    anthropic/claude-sonnet-4.6.
+
+    Reuses the 9router model regex — both backends use `<provider>/<model-id>`
+    slugs (kr/claude-sonnet-4.5 and anthropic/claude-sonnet-4.6 both match).
+    """
+    pb.ensure_state_dirs()
+
+    # --- API key ---
+    env_key = os.environ.get("CCL_OPENROUTER_API_KEY", "").strip()
+    if non_interactive:
+        api_key = env_key
+        if not api_key and pb.OPENROUTER_KEY_FILE.exists():
+            # In non-interactive mode, accept a previously written key file.
+            api_key = pb.OPENROUTER_KEY_FILE.read_text().strip()
+        if not api_key:
+            fail(
+                "OpenRouter API key required. Set CCL_OPENROUTER_API_KEY or "
+                f"write the key to {pb.OPENROUTER_KEY_FILE} (chmod 600) "
+                "before running non-interactively."
+            )
+            return False
+    else:
+        if env_key:
+            api_key = env_key
+            ok("Using OpenRouter API key from CCL_OPENROUTER_API_KEY env var.")
+        else:
+            api_key_input = questionary.password(
+                "Paste your OpenRouter API key (kept locally, chmod-600):",
+            ).ask()
+            api_key = (api_key_input or "").strip()
+            if not api_key:
+                fail("No API key provided. Cannot continue.")
+                return False
+
+    pb.OPENROUTER_KEY_FILE.write_text(api_key + "\n")
+    pb.OPENROUTER_KEY_FILE.chmod(0o600)
+    ok(f"Wrote OpenRouter API key to [bold]{pb.OPENROUTER_KEY_FILE}[/bold] (chmod 0600).")
+
+    # --- Model name ---
+    env_model = os.environ.get("CCL_OPENROUTER_MODEL", "").strip()
+    if non_interactive:
+        model_name = env_model or _OPENROUTER_DEFAULT_MODEL
+    else:
+        prompt_default = env_model or _OPENROUTER_DEFAULT_MODEL
+        model_input = questionary.text(
+            "OpenRouter model name:",
+            default=prompt_default,
+        ).ask()
+        if not model_input:
+            fail("No model name provided.")
+            return False
+        model_name = model_input.strip()
+
+    if len(model_name) > 256 or not _OPENROUTER_MODEL_RE.match(model_name):
+        fail(
+            f"Invalid OpenRouter model name: {model_name!r}. Expected "
+            "<provider>/<model-id>[:variant] (e.g. anthropic/claude-sonnet-4.6 "
+            "or google/gemma-4-31b-it:free)."
+        )
+        return False
+
+    state.engine_model_tag = model_name
+    state.model_name = model_name
+    state.model_source = "openrouter-direct"
+    state.model_candidate = {}
+    ok(f"Picked OpenRouter model: [bold]{model_name}[/bold]")
+    state.mark("4")
+    return True
+
+
 def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -> bool:
     """Step 4 specialisation for engine=vllm.
 
@@ -1075,6 +1207,11 @@ def step_2_4_pick_model(
     # disk-based size checks. Branch to a dedicated picker.
     if engine == "9router":
         return _step_4_pick_model_9router(state, non_interactive)
+
+    # OpenRouter is a hosted-SaaS cloud-routing engine — same shape as
+    # 9router (key on disk + provider/model slug), no local models.
+    if engine == "openrouter":
+        return _step_4_pick_model_openrouter(state, non_interactive)
 
     # vLLM hosts exactly one model per `vllm serve` process; we read it
     # from /v1/models rather than llmfit / disk.
@@ -2350,6 +2487,11 @@ def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bo
         # CRITICAL: never call /chat/completions for 9router — that's paid
         # cloud quota. We verify reachability by re-checking /v1/models.
         result = pb.smoke_test_router9_models()
+    elif engine == "openrouter":
+        # CRITICAL: never call /chat/completions for OpenRouter — same
+        # paid-cloud-quota constraint as 9router. We verify reachability
+        # by re-checking /models on the hosted endpoint.
+        result = pb.smoke_test_openrouter_models()
     else:
         warn(f"Smoke test for engine '{engine}' not implemented — skipping.")
         result = {"ok": True, "response": "(skipped)"}
@@ -2591,6 +2733,39 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         return WireResult(
             argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
         )
+    if engine == "openrouter":
+        # OpenRouter is hosted SaaS at https://openrouter.ai/api/v1 with
+        # an OpenAI-compatible API. Same key-on-disk boundary as 9router:
+        # the helper script reads the API key at exec-time from a chmod-600
+        # file, never embedding it. HTTP_REFERER and X_TITLE are
+        # OpenRouter's optional attribution headers; harmless when ignored
+        # by the harness, useful in OpenRouter's dashboard analytics.
+        # Env-var names use underscores (HTTP_REFERER, X_TITLE) because
+        # POSIX env-var names cannot contain hyphens; the harness is
+        # responsible for translating them into the hyphenated HTTP
+        # headers (HTTP-Referer, X-Title) on the wire.
+        base_url = pb.OPENROUTER_BASE_URL
+        key_file = pb.OPENROUTER_KEY_FILE
+        key_expr = f'"$(cat {shlex.quote(str(key_file))})"'
+        raw_env = {
+            "ANTHROPIC_AUTH_TOKEN": key_expr,
+            "ANTHROPIC_API_KEY": key_expr,
+        }
+        env = {
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"OpenRouter {tag}",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                f"Cloud-routed via OpenRouter at {base_url}"
+            ),
+            "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            "HTTP_REFERER": "https://github.com/luongnv89/ccl",
+            "X_TITLE": "claude-codex-local",
+        }
+        return WireResult(
+            argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
+        )
     fail(f"Unknown engine for Claude wire-up: {engine}")
     return None
 
@@ -2655,6 +2830,21 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
         raw_env = {"OPENAI_API_KEY": key_expr}
         env = {"OPENAI_BASE_URL": base_url}
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
+    if engine == "openrouter":
+        # See _wire_claude(engine="openrouter"): the API key is read at
+        # exec-time from a chmod-600 file, never embedded in the helper
+        # script body. HTTP_REFERER / X_TITLE are decorative attribution
+        # headers OpenRouter accepts.
+        base_url = pb.OPENROUTER_BASE_URL
+        key_file = pb.OPENROUTER_KEY_FILE
+        key_expr = f'"$(cat {shlex.quote(str(key_file))})"'
+        raw_env = {"OPENAI_API_KEY": key_expr}
+        env = {
+            "OPENAI_BASE_URL": base_url,
+            "HTTP_REFERER": "https://github.com/luongnv89/ccl",
+            "X_TITLE": "claude-codex-local",
+        }
+        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
     fail(f"Unknown engine for Codex wire-up: {engine}")
     return None
 
@@ -2679,6 +2869,8 @@ def _pi_base_url_for_engine(engine: str) -> str | None:
         return f"{pb.VLLM_BASE_URL.rstrip('/')}/v1"
     if engine == "9router":
         return pb.ROUTER9_BASE_URL
+    if engine == "openrouter":
+        return pb.OPENROUTER_BASE_URL
     return None
 
 
@@ -2693,6 +2885,8 @@ def _pi_api_key_for_engine(engine: str) -> str:
         return "sk-local"  # pragma: allowlist secret
     if engine == "9router":
         return f"!cat {shlex.quote(str(pb.ROUTER9_KEY_FILE))}"
+    if engine == "openrouter":
+        return f"!cat {shlex.quote(str(pb.OPENROUTER_KEY_FILE))}"
     return "sk-local"  # pragma: allowlist secret
 
 
@@ -2820,12 +3014,15 @@ def _fence_tag_for(harness: str, engine: str) -> str:
 
     `state.primary_harness` stays "claude" / "codex" (semantic). The fence
     tag — used as the helper-script filename, the alias short name, and
-    the ~/.zshrc fence label — is `claude` / `codex` for the local engines
-    and `claude9` / `codex9` for 9router. This keeps step 6/7/8 and the
-    codex-limitation guard branching on `state.primary_harness` unchanged.
+    the ~/.zshrc fence label — is `claude` / `codex` for the local engines,
+    `claude9` / `codex9` for 9router, and `claudeo` / `codexo` for
+    OpenRouter. This keeps step 6/7/8 and the codex-limitation guard
+    branching on `state.primary_harness` unchanged.
     """
     if engine == "9router":
         return f"{harness}9"
+    if engine == "openrouter":
+        return f"{harness}o"
     return harness
 
 
@@ -2833,11 +3030,13 @@ def _helper_script_basename(harness: str) -> str:
     """
     Map a fence tag to the helper-script filename.
 
-    Valid harness values are the four fence tags supported by the
-    install: "claude" / "codex" / "pi" (existing local harnesses) and
-    "claude9" / "codex9" / "pi9" (their 9router variants). The script
-    names must stay distinct so the cc/cx/cp (local) and cc9/cx9/cp9
-    (9router) install paths can coexist on the same machine.
+    Valid harness values are the fence tags supported by the install:
+    "claude" / "codex" / "pi" (existing local harnesses), their
+    "claude9" / "codex9" / "pi9" 9router variants, and the OpenRouter
+    variants "claudeo" / "codexo" / "pio". The script names must stay
+    distinct so the local (cc/cx/cp), 9router (cc9/cx9/cp9), and
+    OpenRouter (cco/cxo/cpo) install paths can all coexist on the same
+    machine.
     """
     mapping = {
         "claude": "cc",
@@ -2846,6 +3045,9 @@ def _helper_script_basename(harness: str) -> str:
         "claude9": "cc9",
         "codex9": "cx9",
         "pi9": "cp9",
+        "claudeo": "cco",
+        "codexo": "cxo",
+        "pio": "cpo",
     }
     if harness not in mapping:
         raise ValueError(f"Unknown harness fence tag: {harness!r}")
@@ -2856,10 +3058,11 @@ def _alias_names_for(harness: str) -> list[str]:
     """
     Map a fence tag to the alias names installed in the user's shell rc.
 
-    The 9router variants intentionally expose ONLY the short alias
-    (cc9 / cx9 / cp9). The long forms (claude-local / codex-local /
-    pi-local) are reserved for the original local-only paths so existing
-    shell aliases keep pointing where users expect.
+    The 9router and OpenRouter variants intentionally expose ONLY the
+    short alias (cc9/cx9/cp9 and cco/cxo/cpo). The long forms
+    (claude-local / codex-local / pi-local) are reserved for the
+    original local-only paths so existing shell aliases keep pointing
+    where users expect.
     """
     mapping = {
         "claude": ["cc", "claude-local"],
@@ -2868,6 +3071,9 @@ def _alias_names_for(harness: str) -> list[str]:
         "claude9": ["cc9"],
         "codex9": ["cx9"],
         "pi9": ["cp9"],
+        "claudeo": ["cco"],
+        "codexo": ["cxo"],
+        "pio": ["cpo"],
     }
     if harness not in mapping:
         raise ValueError(f"Unknown harness fence tag: {harness!r}")
@@ -2880,7 +3086,8 @@ def _write_helper_script(harness: str, result: WireResult, *, engine: str | None
     wire-result argv. Returns the absolute path to the helper.
 
     `harness` is a fence tag — one of "claude", "codex", "pi",
-    "claude9", "codex9", "pi9" — and selects the helper-script filename.
+    "claude9", "codex9", "pi9", "claudeo", "codexo", "pio" — and
+    selects the helper-script filename.
 
     When `engine == "llamacpp"`, the helper grows a pre-flight stanza that
     probes the configured llama-server `/health` endpoint and runs
@@ -3071,6 +3278,26 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
         state.mark("7")
         return True
 
+    # CRITICAL OpenRouter branch — same paid-cloud-quota constraint as
+    # 9router. Probe /models on the hosted endpoint and skip the chat
+    # test entirely; otherwise the verify command would issue a paid
+    # `claude --model anthropic/claude-sonnet-4.6 -p READY` call.
+    if engine == "openrouter":
+        result = pb.smoke_test_openrouter_models()
+        state.verify_result = {
+            "ok": bool(result.get("ok")),
+            "via": "openrouter-models-endpoint",
+            "skipped_chat": True,
+            "detail": result.get("response") or result.get("error", ""),
+        }
+        state.save()
+        if not result.get("ok"):
+            fail(f"OpenRouter not reachable: {result.get('error')}")
+            return False
+        ok("Verify (OpenRouter): /models reachable, skipping chat call to avoid quota burn.")
+        state.mark("7")
+        return True
+
     wire_env: dict[str, str] = dict(state.wire_result.get("env", {}))
 
     # The verify command talks to llama-server over HTTP. If the server is
@@ -3236,9 +3463,9 @@ official backend/config.
 
 ## Rollback
 
-Each install (claude / codex / pi / claude9 / codex9 / pi9) has its own
-fenced block, so you can remove just this one without touching any other
-install.
+Each install (claude / codex / pi / claude9 / codex9 / pi9 / claudeo /
+codexo / pio) has its own fenced block, so you can remove just this one
+without touching any other install.
 
 To wipe only this install:
 
@@ -3262,7 +3489,7 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
     fence_tag = _fence_tag_for(state.primary_harness, state.primary_engine)
     alias_names = state.alias_names or _alias_names_for(fence_tag)
     alias_short = alias_names[0]
-    # claude9 / codex9 only have the short alias; reuse it as the long form.
+    # claude9 / codex9 / claudeo / codexo only have the short alias; reuse it as the long form.
     alias_long = alias_names[1] if len(alias_names) > 1 else alias_names[0]
     codex_limitation = ""
     if state.primary_harness == "codex" and state.primary_engine == "ollama":
@@ -3470,7 +3697,7 @@ def run_doctor() -> int:
             "installed" if installed else "missing — re-run wizard to re-create/pull",
         )
 
-    # Helper script (cc / cx / cc9 / cx9)
+    # Helper script (cc / cx / cc9 / cx9 / cco / cxo / cpo)
     if state.helper_script_path:
         script_path = Path(state.helper_script_path)
         add_row(
@@ -3518,6 +3745,49 @@ def run_doctor() -> int:
             add_row(
                 "9router model name",
                 "<provider>/<model-id>",
+                valid_model,
+                state.engine_model_tag if valid_model else "invalid — re-run step 4",
+            )
+
+    # OpenRouter-specific checks (mirrors the 9router shape — same key-file
+    # boundary, same provider/model-id regex).
+    if state.primary_engine == "openrouter":
+        key_file = pb.OPENROUTER_KEY_FILE
+        if key_file.exists():
+            try:
+                mode = key_file.stat().st_mode & 0o777
+            except OSError:
+                mode = -1
+            mode_ok = mode != -1 and (mode & 0o077) == 0
+            add_row(
+                "openrouter key file mode",
+                "owner-only (0600)",
+                mode_ok,
+                f"{mode:04o}" if mode != -1 else "stat failed",
+            )
+            content = ""
+            with contextlib.suppress(OSError):
+                content = key_file.read_text().strip()
+            add_row(
+                "openrouter key file content",
+                "non-empty",
+                bool(content),
+                "ok" if content else "empty — re-run step 4 to set the key",
+            )
+        else:
+            add_row(
+                "openrouter key file",
+                str(key_file),
+                False,
+                "missing — re-run step 4 to set the key",
+            )
+        if state.engine_model_tag:
+            valid_model = len(state.engine_model_tag) <= 256 and bool(
+                _OPENROUTER_MODEL_RE.match(state.engine_model_tag)
+            )
+            add_row(
+                "openrouter model name",
+                "<provider>/<model-id>[:variant]",
                 valid_model,
                 state.engine_model_tag if valid_model else "invalid — re-run step 4",
             )
@@ -3603,7 +3873,7 @@ def _resolve_wire_env(wire_result: dict[str, Any]) -> dict[str, str]:
 
     `wire_result.env` values are literal strings. `wire_result.raw_env` values
     are bash expressions evaluated at exec-time by the helper script (e.g.
-    `"$(cat /path/to/key)"` for the 9router/vllm key files — see WireResult).
+    `"$(cat /path/to/key)"` for the 9router/openrouter/vllm key files — see WireResult).
     `ccl run` bypasses the helper script, so we evaluate raw_env in a one-shot
     bash subshell to keep the secret-on-disk boundary intact.
     """
@@ -3727,8 +3997,9 @@ def run_serve() -> int:
         return 1
     state = WizardState.load()
     if state.primary_engine != "llamacpp":
-        # Other engines (Ollama, LM Studio, 9router) are usually long-lived
-        # services managed outside ccl; nothing to do here.
+        # Other engines (Ollama, LM Studio, 9router, OpenRouter) are
+        # usually long-lived services managed outside ccl; nothing to
+        # do here.
         info(f"Engine '{state.primary_engine or 'unset'}' does not need `ccl serve`.")
         return 0
     if not state.engine_model_tag:
@@ -3827,7 +4098,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     setup.add_argument(
         "--engine",
-        choices=("ollama", "lmstudio", "llamacpp", "vllm", "9router"),
+        choices=("ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"),
         help="Force the primary engine",
     )
     setup.add_argument(

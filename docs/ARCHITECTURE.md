@@ -37,7 +37,7 @@ This document describes the system design of `claude-codex-local`.
 - `profile` — dumps a JSON snapshot of installed harnesses, engines, `llmfit`, and free disk
 - `recommend` — picks the best-fit installed coding model for the hardware
 - `doctor` — pretty-prints the current wizard state and re-runs presence checks
-- `adapters` — lists the registered `RuntimeAdapter` implementations (ollama, lmstudio, llamacpp, vllm, 9router)
+- `adapters` — lists the registered `RuntimeAdapter` implementations (ollama, lmstudio, llamacpp, vllm, 9router, openrouter)
 
 These are reachable for debugging via `python -m claude_codex_local.core <cmd>`. There is no user-facing binary for them — they return JSON for scripting and introspection.
 
@@ -65,8 +65,8 @@ State is persisted to `.claude-codex-local/wizard-state.json` so a failed run ca
 
 The user-facing surface after setup:
 
-- `.claude-codex-local/bin/cc` / `cx` / `cp` / `cc9` / `cx9` / `cp9` — a short bash wrapper that invokes the configured launch command. The `*9` helpers are installed when the user picks the 9router engine; they coexist with the local-engine helpers so a single machine can run both backends.
-- `~/.zshrc` / `~/.bashrc` — one fenced block per **install** (`# >>> claude-codex-local:claude >>>` for Claude+local-engine, `# >>> claude-codex-local:pi9 >>>` for Pi+9router, etc.). Fence tags are derived at the alias-emission site as `f"{harness}9"` for 9router and `harness` otherwise, so `state.primary_harness` stays semantic ("claude" / "codex" / "pi") while the fence-tag stays presentational. Each block is idempotently replaced on re-run of its own install, and all blocks coexist. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
+- `.claude-codex-local/bin/cc` / `cx` / `cp` / `cc9` / `cx9` / `cp9` / `cco` / `cxo` / `cpo` — a short bash wrapper that invokes the configured launch command. The `*9` helpers are installed when the user picks the 9router engine and the `*o` helpers when the user picks OpenRouter; all three families coexist with the local-engine helpers so a single machine can run any combination of backends.
+- `~/.zshrc` / `~/.bashrc` — one fenced block per **install** (`# >>> claude-codex-local:claude >>>` for Claude+local-engine, `# >>> claude-codex-local:pi9 >>>` for Pi+9router, `# >>> claude-codex-local:claudeo >>>` for Claude+OpenRouter, etc.). Fence tags are derived at the alias-emission site as `f"{harness}9"` for 9router, `f"{harness}o"` for OpenRouter, and `harness` otherwise — so `state.primary_harness` stays semantic ("claude" / "codex" / "pi") while the fence-tag stays presentational. Each block is idempotently replaced on re-run of its own install, and all blocks coexist. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
 
 ### `WireResult.raw_env` — deferred-secret pattern
 
@@ -97,6 +97,16 @@ Uses an inline-env approach for Claude Code and Codex: the helper script exports
 - **Uses the deferred-secret pattern** (see `WireResult.raw_env` above): the API key is stored in `~/.claude-codex-local/9router-api-key` (chmod 0600) and the helper script reads it at exec time via `$(cat …)`.
 - **Skips Step 7 chat-verification.** The standard verify step runs `claude --model <tag> -p "Reply with exactly READY"`. For 9router this would issue a real paid `/chat/completions` call, so the wizard short-circuits with a `/v1/models` reachability check and records `state.verify_result = {"ok": ..., "via": "9router-models-endpoint", "skipped_chat": True}`.
 - **Does not download or score models.** Step 4 has a dedicated `_step_4_pick_model_9router` branch that prompts for an API key + model name (default `kr/claude-sonnet-4.5`) and skips llmfit / disk / download paths entirely.
+
+### OpenRouter (hosted cloud-routing service, optional)
+
+[OpenRouter](https://openrouter.ai) is a hosted-SaaS counterpart to 9router. It exposes the same OpenAI-compatible API at `https://openrouter.ai/api/v1` and forwards calls to paid cloud models (e.g. `anthropic/claude-sonnet-4.6`, `openai/gpt-4o`, `meta-llama/llama-3.1-70b-instruct`). The CCL adapter mirrors `Router9Adapter` with three deliberate divergences:
+
+- **No install path.** OpenRouter is hosted at openrouter.ai — there is no daemon to install or start. `_ensure_tool("openrouter")` only informs the user that the API-key prompt happens in Step 4 and returns `True` even when offline so the wizard does not block on transient network issues.
+- **Network detection.** `OpenRouterAdapter.detect()` hits the real HTTPS endpoint at `https://openrouter.ai/api/v1/models` with a 5-second timeout. It tolerates URL errors, timeouts, and non-2xx responses gracefully (returns `present=False` rather than raising) so the wizard's discover step works on machines without internet access.
+- **Attribution headers.** The wire env sets `HTTP_REFERER=https://github.com/luongnv89/ccl` and `X_TITLE=claude-codex-local` per OpenRouter convention. These are decorative — the harness may or may not forward them as actual HTTP headers — but they are not secrets and live in plain `env`, not `raw_env`.
+
+Everything else (key file at `~/.claude-codex-local/openrouter-api-key` chmod 0600, deferred-secret pattern, Step 7 chat skip, fence tags `claudeo` / `codexo` / `pio`, helper aliases `cco` / `cxo` / `cpo`) follows the 9router shape exactly.
 
 ## Isolation Rule
 
