@@ -327,6 +327,42 @@ class TestWireClaude:
         assert "$(cat" in body
         assert str(pb.ROUTER9_KEY_FILE) in body
 
+    def test_openrouter_returns_raw_env_with_keyfile_expr(self, isolated_state):
+        """OpenRouter routes to paid cloud models; key MUST stay in a keyfile."""
+        pb, wiz, _ = isolated_state
+        result = wiz._wire_claude("openrouter", "anthropic/claude-sonnet-4.6")
+        assert result.argv == ["claude", "--model", "anthropic/claude-sonnet-4.6"]
+        assert result.env["ANTHROPIC_BASE_URL"] == pb.OPENROUTER_BASE_URL
+        assert result.env["ANTHROPIC_CUSTOM_MODEL_OPTION"] == "anthropic/claude-sonnet-4.6"
+        assert "OpenRouter" in result.env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"]
+        assert result.env["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
+        # Attribution headers (decorative, harmless when ignored).
+        assert result.env["HTTP_REFERER"] == "https://github.com/luongnv89/ccl"
+        assert result.env["X_TITLE"] == "claude-codex-local"
+        # raw_env: API key as $(cat ...) expression — NOT embedded literally.
+        assert "ANTHROPIC_AUTH_TOKEN" in result.raw_env
+        assert "ANTHROPIC_API_KEY" in result.raw_env
+        assert "$(cat" in result.raw_env["ANTHROPIC_AUTH_TOKEN"]
+        assert str(pb.OPENROUTER_KEY_FILE) in result.raw_env["ANTHROPIC_AUTH_TOKEN"]
+
+    def test_openrouter_helper_script_does_not_embed_key_value(self, isolated_state):
+        """Pin: OpenRouter helper script must contain $(cat ...) and NOT the real key.
+
+        Mirrors the 9router pin. The sentinel key 'openrouter-test-key'
+        must NEVER appear in the script body — the script reads it at
+        exec-time from the chmod-600 file.
+        """
+        pb, wiz, _ = isolated_state
+        pb.ensure_state_dirs()
+        pb.OPENROUTER_KEY_FILE.write_text("openrouter-test-key\n")  # pragma: allowlist secret
+        pb.OPENROUTER_KEY_FILE.chmod(0o600)
+        result = wiz._wire_claude("openrouter", "anthropic/claude-sonnet-4.6")
+        path = wiz._write_helper_script("claudeo", result)
+        body = path.read_text()
+        assert "openrouter-test-key" not in body  # pragma: allowlist secret
+        assert "$(cat" in body
+        assert str(pb.OPENROUTER_KEY_FILE) in body
+
 
 # ---------------------------------------------------------------------------
 # _wire_codex — returns WireResult with engine-specific argv/env.
@@ -368,6 +404,20 @@ class TestWireCodex:
         assert "$(cat" in result.raw_env["OPENAI_API_KEY"]
         assert str(pb.ROUTER9_KEY_FILE) in result.raw_env["OPENAI_API_KEY"]
         # Plain env must NOT carry a literal API key; only the URL.
+        assert "OPENAI_API_KEY" not in result.env
+
+    def test_openrouter_returns_raw_env_with_keyfile_expr(self, isolated_state):
+        """OpenRouter for codex: only OPENAI_API_KEY needs deferred-cat."""
+        pb, wiz, _ = isolated_state
+        result = wiz._wire_codex("openrouter", "anthropic/claude-sonnet-4.6")
+        assert result.argv == ["codex", "-m", "anthropic/claude-sonnet-4.6"]
+        assert result.env["OPENAI_BASE_URL"] == pb.OPENROUTER_BASE_URL
+        assert result.env["HTTP_REFERER"] == "https://github.com/luongnv89/ccl"
+        assert result.env["X_TITLE"] == "claude-codex-local"
+        assert "OPENAI_API_KEY" in result.raw_env
+        assert "$(cat" in result.raw_env["OPENAI_API_KEY"]
+        assert str(pb.OPENROUTER_KEY_FILE) in result.raw_env["OPENAI_API_KEY"]
+        # Plain env must NOT carry a literal API key; only URL + attribution.
         assert "OPENAI_API_KEY" not in result.env
 
 
@@ -416,6 +466,29 @@ class TestWirePi:
         assert provider["baseUrl"] == pb.ROUTER9_BASE_URL
         assert provider["apiKey"].startswith("!cat ")
         assert str(pb.ROUTER9_KEY_FILE) in provider["apiKey"]
+
+    def test_openrouter_uses_keyfile_command_not_literal_key(self, isolated_state):
+        pb, wiz, _ = isolated_state
+        pb.ensure_state_dirs()
+        pb.OPENROUTER_KEY_FILE.write_text("openrouter-test-key\n")  # pragma: allowlist secret
+        result = wiz._wire_pi("openrouter", "anthropic/claude-sonnet-4.6")
+        assert result.argv == [
+            "pi",
+            "--provider",
+            "ccl-openrouter",
+            "--model",
+            "anthropic/claude-sonnet-4.6",
+        ]
+        models_path = pb.STATE_DIR / "pi-agent" / "models.json"
+        body = models_path.read_text()
+        # Sentinel key value MUST NOT appear in the models.json — Pi reads
+        # it at exec-time via the !cat directive.
+        assert "openrouter-test-key" not in body  # pragma: allowlist secret
+        models = json.loads(body)
+        provider = models["providers"]["ccl-openrouter"]
+        assert provider["baseUrl"] == pb.OPENROUTER_BASE_URL
+        assert provider["apiKey"].startswith("!cat ")
+        assert str(pb.OPENROUTER_KEY_FILE) in provider["apiKey"]
 
     def test_unknown_engine_returns_none(self, isolated_state):
         _, wiz, _ = isolated_state
@@ -522,6 +595,40 @@ class TestHelperScriptWriter:
         path = wiz._write_helper_script("codex9", result)
         assert path.name == "cx9"
 
+    def test_claudeo_dispatches_to_cco_filename(self, isolated_state):
+        """The OpenRouter fence tag claudeo maps to a `cco` helper script."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude", "--model", "anthropic/claude-sonnet-4.6"],
+            env={"ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"},
+            effective_tag="anthropic/claude-sonnet-4.6",
+        )
+        path = wiz._write_helper_script("claudeo", result)
+        assert path.name == "cco"
+        assert path.exists()
+
+    def test_codexo_dispatches_to_cxo_filename(self, isolated_state):
+        """The OpenRouter fence tag codexo maps to a `cxo` helper script."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["codex", "-m", "anthropic/claude-sonnet-4.6"],
+            env={"OPENAI_BASE_URL": "https://openrouter.ai/api/v1"},
+            effective_tag="anthropic/claude-sonnet-4.6",
+        )
+        path = wiz._write_helper_script("codexo", result)
+        assert path.name == "cxo"
+
+    def test_pio_dispatches_to_cpo_filename(self, isolated_state):
+        """The OpenRouter fence tag pio maps to a `cpo` helper script."""
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["pi", "--provider", "ccl-openrouter", "--model", "anthropic/claude-sonnet-4.6"],
+            env={"PI_CODING_AGENT_DIR": "/tmp/pi"},
+            effective_tag="anthropic/claude-sonnet-4.6",
+        )
+        path = wiz._write_helper_script("pio", result)
+        assert path.name == "cpo"
+
     def test_unknown_fence_tag_raises_value_error(self, isolated_state):
         """Defensive: unknown fence tags must fail loudly, not silently fall back."""
         import pytest
@@ -552,6 +659,39 @@ class TestHelperScriptWriter:
         assert "alias cx9=" in block
         assert "alias codex-local=" not in block
         assert "# >>> claude-codex-local:codex9 >>>" in block
+
+    def test_alias_block_claudeo_short_form_only(self, isolated_state, tmp_path):
+        """claudeo (OpenRouter) emits ONLY the short `cco` alias, not a long form."""
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cco"
+        script.write_text("#!/bin/sh\n")
+        block, names = wiz._alias_block(script, "claudeo")
+        assert names == ["cco"]
+        assert "alias cco=" in block
+        assert "alias claude-local=" not in block
+        assert "# >>> claude-codex-local:claudeo >>>" in block
+
+    def test_alias_block_codexo_short_form_only(self, isolated_state, tmp_path):
+        """codexo (OpenRouter) emits ONLY the short `cxo` alias, not a long form."""
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cxo"
+        script.write_text("#!/bin/sh\n")
+        block, names = wiz._alias_block(script, "codexo")
+        assert names == ["cxo"]
+        assert "alias cxo=" in block
+        assert "alias codex-local=" not in block
+        assert "# >>> claude-codex-local:codexo >>>" in block
+
+    def test_alias_block_pio_short_form_only(self, isolated_state, tmp_path):
+        """pio (OpenRouter) emits ONLY the short `cpo` alias, not a long form."""
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cpo"
+        script.write_text("#!/bin/sh\n")
+        block, names = wiz._alias_block(script, "pio")
+        assert names == ["cpo"]
+        assert "alias cpo=" in block
+        assert "alias pi-local=" not in block
+        assert "# >>> claude-codex-local:pio >>>" in block
 
 
 # ---------------------------------------------------------------------------
@@ -3475,3 +3615,495 @@ class TestEnsureToolCacheInvalidation:
         with wiz.console.capture():
             assert wiz._ensure_tool("ollama") is False
         assert invalidations == []
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter (issue #83) — fence tags, helper basenames, alias names,
+# engine list, Step 4 picker, doctor checks, smoke test, verify, ensure_tool.
+# ---------------------------------------------------------------------------
+
+
+class TestEnginesListOpenRouter:
+    """Issue #83 — `openrouter` is a 6th supported engine alongside the existing five."""
+
+    def test_all_engines_constant_includes_openrouter(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert "openrouter" in wiz._ALL_ENGINES
+
+    def test_argparse_engine_choice_accepts_openrouter(self, isolated_state):
+        from claude_codex_local.wizard import _build_parser
+
+        parser = _build_parser()
+        args = parser.parse_args(["setup", "--engine", "openrouter"])
+        assert args.engine == "openrouter"
+
+
+class TestFenceTagOpenRouter:
+    """OpenRouter fence tag is `<harness>o` (cco / cxo / cpo)."""
+
+    def test_fence_tag_for_claude_openrouter(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._fence_tag_for("claude", "openrouter") == "claudeo"
+
+    def test_fence_tag_for_codex_openrouter(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._fence_tag_for("codex", "openrouter") == "codexo"
+
+    def test_fence_tag_for_pi_openrouter(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._fence_tag_for("pi", "openrouter") == "pio"
+
+    def test_fence_tag_for_other_engines_unchanged_for_claude(self, isolated_state):
+        """Mirroring 9router shape must not break the local-engine path."""
+        _, wiz, _ = isolated_state
+        assert wiz._fence_tag_for("claude", "ollama") == "claude"
+        assert wiz._fence_tag_for("claude", "9router") == "claude9"
+
+
+class TestHelperScriptBasenameOpenRouter:
+    """OpenRouter fence tags map to cco/cxo/cpo helper script filenames."""
+
+    def test_claudeo_basename(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._helper_script_basename("claudeo") == "cco"
+
+    def test_codexo_basename(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._helper_script_basename("codexo") == "cxo"
+
+    def test_pio_basename(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._helper_script_basename("pio") == "cpo"
+
+
+class TestAliasNamesOpenRouter:
+    """OpenRouter aliases are short-form only (cco/cxo/cpo)."""
+
+    def test_claudeo_aliases(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._alias_names_for("claudeo") == ["cco"]
+
+    def test_codexo_aliases(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._alias_names_for("codexo") == ["cxo"]
+
+    def test_pio_aliases(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._alias_names_for("pio") == ["cpo"]
+
+
+class TestStep4PickOpenRouter:
+    """Issue #83 — Step 4 has a dedicated openrouter branch that skips llmfit/download."""
+
+    def test_non_interactive_uses_env_key_and_default_model(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+        monkeypatch.delenv("CCL_OPENROUTER_MODEL", raising=False)
+
+        # Hard-fail if the wizard tries any of the local-model paths.
+        for forbidden in (
+            "_find_model_auto",
+            "installed_models_for_engine",
+            "_estimate_model_size",
+            "_download_model",
+        ):
+            if hasattr(wiz, forbidden):
+                monkeypatch.setattr(
+                    wiz,
+                    forbidden,
+                    lambda *a, **kw: (_ for _ in ()).throw(
+                        AssertionError(f"{forbidden} must not run for openrouter")
+                    ),
+                )
+            if hasattr(pb, forbidden):
+                monkeypatch.setattr(
+                    pb,
+                    forbidden,
+                    lambda *a, **kw: (_ for _ in ()).throw(
+                        AssertionError(f"{forbidden} must not run for openrouter")
+                    ),
+                )
+
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "anthropic/claude-sonnet-4.6"
+        assert state.model_source == "openrouter-direct"
+        # Key file: chmod 0600.
+        assert pb.OPENROUTER_KEY_FILE.exists()
+        mode = pb.OPENROUTER_KEY_FILE.stat().st_mode & 0o777
+        assert mode == 0o600
+        assert (
+            "openrouter-test-key"  # pragma: allowlist secret
+            in pb.OPENROUTER_KEY_FILE.read_text()
+        )
+
+    def test_non_interactive_respects_env_model_override(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+        monkeypatch.setenv("CCL_OPENROUTER_MODEL", "openai/gpt-4o")
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="codex")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "openai/gpt-4o"
+
+    def test_non_interactive_fails_without_key(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.delenv("CCL_OPENROUTER_API_KEY", raising=False)
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+    def test_invalid_model_name_rejected(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setenv(
+            "CCL_OPENROUTER_API_KEY",
+            "openrouter-test-key",  # pragma: allowlist secret
+        )
+        monkeypatch.setenv("CCL_OPENROUTER_MODEL", "no-slash-model")
+        state = wiz.WizardState(primary_engine="openrouter", primary_harness="claude")
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+
+class TestRunDoctorOpenRouterChecks:
+    """Issue #83 — run_doctor surfaces openrouter-specific health checks."""
+
+    def _make_state(self, isolated_state, *, key_content: str | None, mode: int | None, model: str):
+        pb, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+        if key_content is not None:
+            pb.OPENROUTER_KEY_FILE.write_text(key_content)
+            if mode is not None:
+                pb.OPENROUTER_KEY_FILE.chmod(mode)
+        state = wiz.WizardState(
+            primary_harness="claude",
+            primary_engine="openrouter",
+            engine_model_tag=model,
+            completed_steps=["1", "2", "3", "4", "5", "6", "6.5", "7", "8"],
+            verify_result={
+                "ok": True,
+                "via": "openrouter-models-endpoint",
+                "skipped_chat": True,
+            },
+        )
+        state.save()
+        return pb, wiz
+
+    def test_doctor_reports_missing_keyfile(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state, key_content=None, mode=None, model="anthropic/claude-sonnet-4.6"
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda **_kw: {
+                "presence": {"harnesses": ["claude"], "engines": ["openrouter"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        assert rc == 1
+        assert "openrouter key file" in out
+        assert "missing" in out
+
+    def test_doctor_warns_on_world_readable_key(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state,
+            key_content="openrouter-test-key",  # pragma: allowlist secret
+            mode=0o644,
+            model="anthropic/claude-sonnet-4.6",
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda **_kw: {
+                "presence": {"harnesses": ["claude"], "engines": ["openrouter"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        assert rc == 1
+        assert "openrouter key file mode" in out
+        assert "0644" in out
+
+    def test_doctor_flags_invalid_model_name(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state,
+            key_content="openrouter-test-key",  # pragma: allowlist secret
+            mode=0o600,
+            model="not-a-valid-model",
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda **_kw: {
+                "presence": {"harnesses": ["claude"], "engines": ["openrouter"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        assert rc == 1
+        assert "openrouter model name" in out
+        assert "invalid" in out
+
+    def test_doctor_passes_with_valid_state(self, isolated_state, monkeypatch):
+        pb, wiz = self._make_state(
+            isolated_state,
+            key_content="openrouter-test-key",  # pragma: allowlist secret
+            mode=0o600,
+            model="anthropic/claude-sonnet-4.6",
+        )
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda **_kw: {
+                "presence": {"harnesses": ["claude"], "engines": ["openrouter"]},
+                "ollama": {"models": []},
+                "lmstudio": {"models": []},
+            },
+        )
+        guide = wiz.GUIDE_PATH
+        guide.parent.mkdir(parents=True, exist_ok=True)
+        guide.write_text("# fake guide")
+
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_doctor()
+        out = cap.get()
+        if rc == 0:
+            assert "All checks passed" in out
+        # openrouter-specific lines must show ok markers, not failures.
+        assert "openrouter key file mode" in out
+        assert "openrouter key file content" in out
+        assert "openrouter model name" in out
+
+
+class TestStep5SmokeTestOpenRouter:
+    """Issue #83 — Step 5 smoke test must use /models, NOT /chat/completions."""
+
+    def test_step5_calls_smoke_test_openrouter_models(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        seen: dict[str, bool] = {"called": False}
+
+        def fake_models(*a, **kw):
+            seen["called"] = True
+            return {
+                "ok": True,
+                "models": ["anthropic/claude-sonnet-4.6"],
+                "response": "1 models",
+            }
+
+        monkeypatch.setattr(pb, "smoke_test_openrouter_models", fake_models)
+        # Hard-fail if any other smoke test is called for openrouter.
+        for forbidden in (
+            "smoke_test_ollama_model",
+            "smoke_test_lmstudio_model",
+            "smoke_test_llamacpp_model",
+            "smoke_test_vllm_model",
+            "smoke_test_router9_models",
+        ):
+            monkeypatch.setattr(
+                pb,
+                forbidden,
+                lambda *a, **kw: (_ for _ in ()).throw(
+                    AssertionError(f"{forbidden} must not be called for openrouter")
+                ),
+            )
+
+        state = wiz.WizardState(
+            primary_engine="openrouter",
+            primary_harness="claude",
+            engine_model_tag="anthropic/claude-sonnet-4.6",
+        )
+        assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
+        assert seen["called"] is True
+        assert state.smoke_test_result["ok"] is True
+
+
+class TestStep7VerifyOpenRouter:
+    """Issue #83 — Step 7 verify for openrouter NEVER calls subprocess.run."""
+
+    def test_verify_uses_models_endpoint_and_does_not_run_subprocess(
+        self, isolated_state, monkeypatch
+    ):
+        import subprocess
+
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="openrouter",
+            primary_harness="claude",
+            engine_model_tag="anthropic/claude-sonnet-4.6",
+            wire_result={
+                "argv": ["claude", "--model", "anthropic/claude-sonnet-4.6"],
+                "env": {"ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"},
+                "effective_tag": "anthropic/claude-sonnet-4.6",
+                "raw_env": {"ANTHROPIC_AUTH_TOKEN": '"$(cat /tmp/k)"'},
+            },
+        )
+
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_openrouter_models",
+            lambda *a, **kw: {"ok": True, "models": [], "response": "0 models"},
+        )
+
+        def fail_run(*a, **kw):
+            raise AssertionError("step_2_7_verify must NOT call subprocess.run for openrouter")
+
+        monkeypatch.setattr(subprocess, "run", fail_run)
+        monkeypatch.setattr(wiz.subprocess, "run", fail_run)
+
+        assert wiz.step_2_7_verify(state, non_interactive=True) is True
+        assert state.verify_result["skipped_chat"] is True
+        assert state.verify_result["via"] == "openrouter-models-endpoint"
+        assert state.verify_result["ok"] is True
+
+    def test_verify_fails_when_models_unreachable(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="openrouter",
+            primary_harness="claude",
+            engine_model_tag="anthropic/claude-sonnet-4.6",
+            wire_result={
+                "argv": ["claude"],
+                "env": {},
+                "effective_tag": "x",
+                "raw_env": {},
+            },
+        )
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_openrouter_models",
+            lambda *a, **kw: {"ok": False, "error": "refused"},
+        )
+        import subprocess
+
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not run subprocess on openrouter failure path")
+            ),
+        )
+        monkeypatch.setattr(
+            wiz.subprocess,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not run subprocess on openrouter failure path")
+            ),
+        )
+        assert wiz.step_2_7_verify(state, non_interactive=True) is False
+        assert state.verify_result["skipped_chat"] is True
+
+
+class TestEnsureToolOpenRouter:
+    """OpenRouter is hosted SaaS — _ensure_tool must NOT prompt for npm install
+    and must return True even when offline (key check is deferred to step 4).
+    """
+
+    def test_returns_true_when_endpoint_reachable(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb.OpenRouterAdapter, "detect", lambda self: {"present": True, "version": ""}
+        )
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz._ensure_tool("openrouter") is True
+
+    def test_returns_true_when_offline_no_install_attempted(self, isolated_state, monkeypatch):
+        """Critical divergence from 9router: openrouter has no daemon to
+        install. When detect() fails (offline), still return True so the
+        wizard can continue to step 4 where the key prompt happens."""
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb.OpenRouterAdapter, "detect", lambda self: {"present": False, "version": ""}
+        )
+        # npm must NEVER be invoked for openrouter.
+        import subprocess as sp
+
+        monkeypatch.setattr(
+            sp,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not subprocess.run for openrouter (no npm install)")
+            ),
+        )
+        # questionary.confirm must NEVER be prompted either.
+        import questionary
+
+        monkeypatch.setattr(
+            questionary,
+            "confirm",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not prompt for openrouter install")
+            ),
+        )
+        wiz.console.width = 200
+        with wiz.console.capture():
+            assert wiz._ensure_tool("openrouter") is True
+
+
+class TestClaudeOllamaThenClaudeoCoexist:
+    """Issue #83 — installing claude+ollama and claude+openrouter must coexist.
+
+    Mirrors the 9router coexistence test (TestClaudeOllamaThenClaude9Coexist).
+    The `claude` regex must NOT eat the `claudeo` block.
+    """
+
+    def test_both_blocks_and_aliases_present(self, isolated_state, monkeypatch, tmp_path):
+        from pathlib import Path
+
+        _, wiz, _ = isolated_state
+        rc = Path.home() / ".zshrc"
+        rc.write_text("")
+
+        # Install 1: claude + ollama (writes :claude block with cc + claude-local).
+        cc_script = tmp_path / "cc"
+        cc_script.write_text("#!/bin/sh\n")
+        cc_script.chmod(0o755)
+        wiz._install_shell_aliases(cc_script, "claude", non_interactive=True)
+
+        # Install 2: claude + openrouter (writes :claudeo block with cco only).
+        cco_script = tmp_path / "cco"
+        cco_script.write_text("#!/bin/sh\n")
+        cco_script.chmod(0o755)
+        wiz._install_shell_aliases(cco_script, "claudeo", non_interactive=True)
+
+        body = rc.read_text()
+        # Both fenced blocks must be present, exactly once each.
+        assert body.count("# >>> claude-codex-local:claude >>>") == 1
+        assert body.count("# <<< claude-codex-local:claude <<<") == 1
+        assert body.count("# >>> claude-codex-local:claudeo >>>") == 1
+        assert body.count("# <<< claude-codex-local:claudeo <<<") == 1
+        # Both alias sets must be present.
+        assert "alias cc=" in body
+        assert "alias claude-local=" in body
+        assert "alias cco=" in body
+        # Both helper scripts referenced.
+        assert str(cc_script) in body
+        assert str(cco_script) in body
+        # Pin: re-running the claude install must NOT touch the claudeo block.
+        cc_script_v2 = tmp_path / "cc-v2"
+        cc_script_v2.write_text("#!/bin/sh\n")
+        cc_script_v2.chmod(0o755)
+        wiz._install_shell_aliases(cc_script_v2, "claude", non_interactive=True)
+        body2 = rc.read_text()
+        assert body2.count("# >>> claude-codex-local:claude >>>") == 1
+        assert body2.count("# >>> claude-codex-local:claudeo >>>") == 1
+        assert str(cco_script) in body2  # untouched
+        assert f"alias cc={cc_script}\n" not in body2  # original cc replaced

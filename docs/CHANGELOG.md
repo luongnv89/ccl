@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Features
+
+- **OpenRouter Integration**: Add OpenRouter as a hosted-SaaS cloud-routing backend alongside 9router (#83)
+  - New `openrouter` engine with `OpenRouterAdapter` mirroring the 9router shape
+  - Helper scripts `cco` / `cxo` / `cpo` (Claude / Codex / Pi via OpenRouter)
+  - Default model `anthropic/claude-sonnet-4.6`; override via `CCL_OPENROUTER_MODEL`
+  - Deferred-secret API key storage (chmod 0600) reused from the 9router pattern
+  - Smoke test and verify use `/models` only — never `/chat/completions` — to avoid burning paid quota
+  - Doctor checks for OpenRouter key file mode, content, and model name validity
+
 ## v0.11.0 — 2026-05-16
 
 ### Features

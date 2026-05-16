@@ -187,7 +187,7 @@ class TestCoreDebugCli:
         pb.main()
         data = json.loads(capsys.readouterr().out)
         names = {a["name"] for a in data["adapters"]}
-        assert names == {"ollama", "lmstudio", "llamacpp", "vllm", "9router"}
+        assert names == {"ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"}
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +770,43 @@ esac"""
         leaked = env_log.read_text()
         assert "ANTHROPIC_API_KEY=sk-router9-test-secret" in leaked
         assert "ANTHROPIC_AUTH_TOKEN=sk-router9-test-secret" in leaked
+        # Critical: the literal `$(cat ...)` expression must NOT reach the harness.
+        assert "$(cat" not in leaked
+
+    def test_ccl_run_with_openrouter_raw_env_keyfile(self, fake_bin, tmp_path):
+        """
+        OpenRouter key-on-disk path: same security boundary as 9router. The
+        `$(cat ...)` shell expression must be resolved at exec-time so the
+        harness sees the real key, never the literal expression. The key
+        value must never leak into the helper script body or wizard state.
+        """
+        bdir, put_stub = fake_bin
+        keyfile = tmp_path / "openrouter-key"
+        keyfile.write_text("openrouter-test-secret\n")
+        env_log = tmp_path / "claude-env.log"
+        put_stub(
+            "claude",
+            f'echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" > {shlex.quote(str(env_log))}\n'
+            f'echo "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" >> {shlex.quote(str(env_log))}\n'
+            "exit 0",
+        )
+        key_expr = f'"$(cat {shlex.quote(str(keyfile))})"'
+        self._seed_state(
+            tmp_path,
+            "claude",
+            "openrouter",
+            "anthropic/claude-sonnet-4.6",
+            raw_env={"ANTHROPIC_API_KEY": key_expr, "ANTHROPIC_AUTH_TOKEN": key_expr},
+        )
+        result = self._spawn_ccl(
+            extra_args=["run", "-p", "ping"],
+            tmp_path=tmp_path,
+            fake_bin=fake_bin,
+        )
+        assert result.returncode == 0, result.stderr
+        leaked = env_log.read_text()
+        assert "ANTHROPIC_API_KEY=openrouter-test-secret" in leaked
+        assert "ANTHROPIC_AUTH_TOKEN=openrouter-test-secret" in leaked
         # Critical: the literal `$(cat ...)` expression must NOT reach the harness.
         assert "$(cat" not in leaked
 
