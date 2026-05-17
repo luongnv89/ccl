@@ -157,6 +157,49 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 ---
 
+## Sharing Context Between Agents
+
+`ccl session` manages an opt-in JSONL store under
+`~/.claude-codex-local/sessions/<agent_id>.jsonl` for copying conversation
+context between local harnesses (Claude Code ↔ Codex ↔ Pi). It is **not** an
+auto-capture pipeline: CCL does not record harness conversations on its own.
+You (or an external script) write messages into an agent's JSONL file using
+the Python API, and the CLI lets you list, view, sync, truncate, or clear
+those files.
+
+```bash
+ccl session list                                # show all known agent files + counts
+ccl session show claude                         # print one agent's messages (JSON)
+ccl session sync --from claude --to codex       # copy redacted messages claude → codex
+ccl session truncate codex --keep 50            # keep only the last N (--keep required)
+ccl session clear codex                         # delete one agent's file
+```
+
+`sync` is **idempotent** (a content-hash dedup key per message prevents
+double-copies), preserves the source `agent_id` on the target side as
+provenance, and applies **best-effort redaction** of common token shapes
+(OpenAI, Anthropic, AWS, GitHub PAT/OAuth, Slack, GitLab, Google API)
+before persisting. Treat the JSONL files as semi-sensitive — the scrub
+covers known patterns, not arbitrary secrets in prose.
+
+Programmatic write path (for harness adapters or your own tooling):
+
+```python
+from claude_codex_local.session import SessionMessage, save_message
+
+save_message(
+    agent_id="claude",
+    message=SessionMessage(role="user", content="hello from claude"),
+)
+```
+
+State directory can be overridden with `CLAUDE_CODEX_LOCAL_STATE_DIR` (useful
+for tests and CI). `--keep` is **required** on `truncate` to prevent
+accidental wipes; use `ccl session clear` if you want to remove the file
+entirely.
+
+---
+
 ## Prerequisites
 
 - macOS or Linux with zsh or bash

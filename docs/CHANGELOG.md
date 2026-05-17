@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Features
+
+- **Session sync between agents**: New `ccl session` command group manages an opt-in JSONL store at `~/.claude-codex-local/sessions/<agent_id>.jsonl` for sharing conversation context between Claude Code, Codex, and Pi (#62, #93)
+  - Subcommands: `list`, `show`, `sync --from A --to B`, `truncate <agent> --keep N`, `clear <agent>`
+  - `sync` is idempotent (content-hash dedup) and preserves source `agent_id` as provenance on the target file
+  - Best-effort redaction of common token shapes (OpenAI, AWS, GitHub PAT/OAuth, Slack, GitLab, Google API) before persisting
+  - `truncate` requires `--keep` to prevent accidental wipes; use `clear` to remove a file entirely
+  - State directory overridable via `CLAUDE_CODEX_LOCAL_STATE_DIR` for tests and CI
+  - Producer side is manual today — messages are written via `claude_codex_local.session.save_message()`; harness auto-capture is not wired
+
+### Documentation
+
+- README: add `## Sharing Context Between Agents` section after Usage
+- docs.html: add `ccl session` card to CLI reference
+
 ## v0.12.0 — 2026-05-16
 
 ### Features

@@ -259,6 +259,21 @@
                   Non-interactive mode for scripted workflows. Execute a single prompt and exit. Streams output to stdout.
                 </div>
               </div>
+
+              <div class="tb-cmd">
+                <div class="tb-cmd-name">ccl session</div>
+                <div class="tb-cmd-desc">
+                  Manage opt-in shared conversation JSONL files under <code>~/.claude-codex-local/sessions/</code>. Lets you copy redacted context between local harnesses (Claude Code ↔ Codex ↔ Pi). Not an auto-capture pipeline — messages are written by you or external tooling via the Python API.
+                  <div class="tb-cmd-flags">
+                    <div class="tb-cmd-flags-title">Subcommands</div>
+                    <div><code>list</code> &nbsp;— show all known agent files + counts</div>
+                    <div><code>show &lt;agent&gt;</code> &nbsp;— print one agent's messages</div>
+                    <div><code>sync --from A --to B</code> &nbsp;— copy messages A → B (idempotent, redacted)</div>
+                    <div><code>truncate &lt;agent&gt; --keep N</code> &nbsp;— keep only the last N (--keep required)</div>
+                    <div><code>clear &lt;agent&gt;</code> &nbsp;— delete one agent's file</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
