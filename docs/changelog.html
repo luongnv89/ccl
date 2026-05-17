@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Changelog — claude-codex-local</title>
+    <meta
+      name="description"
+      content="Release history and changelog for claude-codex-local. Track new features, bug fixes, and improvements."
+    />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      .changelog-container {
+        max-width: 900px;
+        margin: 0 auto;
+      }
+
+      .changelog-version {
+        margin-bottom: 48px;
+        padding-bottom: 48px;
+        border-bottom: 1px solid var(--border-dim);
+      }
+
+      .changelog-version:last-child {
+        border-bottom: none;
+      }
+
+      .version-header {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .version-number {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--green);
+        font-family: var(--mono);
+      }
+
+      .version-date {
+        font-size: 14px;
+        color: var(--text-muted);
+        font-family: var(--mono);
+      }
+
+      .changelog-section {
+        margin-bottom: 24px;
+      }
+
+      .changelog-section h3 {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--cyan);
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-family: var(--mono);
+      }
+
+      .changelog-section ul {
+        list-style: none;
+        padding: 0;
+      }
+
+      .changelog-section li {
+        padding-left: 24px;
+        position: relative;
+        margin-bottom: 12px;
+        line-height: 1.7;
+        color: var(--text-muted);
+      }
+
+      .changelog-section li::before {
+        content: "→";
+        position: absolute;
+        left: 0;
+        color: var(--green);
+        font-weight: 700;
+      }
+
+      .changelog-section li strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .changelog-section li code {
+        font-family: var(--mono);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 5px;
+        border-radius: 4px;
+        color: var(--cyan);
+      }
+
+      .changelog-link {
+        display: inline-block;
+        margin-top: 16px;
+        font-size: 14px;
+        color: var(--cyan);
+        text-decoration: none;
+        font-family: var(--mono);
+      }
+
+      .changelog-link:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ── Nav ──────────────────────────────────────────────────── -->
+    <nav id="main-nav">
+      <div class="nav-inner">
+        <a href="index.html" class="nav-logo">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 64 64"
+            fill="none"
+          >
+            <rect width="64" height="64" rx="14" fill="#111111" />
+            <line
+              x1="32"
+              y1="6"
+              x2="32"
+              y2="18"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="32"
+              y1="46"
+              x2="32"
+              y2="58"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="6"
+              y1="32"
+              x2="18"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="46"
+              y1="32"
+              x2="58"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="13.5"
+              x2="21.9"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="42.1"
+              y1="42.1"
+              x2="50.5"
+              y2="50.5"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="50.5"
+              y1="13.5"
+              x2="42.1"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="50.5"
+              x2="21.9"
+              y2="42.1"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M22,27 L28,32 L22,37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <line
+              x1="31"
+              y1="37"
+              x2="39"
+              y2="37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+            />
+          </svg>
+          CCL<span> · claude-codex-local</span>
+        </a>
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="guides.html">Guides</a></li>
+          <li><a href="resources.html">Resources</a></li>
+          <li><a href="changelog.html" class="active">Changelog</a></li>
+        </ul>
+        <a
+          href="https://github.com/luongnv89/claude-codex-local"
+          target="_blank"
+          rel="noopener"
+          class="nav-gh"
+        >
+          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </nav>
+
+    <!-- ── Changelog ────────────────────────────────────────────── -->
+    <section id="changelog">
+      <div class="container">
+        <div class="section-label reveal" style="text-align: center">
+          Release History
+        </div>
+        <h2 class="section-title reveal" style="text-align: center">
+          Changelog
+        </h2>
+        <p class="section-sub reveal" style="text-align: center; margin: 0 auto 56px;">
+          All notable changes to this project are documented here. The format is based on
+          <a href="https://keepachangelog.com/en/1.0.0/" target="_blank" rel="noopener" style="color: var(--cyan);">Keep a Changelog</a>,
+          and this project adheres to
+          <a href="https://semver.org/spec/v2.0.0.html" target="_blank" rel="noopener" style="color: var(--cyan);">Semantic Versioning</a>.
+        </p>
+
+        <div class="changelog-container reveal">
+          <!-- v0.12.0 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.12.0</h2>
+              <span class="version-date">2026-05-16</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Features</h3>
+              <ul>
+                <li><strong>OpenRouter Integration:</strong> Add OpenRouter as a hosted-SaaS cloud-routing backend alongside 9router (#83)</li>
+                <li>New <code>openrouter</code> engine with <code>OpenRouterAdapter</code> mirroring the 9router shape</li>
+                <li>Helper scripts <code>cco</code> / <code>cxo</code> / <code>cpo</code> (Claude / Codex / Pi via OpenRouter)</li>
+                <li>Default model <code>anthropic/claude-sonnet-4.6</code>; override via <code>CCL_OPENROUTER_MODEL</code></li>
+                <li>Deferred-secret API key storage (chmod 0600) reused from the 9router pattern</li>
+                <li>Smoke test sends a minimal request to the selected OpenRouter model; verify still uses <code>/models</code> only to avoid an extra chat call</li>
+                <li>Doctor checks for OpenRouter key file mode, content, and model name validity</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Bug Fixes</h3>
+              <ul>
+                <li><strong>OpenRouter smoke test:</strong> Smoke test now targets the selected OpenRouter model (#85)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Documentation</h3>
+              <ul>
+                <li>Update landing page release history for recent versions</li>
+              </ul>
+            </div>
+
+            <a href="https://github.com/luongnv89/ccl/compare/v0.11.0...v0.12.0" target="_blank" rel="noopener" class="changelog-link">
+              Full Changelog →
+            </a>
+          </div>
+
+          <!-- v0.11.0 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.11.0</h2>
+              <span class="version-date">2026-05-16</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Features</h3>
+              <ul>
+                <li><strong>Pi Harness Support:</strong> Add Pi as a supported harness alongside Claude Code and Codex CLI, enabling model-agnostic terminal coding workflows (#59, #82)</li>
+                <li>Wire Pi into the wizard setup flow with dedicated configuration</li>
+                <li>Add <code>cp</code> alias for Pi + local model sessions</li>
+                <li>Support Pi-specific <code>models.json</code> configuration</li>
+                <li>Update documentation and guide generation for Pi workflows</li>
+              </ul>
+            </div>
+
+            <a href="https://github.com/luongnv89/ccl/compare/v0.10.0...v0.11.0" target="_blank" rel="noopener" class="changelog-link">
+              Full Changelog →
+            </a>
+          </div>
+
+          <!-- v0.10.0 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.10.0</h2>
+              <span class="version-date">2026-05-10</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Features</h3>
+              <ul>
+                <li><strong>Non-interactive CLI:</strong> Add <code>ccl run</code> subcommand with <code>-p/--prompt</code> flag for non-interactive sessions, enabling scripted and automated workflows (#70, #71)</li>
+                <li><strong>vLLM Wizard Integration:</strong> Wire vLLM into the setup wizard as a selectable backend option (#66)</li>
+                <li><strong>9router Auto-install:</strong> Wizard now offers to install 9router via npm when user selects it as their routing backend (#67)</li>
+                <li><strong>Machine Profile Caching:</strong> Cache machine specifications to avoid re-scanning hardware on subsequent setup runs, significantly improving wizard startup time (#58, #75)</li>
+                <li><strong>llama.cpp Enhancements:</strong> Upgrade to 128k context support, add reasoning model smoke test, implement <code>ccl serve</code> command, and enable automatic server restart on crashes (#60)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Bug Fixes</h3>
+              <ul>
+                <li><strong>Wizard Component Recheck:</strong> Fix wizard to recheck selected setup components after user modifications, ensuring configuration consistency (#79, #81)</li>
+                <li><strong>vLLM Detection:</strong> vLLM detection now checks for CLI installation rather than just server reachability, preventing false positives (#78)</li>
+                <li><strong>llama.cpp Model Matching:</strong> Fix HuggingFace tag matching to use existing <code>_llamacpp_models_match</code> helper for consistent model resolution (#64)</li>
+                <li><strong>Machine Profile Cache:</strong> Write in-process machine profile cache to the correct symbol, fixing cache persistence issues (#77)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Performance</h3>
+              <ul>
+                <li><strong>Lazy llmfit Loading:</strong> Optimize setup workflow with lazy llmfit initialization and cache-aware model picker, reducing unnecessary hardware scans (#79, #80)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Tests</h3>
+              <ul>
+                <li><strong>vLLM E2E Coverage:</strong> Add comprehensive end-to-end test against a live vLLM server instance (#63)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Documentation</h3>
+              <ul>
+                <li>Refresh documentation and brand assets for improved clarity and visual consistency (#76)</li>
+              </ul>
+            </div>
+
+            <a href="https://github.com/luongnv89/ccl/compare/v0.9.0...v0.10.0" target="_blank" rel="noopener" class="changelog-link">
+              Full Changelog →
+            </a>
+          </div>
+
+          <!-- v0.9.0 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.9.0</h2>
+              <span class="version-date">2026-05-05</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Features</h3>
+              <ul>
+                <li><strong>9router Integration:</strong> Add 9router as a cloud-routing backend provider (#51, #52)</li>
+                <li>Add Router9Adapter with smoke test support</li>
+                <li>Extend wizard with 9router setup flow and API key management</li>
+                <li>Support cc9/cx9 aliases for 9router alongside existing cc/cx aliases</li>
+                <li>Add fence-tag derivation and doctor checks for 9router</li>
+                <li>Implement key-file deferral for Claude and Codex 9router branches</li>
+                <li>Update wizard steps to handle 9router-specific configuration</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Bug Fixes</h3>
+              <ul>
+                <li>Fix wizard to honor forced setup preferences (#51)</li>
+                <li>Update DeepSeek model hub paths</li>
+                <li>Fix step 2 install-hint loop to show 9router URL (#51)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Documentation</h3>
+              <ul>
+                <li>Document 9router engine and cc9/cx9 aliases in README and ARCHITECTURE.md (#51)</li>
+                <li>Add 9router to primary_engine inline comments (#51)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Tests</h3>
+              <ul>
+                <li>Update e2e and vllm adapter registry assertions for 9router (#51)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Refactoring</h3>
+              <ul>
+                <li>Refactor wizard _alias_block and _write_helper_script to use 4-way dispatch (#51)</li>
+                <li>Extend WireResult with raw_env field for deferred shell expressions (#51)</li>
+              </ul>
+            </div>
+
+            <a href="https://github.com/luongnv89/ccl/compare/v0.8.3...v0.9.0" target="_blank" rel="noopener" class="changelog-link">
+              Full Changelog →
+            </a>
+          </div>
+
+          <!-- v0.8.3 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.8.3</h2>
+              <span class="version-date">2026-04-24</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Fixed</h3>
+              <ul>
+                <li>Retired the qwen2.5-coder 0.5b verified path and removed related claims from the README, docs, model mapping, and static site (#49)</li>
+                <li>Restored the bootstrap docs to point users to <code>ccl find-model</code> instead of a hardcoded tiny model download path (#49)</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- v0.8.2 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.8.2</h2>
+              <span class="version-date">2026-04-20</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Fixed</h3>
+              <ul>
+                <li>Wizard step IDs renumbered from the <code>2.x</code> scheme (<code>2.1</code>–<code>2.8</code>) to sequential integers (<code>1</code>–<code>8</code>), so progress indicators are consistent throughout the setup flow (#47)</li>
+                <li>Documentation updated to reflect the new sequential step numbering (<code>1</code>–<code>11</code> across all wizard sections)</li>
+                <li>E2e and unit tests updated to reference the new step IDs</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- v0.8.1 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.8.1</h2>
+              <span class="version-date">2026-04-17</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Fixed</h3>
+              <ul>
+                <li>Machine specifications table now shows real CPU, RAM, and GPU values — the wizard was reading <code>llmfit system --json</code> fields from the top level, but they are wrapped under a <code>system</code> key; Platform row now comes from <code>platform.system()</code> / <code>platform.machine()</code> since llmfit does not emit those keys (#46)</li>
+                <li>llmfit ranking now uses <strong>available</strong> RAM instead of total — <code>llmfit fit --json</code> is invoked with <code>--ram &lt;available_ram_gb&gt;G</code> so the Speed/Balanced/Quality picks match what will actually fit on the host right now (#46)</li>
+                <li>Embedding and reranker models are hidden from the installed-models picker for both Ollama and LM Studio — they cannot serve as chat coding models and were surfacing as confusing choices (e.g. <code>embeddinggemma:300m</code>, <code>nomic-embed-text:latest</code>) (#46)</li>
+                <li>Step 4 (formerly 2.4) model picker is now grouped with visual separators — <code>Running server</code> / <code>Suggested by llmfit</code> / <code>Installed on this machine</code> / <code>Other</code> — so categories are visually distinct (#46)</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- v0.8.0 -->
+          <div class="changelog-version">
+            <div class="version-header">
+              <h2 class="version-number">v0.8.0</h2>
+              <span class="version-date">2026-04-17</span>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Added</h3>
+              <ul>
+                <li>vLLM backend adapter with unit and e2e test coverage — high-throughput inference engine now joins Ollama, LM Studio, and llama.cpp as a first-class engine option</li>
+                <li>Wizard detects an already-running <code>llama-server</code> and offers its active model as a pick, so you can keep your warm process instead of re-pulling a GGUF</li>
+                <li>Wizard pre-populates the model picker with models discovered on-host and recommendation profile picks, so the first press of Enter lands on a sensible default (#35, #36)</li>
+                <li>Wizard welcome banner now shows the installed version and repository URL, so users know which build they are running and where to file issues (#37)</li>
+                <li>Live progress for model downloads: <code>ollama pull</code>, <code>lms get</code>, and the Hugging Face CLI now stream their own progress bars (bytes, speed, ETA) straight to the terminal, and the wizard prints a post-download summary with the final size and elapsed time. Ctrl-C cleanly aborts an in-flight pull (#39)</li>
+                <li>Fuzzy-search fallback for Hugging Face GGUF downloads: when a repo is not found, the wizard queries the Hub's search API, presents up to 3 closest matches as a numbered picker, and lets the user either pick one or re-enter a different name. When no similar models are found the wizard reports it and re-prompts for a new name (#38)</li>
+              </ul>
+            </div>
+
+            <div class="changelog-section">
+              <h3>Fixed</h3>
+              <ul>
+                <li>Post-review polish for the fuzzy fallback and KI wizard flow (#45)</li>
+                <li>vLLM adapter type annotations and lint warnings cleared under <code>mypy</code> and <code>ruff</code></li>
+                <li>Removed a stray agent worktree gitlink that broke CI on fresh clones</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Earlier versions link -->
+          <div class="changelog-version">
+            <p style="text-align: center; color: var(--text-muted);">
+              <a href="https://github.com/luongnv89/claude-codex-local/blob/main/docs/CHANGELOG.md" target="_blank" rel="noopener" class="changelog-link">
+                View complete changelog on GitHub →
+              </a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ─────────────────────────────────────────────────── -->
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-logo">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 64 64"
+            fill="none"
+          >
+            <rect width="64" height="64" rx="14" fill="#111111" />
+            <line
+              x1="32"
+              y1="6"
+              x2="32"
+              y2="18"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="32"
+              y1="46"
+              x2="32"
+              y2="58"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="6"
+              y1="32"
+              x2="18"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="46"
+              y1="32"
+              x2="58"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="13.5"
+              x2="21.9"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="42.1"
+              y1="42.1"
+              x2="50.5"
+              y2="50.5"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="50.5"
+              y1="13.5"
+              x2="42.1"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="50.5"
+              x2="21.9"
+              y2="42.1"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M22,27 L28,32 L22,37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <line
+              x1="31"
+              y1="37"
+              x2="39"
+              y2="37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+            />
+          </svg>
+          <strong>claude-codex-local</strong> · v0.12.0
+        </div>
+        <ul class="footer-links">
+          <li>
+            <a
+              href="https://github.com/luongnv89/claude-codex-local"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li>
+            <a href="docs.html">Docs</a>
+          </li>
+          <li>
+            <a href="changelog.html">Changelog</a>
+          </li>
+          <li>
+            <a
+              href="https://github.com/luongnv89/claude-codex-local/issues"
+              target="_blank"
+              rel="noopener"
+              >Issues</a
+            >
+          </li>
+        </ul>
+        <div class="footer-right">
+          MIT License · Built for developers, by developers
+        </div>
+      </div>
+    </footer>
+
+    <script src="nav.js"></script>
+  </body>
+</html>
