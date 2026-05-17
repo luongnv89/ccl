@@ -6,111 +6,28 @@
     <title>Resources — claude-codex-local</title>
     <meta
       name="description"
-      content="Curated resources for claude-codex-local. GitHub repository, discussions, related tools, and community links."
+      content="Curated links: project, related tools, model hubs, and supported harnesses."
     />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body class="tb-page">
     <!-- ── Nav ──────────────────────────────────────────────────── -->
     <nav id="main-nav">
       <div class="nav-inner">
         <a href="index.html" class="nav-logo">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 64 64"
-            fill="none"
-          >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
             <rect width="64" height="64" rx="14" fill="#111111" />
-            <line
-              x1="32"
-              y1="6"
-              x2="32"
-              y2="18"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="32"
-              y1="46"
-              x2="32"
-              y2="58"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="6"
-              y1="32"
-              x2="18"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="46"
-              y1="32"
-              x2="58"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="13.5"
-              x2="21.9"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="42.1"
-              y1="42.1"
-              x2="50.5"
-              y2="50.5"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="50.5"
-              y1="13.5"
-              x2="42.1"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="50.5"
-              x2="21.9"
-              y2="42.1"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <path
-              d="M22,27 L28,32 L22,37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              fill="none"
-            />
-            <line
-              x1="31"
-              y1="37"
-              x2="39"
-              y2="37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-            />
+            <line x1="32" y1="6" x2="32" y2="18" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="6" y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
           CCL<span> · claude-codex-local</span>
         </a>
@@ -121,318 +38,235 @@
           <li><a href="resources.html" class="active">Resources</a></li>
           <li><a href="changelog.html">Changelog</a></li>
         </ul>
-        <a
-          href="https://github.com/luongnv89/claude-codex-local"
-          target="_blank"
-          rel="noopener"
-          class="nav-gh"
-        >
+        <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="nav-gh">
           <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-            />
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
           </svg>
-          GitHub
+          <span class="nav-gh-text">GitHub</span>
         </a>
       </div>
     </nav>
 
-    <!-- ── Resources ───────────────────────────────────────────────── -->
-    <section id="resources">
+    <!-- ── Page hero ────────────────────────────────────────────── -->
+    <section class="tb-page-hero">
       <div class="container">
-        <div class="section-label reveal" style="text-align: center">
-          Community
+        <div class="tb-crumb reveal">
+          <a href="index.html">~</a>
+          <span class="sep">/</span>
+          <span class="here">resources</span>
         </div>
-        <h2 class="section-title reveal" style="text-align: center">
-          Resources
-        </h2>
-        <p class="section-sub reveal" style="text-align: center; margin: 0 auto 56px;">
-          Curated links to help you get the most out of claude-codex-local.
+        <h1 class="tb-page-title reveal">
+          <span class="slash">/</span>resources<span class="accent">_</span>
+        </h1>
+        <p class="tb-page-sub reveal">
+          Everything in the orbit of claude-codex-local — the upstream project, supported runtimes, routing backends, model hubs, and the harnesses we bridge to.
         </p>
-
-        <div style="max-width: 900px; margin: 0 auto;">
-          <!-- Official Links -->
-          <div class="reveal" style="margin-bottom: 48px;">
-            <h3 style="font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 24px;">Official Links</h3>
-            <div class="features-grid">
-              <div class="feature-card">
-                <div class="feature-icon">📦</div>
-                <h3>GitHub Repository</h3>
-                <p>Source code, issue tracker, and contribution guidelines.</p>
-                <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View on GitHub →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">💬</div>
-                <h3>GitHub Discussions</h3>
-                <p>Ask questions, share tips, and connect with the community.</p>
-                <a href="https://github.com/luongnv89/claude-codex-local/discussions" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  Join Discussions →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">🐛</div>
-                <h3>Issue Tracker</h3>
-                <p>Report bugs, request features, and track development progress.</p>
-                <a href="https://github.com/luongnv89/claude-codex-local/issues" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View Issues →
-                </a>
-              </div>
-            </div>
+        <div class="tb-page-stats reveal">
+          <div class="stat">
+            <div class="stat-label">Categories</div>
+            <div class="stat-value">4 sections</div>
           </div>
-
-          <!-- Related Tools -->
-          <div class="reveal" style="margin-bottom: 48px;">
-            <h3 style="font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 24px;">Related Tools</h3>
-            <div class="features-grid">
-              <div class="feature-card">
-                <div class="feature-icon">🦙</div>
-                <h3>Ollama</h3>
-                <p>Get up and running with large language models locally. Primary backend for claude-codex-local.</p>
-                <a href="https://ollama.com" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  ollama.com →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">🔧</div>
-                <h3>llama.cpp</h3>
-                <p>Inference of LLaMA models in pure C/C++. High-performance GGUF model support.</p>
-                <a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View on GitHub →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">⚡</div>
-                <h3>vLLM</h3>
-                <p>High-throughput and memory-efficient inference engine for LLMs.</p>
-                <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View on GitHub →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">🎯</div>
-                <h3>llmfit</h3>
-                <p>Hardware-aware model selection. Analyzes your system and recommends models that fit.</p>
-                <a href="https://github.com/luongnv89/llmfit" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View on GitHub →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">🌐</div>
-                <h3>9router</h3>
-                <p>Local cloud-routing proxy for alternative providers (OpenAI, DeepSeek, etc.).</p>
-                <a href="https://github.com/luongnv89/9router" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View on GitHub →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">🔀</div>
-                <h3>OpenRouter</h3>
-                <p>Hosted SaaS alternative to 9router with unified API for multiple LLM providers.</p>
-                <a href="https://openrouter.ai" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  openrouter.ai →
-                </a>
-              </div>
-            </div>
+          <div class="stat">
+            <div class="stat-label">Curated</div>
+            <div class="stat-value">14 links</div>
           </div>
-
-          <!-- Model Hubs -->
-          <div class="reveal" style="margin-bottom: 48px;">
-            <h3 style="font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 24px;">Model Hubs</h3>
-            <div class="features-grid">
-              <div class="feature-card">
-                <div class="feature-icon">🤗</div>
-                <h3>Hugging Face</h3>
-                <p>Download GGUF models directly via the built-in <code>huggingface-cli</code> integration.</p>
-                <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  Browse GGUF Models →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">📚</div>
-                <h3>Ollama Library</h3>
-                <p>Pre-configured models optimized for Ollama. One-command installation.</p>
-                <a href="https://ollama.com/library" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  Browse Library →
-                </a>
-              </div>
-            </div>
-          </div>
-
-          <!-- Harnesses -->
-          <div class="reveal">
-            <h3 style="font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 24px;">Supported Harnesses</h3>
-            <div class="features-grid">
-              <div class="feature-card">
-                <div class="feature-icon">🤖</div>
-                <h3>Claude Code</h3>
-                <p>Anthropic's official CLI for Claude. Full skill and agent support.</p>
-                <a href="https://www.anthropic.com/claude/code" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  Learn More →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">💻</div>
-                <h3>Codex CLI</h3>
-                <p>Terminal-based coding assistant with MCP server support.</p>
-                <a href="https://codex.so" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  codex.so →
-                </a>
-              </div>
-
-              <div class="feature-card">
-                <div class="feature-icon">🥧</div>
-                <h3>Pi</h3>
-                <p>Model-agnostic terminal coding workflow. Lightweight alternative harness.</p>
-                <a href="https://github.com/luongnv89/pi" target="_blank" rel="noopener" style="color: var(--cyan); text-decoration: none; font-size: 14px; margin-top: 8px; display: inline-block;">
-                  View on GitHub →
-                </a>
-              </div>
-            </div>
+          <div class="stat">
+            <div class="stat-label">Maintained</div>
+            <div class="stat-value"><span class="dot"></span>actively</div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ── Footer ─────────────────────────────────────────────────── -->
+    <!-- ── Resources content ────────────────────────────────────── -->
+    <section class="tb-section">
+      <div class="container" style="max-width: 1000px;">
+        <!-- Official -->
+        <div class="tb-res-section reveal">
+          <div class="tb-res-head">
+            01 · Official <span class="count">[3 links]</span>
+          </div>
+          <div class="tb-res-grid">
+            <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">github</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>GitHub Repository</h3>
+              <p>Source code, issue tracker, and contribution guidelines.</p>
+            </a>
+
+            <a href="https://github.com/luongnv89/claude-codex-local/discussions" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">discussions</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>GitHub Discussions</h3>
+              <p>Ask questions, share tips, and connect with the community.</p>
+            </a>
+
+            <a href="https://github.com/luongnv89/claude-codex-local/issues" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">issues</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Issue Tracker</h3>
+              <p>Report bugs, request features, and track development progress.</p>
+            </a>
+          </div>
+        </div>
+
+        <!-- Related tools -->
+        <div class="tb-res-section reveal">
+          <div class="tb-res-head">
+            02 · Related tools <span class="count">[6 links]</span>
+          </div>
+          <div class="tb-res-grid">
+            <a href="https://ollama.com" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">runtime · primary</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Ollama</h3>
+              <p>Get up and running with LLMs locally. Primary backend for claude-codex-local.</p>
+            </a>
+
+            <a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">runtime · gguf</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>llama.cpp</h3>
+              <p>Inference of LLaMA models in pure C/C++. High-performance GGUF support.</p>
+            </a>
+
+            <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">runtime · gpu</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>vLLM</h3>
+              <p>High-throughput, memory-efficient inference engine for LLMs.</p>
+            </a>
+
+            <a href="https://github.com/luongnv89/llmfit" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">picker · sibling</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>llmfit</h3>
+              <p>Hardware-aware model selection. Analyzes your system; recommends models that fit.</p>
+            </a>
+
+            <a href="https://github.com/luongnv89/9router" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">router · local</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>9router</h3>
+              <p>Local cloud-routing proxy for alternative providers (OpenAI, DeepSeek, ...).</p>
+            </a>
+
+            <a href="https://openrouter.ai" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">router · hosted</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>OpenRouter</h3>
+              <p>Hosted SaaS alternative to 9router. Unified API for dozens of LLM providers.</p>
+            </a>
+          </div>
+        </div>
+
+        <!-- Model hubs -->
+        <div class="tb-res-section reveal">
+          <div class="tb-res-head">
+            03 · Model hubs <span class="count">[2 links]</span>
+          </div>
+          <div class="tb-res-grid">
+            <a href="https://huggingface.co/models?library=gguf" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">hub · gguf</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Hugging Face</h3>
+              <p>Download GGUF models directly via the built-in <code>huggingface-cli</code> integration.</p>
+            </a>
+
+            <a href="https://ollama.com/library" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">hub · ollama</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Ollama Library</h3>
+              <p>Pre-configured models optimized for Ollama. One-command installation.</p>
+            </a>
+          </div>
+        </div>
+
+        <!-- Harnesses -->
+        <div class="tb-res-section reveal">
+          <div class="tb-res-head">
+            04 · Supported harnesses <span class="count">[3 links]</span>
+          </div>
+          <div class="tb-res-grid">
+            <a href="https://www.anthropic.com/claude/code" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">harness · cc</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Claude Code</h3>
+              <p>Anthropic's official CLI for Claude. Full skill and agent support.</p>
+            </a>
+
+            <a href="https://codex.so" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">harness · cx</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Codex CLI</h3>
+              <p>Terminal-based coding assistant with MCP server support.</p>
+            </a>
+
+            <a href="https://github.com/luongnv89/pi" target="_blank" rel="noopener" class="tb-res-card">
+              <div class="tb-res-card-head">
+                <span class="tb-res-card-tag">harness · cp</span>
+                <span class="tb-res-card-arrow">→</span>
+              </div>
+              <h3>Pi</h3>
+              <p>Model-agnostic terminal coding workflow. Lightweight alternative harness.</p>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ─────────────────────────────────────────────── -->
     <footer>
       <div class="footer-inner">
         <div class="footer-logo">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 64 64"
-            fill="none"
-          >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
             <rect width="64" height="64" rx="14" fill="#111111" />
-            <line
-              x1="32"
-              y1="6"
-              x2="32"
-              y2="18"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="32"
-              y1="46"
-              x2="32"
-              y2="58"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="6"
-              y1="32"
-              x2="18"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="46"
-              y1="32"
-              x2="58"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="13.5"
-              x2="21.9"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="42.1"
-              y1="42.1"
-              x2="50.5"
-              y2="50.5"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="50.5"
-              y1="13.5"
-              x2="42.1"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="50.5"
-              x2="21.9"
-              y2="42.1"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <path
-              d="M22,27 L28,32 L22,37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              fill="none"
-            />
-            <line
-              x1="31"
-              y1="37"
-              x2="39"
-              y2="37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-            />
+            <line x1="32" y1="6" x2="32" y2="18" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="6" y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
           <strong>claude-codex-local</strong> · v0.12.0
         </div>
         <ul class="footer-links">
-          <li>
-            <a
-              href="https://github.com/luongnv89/claude-codex-local"
-              target="_blank"
-              rel="noopener"
-              >GitHub</a
-            >
-          </li>
-          <li>
-            <a href="docs.html">Docs</a>
-          </li>
-          <li>
-            <a href="changelog.html">Changelog</a>
-          </li>
-          <li>
-            <a
-              href="https://github.com/luongnv89/claude-codex-local/issues"
-              target="_blank"
-              rel="noopener"
-              >Issues</a
-            >
-          </li>
+          <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="https://github.com/luongnv89/claude-codex-local/issues" target="_blank" rel="noopener">Issues</a></li>
         </ul>
-        <div class="footer-right">
-          MIT License · Built for developers, by developers
-        </div>
+        <div class="footer-right">MIT License · Built for developers, by developers</div>
       </div>
     </footer>
 

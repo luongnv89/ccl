@@ -99,18 +99,54 @@ document.querySelectorAll(".copy-btn").forEach((btn) => {
   });
 });
 
-// ── FAQ accordion ──────────────────────────────────────────
-document.querySelectorAll(".faq-question").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const item = btn.closest(".faq-item");
-    const isOpen = item.classList.contains("open");
+// ── FAQ accordion (legacy + terminal-brutalism variants) ───
+document
+  .querySelectorAll(".faq-question, .tb-faq-q")
+  .forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const item = btn.closest(".faq-item, .tb-faq-item");
+      if (!item) return;
+      const isOpen = item.classList.contains("open");
 
-    // Close all
-    document
-      .querySelectorAll(".faq-item.open")
-      .forEach((el) => el.classList.remove("open"));
+      const groupSelector = item.classList.contains("tb-faq-item")
+        ? ".tb-faq-item.open"
+        : ".faq-item.open";
 
-    // Toggle clicked
-    if (!isOpen) item.classList.add("open");
+      document
+        .querySelectorAll(groupSelector)
+        .forEach((el) => el.classList.remove("open"));
+
+      if (!isOpen) item.classList.add("open");
+    });
   });
-});
+
+// ── Sidebar scroll-spy for docs/guides pages ───────────────
+const sidebarLinks = document.querySelectorAll(".tb-sidebar-list a[href^='#']");
+if (sidebarLinks.length) {
+  const targetMap = new Map();
+  sidebarLinks.forEach((a) => {
+    const id = a.getAttribute("href").slice(1);
+    const el = document.getElementById(id);
+    if (el) targetMap.set(el, a);
+  });
+
+  const setActive = (link) => {
+    sidebarLinks.forEach((a) => a.classList.remove("active"));
+    if (link) link.classList.add("active");
+  };
+
+  const spyObserver = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((e) => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible.length) {
+        const link = targetMap.get(visible[0].target);
+        setActive(link);
+      }
+    },
+    { rootMargin: "-20% 0px -65% 0px", threshold: 0 },
+  );
+
+  targetMap.forEach((_, el) => spyObserver.observe(el));
+}

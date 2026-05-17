@@ -6,111 +6,28 @@
     <title>Model Selection Guide — claude-codex-local</title>
     <meta
       name="description"
-      content="Choose the right coding model for your hardware. Memory tier recommendations and manual selection guide."
+      content="Hardware-aware model selection guide. Find the right coding model for your memory tier — from 8GB laptops to 192GB workstations."
     />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body class="tb-page">
     <!-- ── Nav ──────────────────────────────────────────────────── -->
     <nav id="main-nav">
       <div class="nav-inner">
         <a href="index.html" class="nav-logo">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 64 64"
-            fill="none"
-          >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
             <rect width="64" height="64" rx="14" fill="#111111" />
-            <line
-              x1="32"
-              y1="6"
-              x2="32"
-              y2="18"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="32"
-              y1="46"
-              x2="32"
-              y2="58"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="6"
-              y1="32"
-              x2="18"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="46"
-              y1="32"
-              x2="58"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="13.5"
-              x2="21.9"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="42.1"
-              y1="42.1"
-              x2="50.5"
-              y2="50.5"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="50.5"
-              y1="13.5"
-              x2="42.1"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="50.5"
-              x2="21.9"
-              y2="42.1"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <path
-              d="M22,27 L28,32 L22,37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              fill="none"
-            />
-            <line
-              x1="31"
-              y1="37"
-              x2="39"
-              y2="37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-            />
+            <line x1="32" y1="6" x2="32" y2="18" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="6" y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
           CCL<span> · claude-codex-local</span>
         </a>
@@ -121,331 +38,284 @@
           <li><a href="resources.html">Resources</a></li>
           <li><a href="changelog.html">Changelog</a></li>
         </ul>
-        <a
-          href="https://github.com/luongnv89/claude-codex-local"
-          target="_blank"
-          rel="noopener"
-          class="nav-gh"
-        >
+        <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="nav-gh">
           <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-            />
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
           </svg>
-          GitHub
+          <span class="nav-gh-text">GitHub</span>
         </a>
       </div>
     </nav>
 
-    <!-- ── Model Guide ────────────────────────────────────────────── -->
-    <section id="model-guide">
+    <!-- ── Page hero ────────────────────────────────────────────── -->
+    <section class="tb-page-hero">
       <div class="container">
-        <div class="section-label reveal" style="text-align: center">
-          Model Guide
+        <div class="tb-crumb reveal">
+          <a href="index.html">~</a>
+          <span class="sep">/</span>
+          <span class="here">guides</span>
+          <span class="sep">/</span>
+          <span class="here" style="color: var(--text-muted);">model-selection</span>
         </div>
-        <h2 class="section-title reveal" style="text-align: center">
-          Which coding model fits your memory?
-        </h2>
-        <p class="model-guide-intro reveal">
-          The wizard uses <code>llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what coding models work at each memory tier.
+        <h1 class="tb-page-title reveal">
+          Which model<br /><span class="accent">fits your machine?</span>
+        </h1>
+        <p class="tb-page-sub reveal">
+          From 8GB laptops to 192GB workstations — a hardware-tiered map of coding models. The wizard does this for you via <code style="font-family: var(--mono); font-size: 15px; background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 3px; color: var(--tb-accent);">llmfit</code>; this page shows the math.
         </p>
-
-        <div class="reveal table-wrapper">
-          <table class="model-guide-table">
-            <caption class="sr-only">Coding model recommendations by memory tier</caption>
-            <thead>
-              <tr>
-                <th>Memory Tier (Hardware)</th>
-                <th>Recommended Coding Models</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td data-label="Memory Tier">
-                  <strong>24GB</strong><br />
-                  <span class="hw-examples">M3 Pro (18GB), RTX 4090 (24GB)</span>
-                </td>
-                <td data-label="Recommended Models">
-                  <strong>Qwen2.5-Coder-7B</strong> — Fast, efficient for most coding tasks<br />
-                  <strong>DeepSeek-Coder-6.7B</strong> — Strong code completion<br />
-                  <strong>CodeLlama-13B</strong> — Balanced performance<br />
-                  <strong>Mistral-7B-Instruct</strong> — General purpose with coding ability
-                </td>
-              </tr>
-              <tr>
-                <td data-label="Memory Tier">
-                  <strong>32GB</strong><br />
-                  <span class="hw-examples">M3 Max (36GB), RTX 6000 Ada (48GB)</span>
-                </td>
-                <td data-label="Recommended Models">
-                  <strong>Qwen2.5-Coder-14B</strong> — Enhanced reasoning for complex refactoring<br />
-                  <strong>DeepSeek-Coder-33B</strong> — Advanced code generation<br />
-                  <strong>CodeLlama-34B</strong> — Large context window (16K tokens)<br />
-                  <strong>Phind-CodeLlama-34B</strong> — Optimized for code search and explanation
-                </td>
-              </tr>
-              <tr>
-                <td data-label="Memory Tier">
-                  <strong>64GB</strong><br />
-                  <span class="hw-examples">M2 Ultra (64GB), H100 (80GB)</span>
-                </td>
-                <td data-label="Recommended Models">
-                  <strong>Qwen2.5-Coder-32B</strong> — Top-tier coding performance<br />
-                  <strong>DeepSeek-Coder-V2-Lite</strong> — 16B with 128K context<br />
-                  <strong>CodeLlama-70B</strong> — Maximum capability for architecture design<br />
-                  <strong>Mixtral-8x7B-Instruct</strong> — MoE architecture, efficient 47B params
-                </td>
-              </tr>
-              <tr>
-                <td data-label="Memory Tier">
-                  <strong>128GB+</strong><br />
-                  <span class="hw-examples">Mac Studio (192GB), H100 NVL (188GB)</span>
-                </td>
-                <td data-label="Recommended Models">
-                  <strong>DeepSeek-Coder-V2-236B</strong> — State-of-the-art coding model<br />
-                  <strong>Qwen2.5-Coder-72B</strong> — Massive context, multi-file reasoning<br />
-                  <strong>Mixtral-8x22B</strong> — 141B params, expert routing<br />
-                  <strong>CodeLlama-70B + long context</strong> — 100K+ token context for entire codebases
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Manual Selection Guide -->
-        <div class="manual-guide reveal" style="margin-top: 60px;">
-          <h3 class="manual-guide-title">How to Select & Verify Models Manually</h3>
-          <p class="manual-guide-intro">
-            While <code>llmfit</code> automates model selection, you can manually choose and verify models for your hardware. Here's how:
-          </p>
-
-          <div class="manual-steps">
-            <div class="manual-step">
-              <div class="step-number">1</div>
-              <div class="step-content">
-                <h4>Check Your Available Memory</h4>
-                <p>Determine your total available memory for model inference:</p>
-                <ul>
-                  <li><strong>Mac (unified memory):</strong> Total system RAM minus ~4-6GB for OS</li>
-                  <li><strong>NVIDIA GPU:</strong> VRAM + system RAM (for offloading layers)</li>
-                  <li><strong>CPU-only:</strong> Total system RAM minus ~8-12GB for OS and applications</li>
-                </ul>
-                <p class="step-example">Example: M3 Max with 36GB → ~30-32GB available for models</p>
-              </div>
-            </div>
-
-            <div class="manual-step">
-              <div class="step-number">2</div>
-              <div class="step-content">
-                <h4>Calculate Model Memory Requirements</h4>
-                <p>Estimate memory needed based on model size and quantization:</p>
-                <ul>
-                  <li><strong>FP16 (full precision):</strong> ~2 bytes per parameter</li>
-                  <li><strong>Q8 (8-bit quantization):</strong> ~1 byte per parameter</li>
-                  <li><strong>Q4 (4-bit quantization):</strong> ~0.5 bytes per parameter</li>
-                  <li><strong>Context buffer:</strong> Add 2-4GB for context window</li>
-                </ul>
-                <p class="step-example">Example: 7B model in Q4 → 7B × 0.5 = 3.5GB + 2GB context = ~5.5GB total</p>
-              </div>
-            </div>
-
-            <div class="manual-step">
-              <div class="step-number">3</div>
-              <div class="step-content">
-                <h4>Choose Quantization Level</h4>
-                <p>Balance quality vs. memory usage:</p>
-                <ul>
-                  <li><strong>Q8:</strong> Best quality, minimal degradation (~95% of FP16 performance)</li>
-                  <li><strong>Q5/Q6:</strong> Good balance for most use cases (~90% performance)</li>
-                  <li><strong>Q4:</strong> Acceptable quality, 2x memory savings (~85% performance)</li>
-                  <li><strong>Q3/Q2:</strong> Maximum compression, noticeable quality loss (not recommended for coding)</li>
-                </ul>
-                <p class="step-example">Recommendation: Start with Q4 or Q5 for coding models</p>
-              </div>
-            </div>
-
-            <div class="manual-step">
-              <div class="step-number">4</div>
-              <div class="step-content">
-                <h4>Test Model Performance</h4>
-                <p>Verify the model runs well on your hardware:</p>
-                <ul>
-                  <li><strong>Load time:</strong> Should load in under 30 seconds</li>
-                  <li><strong>First token latency:</strong> Under 2-3 seconds for good UX</li>
-                  <li><strong>Generation speed:</strong> Aim for 10+ tokens/second for interactive coding</li>
-                  <li><strong>Memory headroom:</strong> Keep 10-20% free memory to avoid swapping</li>
-                </ul>
-                <p class="step-example">Test command: <code>ccl chat --model &lt;model-name&gt; --benchmark</code></p>
-              </div>
-            </div>
-
-            <div class="manual-step">
-              <div class="step-number">5</div>
-              <div class="step-content">
-                <h4>Monitor System Resources</h4>
-                <p>Watch for performance issues during inference:</p>
-                <ul>
-                  <li><strong>Memory pressure:</strong> Check Activity Monitor (Mac) or Task Manager (Windows)</li>
-                  <li><strong>Swap usage:</strong> If swap increases significantly, model is too large</li>
-                  <li><strong>GPU utilization:</strong> Should be 70-90% during generation</li>
-                  <li><strong>Temperature:</strong> Sustained high temps may throttle performance</li>
-                </ul>
-                <p class="step-example">Red flags: Swap usage &gt;2GB, generation speed &lt;5 tokens/sec, system lag</p>
-              </div>
-            </div>
-
-            <div class="manual-step">
-              <div class="step-number">6</div>
-              <div class="step-content">
-                <h4>Optimize If Needed</h4>
-                <p>If performance is poor, try these adjustments:</p>
-                <ul>
-                  <li><strong>Lower quantization:</strong> Switch from Q5 to Q4 or Q4 to Q3</li>
-                  <li><strong>Smaller model:</strong> Drop from 34B to 13B or 13B to 7B</li>
-                  <li><strong>Reduce context:</strong> Lower max context length (e.g., 4K → 2K)</li>
-                  <li><strong>Enable offloading:</strong> Use GPU + CPU hybrid inference (if supported)</li>
-                </ul>
-                <p class="step-example">Goal: Consistent 10+ tokens/sec with &lt;2s first token latency</p>
-              </div>
-            </div>
+        <div class="tb-page-stats reveal">
+          <div class="stat">
+            <div class="stat-label">Tiers</div>
+            <div class="stat-value">4 memory ranges</div>
           </div>
-
-          <div class="manual-guide-footer">
-            <p><strong>Pro tip:</strong> Start with a smaller model (7B-13B) to verify your setup works, then scale up to larger models once you've confirmed performance is acceptable.</p>
+          <div class="stat">
+            <div class="stat-label">Models</div>
+            <div class="stat-value">16+ recommended</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Picker</div>
+            <div class="stat-value"><span class="dot"></span>llmfit auto</div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ── Footer ─────────────────────────────────────────────────── -->
+    <!-- ── Memory tier table ────────────────────────────────────── -->
+    <section class="tb-section">
+      <div class="container">
+        <div class="tb-frame-head reveal">
+          <span class="glyph">┌─</span>
+          <span class="path">/tiers</span>
+          <span class="meta">memory → model fit</span>
+        </div>
+        <span class="tb-eyebrow reveal">Reference table</span>
+        <h2 class="tb-h2 reveal"><span class="ord">01</span>Recommendations by memory tier</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 32px;">
+          Pick a row that matches your hardware. Each tier lists models that perform well at that memory ceiling — assuming Q4–Q5 quantization and a typical 8k–16k context.
+        </p>
+
+        <div class="tb-table-wrap reveal">
+          <table class="tb-table">
+            <caption class="sr-only">Coding model recommendations by memory tier</caption>
+            <thead>
+              <tr>
+                <th>Tier · Hardware</th>
+                <th>Recommended coding models</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mem">
+                  24 GB
+                  <span class="hw">M3 Pro (18GB) · RTX 4090 (24GB)</span>
+                </td>
+                <td>
+                  <strong>Qwen2.5-Coder-7B</strong> — fast, efficient for most coding tasks<br />
+                  <strong>DeepSeek-Coder-6.7B</strong> — strong code completion<br />
+                  <strong>CodeLlama-13B</strong> — balanced performance<br />
+                  <strong>Mistral-7B-Instruct</strong> — general purpose with coding ability
+                </td>
+              </tr>
+              <tr>
+                <td class="mem">
+                  32 GB
+                  <span class="hw">M3 Max (36GB) · RTX 6000 Ada (48GB)</span>
+                </td>
+                <td>
+                  <strong>Qwen2.5-Coder-14B</strong> — enhanced reasoning for refactoring<br />
+                  <strong>DeepSeek-Coder-33B</strong> — advanced code generation<br />
+                  <strong>CodeLlama-34B</strong> — large context window (16K)<br />
+                  <strong>Phind-CodeLlama-34B</strong> — optimized for code search
+                </td>
+              </tr>
+              <tr>
+                <td class="mem">
+                  64 GB
+                  <span class="hw">M2 Ultra (64GB) · H100 (80GB)</span>
+                </td>
+                <td>
+                  <strong>Qwen2.5-Coder-32B</strong> — top-tier coding performance<br />
+                  <strong>DeepSeek-Coder-V2-Lite</strong> — 16B with 128K context<br />
+                  <strong>CodeLlama-70B</strong> — architecture design ceiling<br />
+                  <strong>Mixtral-8x7B-Instruct</strong> — MoE, effective 47B
+                </td>
+              </tr>
+              <tr>
+                <td class="mem">
+                  128 GB+
+                  <span class="hw">Mac Studio (192GB) · H100 NVL (188GB)</span>
+                </td>
+                <td>
+                  <strong>DeepSeek-Coder-V2-236B</strong> — state-of-the-art<br />
+                  <strong>Qwen2.5-Coder-72B</strong> — multi-file reasoning<br />
+                  <strong>Mixtral-8x22B</strong> — 141B params, expert routing<br />
+                  <strong>CodeLlama-70B + long ctx</strong> — 100K+ tokens
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <hr class="tb-rule-solid" />
+
+    <!-- ── Manual selection guide ──────────────────────────────── -->
+    <section class="tb-section">
+      <div class="container">
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/manual-selection</span>
+          <span class="meta">6 steps · DIY</span>
+        </div>
+        <span class="tb-eyebrow reveal">Process</span>
+        <h2 class="tb-h2 reveal"><span class="ord">02</span>Selecting models manually</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 32px;">
+          <code style="font-family: var(--mono); font-size: 14px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; color: var(--tb-accent);">llmfit</code> automates this. If you prefer to drive yourself, here's the procedure.
+        </p>
+
+        <div class="tb-manual reveal" style="max-width: 920px;">
+          <div class="tb-manual-step">
+            <div class="ord">01</div>
+            <div>
+              <h4>Check your available memory</h4>
+              <p>Determine the memory budget your model has to work with:</p>
+              <ul>
+                <li><strong>Mac (unified):</strong> Total RAM − 4–6 GB for OS</li>
+                <li><strong>NVIDIA GPU:</strong> VRAM + system RAM (for offloading layers)</li>
+                <li><strong>CPU-only:</strong> Total RAM − 8–12 GB for OS and apps</li>
+              </ul>
+              <div class="example">Example: M3 Max 36GB → ~30–32 GB available for models.</div>
+            </div>
+          </div>
+
+          <div class="tb-manual-step">
+            <div class="ord">02</div>
+            <div>
+              <h4>Calculate model memory</h4>
+              <p>Estimate memory based on parameter count and quantization:</p>
+              <ul>
+                <li><strong>FP16:</strong> ~2 bytes / parameter</li>
+                <li><strong>Q8:</strong> ~1 byte / parameter</li>
+                <li><strong>Q4:</strong> ~0.5 bytes / parameter</li>
+                <li><strong>Context buffer:</strong> add 2–4 GB</li>
+              </ul>
+              <div class="example">Example: 7B at Q4 → 7 × 0.5 = 3.5 GB + 2 GB ctx = ~5.5 GB.</div>
+            </div>
+          </div>
+
+          <div class="tb-manual-step">
+            <div class="ord">03</div>
+            <div>
+              <h4>Pick a quantization level</h4>
+              <p>Balance quality vs memory:</p>
+              <ul>
+                <li><strong>Q8:</strong> ~95% of FP16 quality, minimal degradation</li>
+                <li><strong>Q5 / Q6:</strong> ~90% quality, balanced default</li>
+                <li><strong>Q4:</strong> ~85% quality, 2× memory savings</li>
+                <li><strong>Q2 / Q3:</strong> noticeable loss — avoid for coding</li>
+              </ul>
+              <div class="example">Recommended: start at Q4 or Q5 for coding models.</div>
+            </div>
+          </div>
+
+          <div class="tb-manual-step">
+            <div class="ord">04</div>
+            <div>
+              <h4>Test on your machine</h4>
+              <p>Run a real session and watch for these signals:</p>
+              <ul>
+                <li><strong>Load time:</strong> under 30 s</li>
+                <li><strong>First token:</strong> under 2–3 s</li>
+                <li><strong>Generation:</strong> 10+ tokens/sec for interactive UX</li>
+                <li><strong>Headroom:</strong> keep 10–20% memory free</li>
+              </ul>
+              <div class="example">Test: <code>ccl chat --model &lt;name&gt; --benchmark</code></div>
+            </div>
+          </div>
+
+          <div class="tb-manual-step">
+            <div class="ord">05</div>
+            <div>
+              <h4>Monitor resources</h4>
+              <p>Watch for the bad signs during a real workload:</p>
+              <ul>
+                <li><strong>Memory pressure:</strong> Activity Monitor (Mac) / Task Manager (Win)</li>
+                <li><strong>Swap usage:</strong> rising swap = model too large</li>
+                <li><strong>GPU util:</strong> 70–90% during generation</li>
+                <li><strong>Thermals:</strong> sustained high temps throttle perf</li>
+              </ul>
+              <div class="example">Red flags: swap &gt;2 GB · &lt;5 tok/s · UI lag.</div>
+            </div>
+          </div>
+
+          <div class="tb-manual-step">
+            <div class="ord">06</div>
+            <div>
+              <h4>Optimize if needed</h4>
+              <p>If performance is poor, walk down one of these axes:</p>
+              <ul>
+                <li><strong>Lower quant:</strong> Q5 → Q4, Q4 → Q3</li>
+                <li><strong>Smaller model:</strong> 34B → 13B → 7B</li>
+                <li><strong>Reduce context:</strong> 4K → 2K</li>
+                <li><strong>Offload:</strong> GPU + CPU hybrid (if supported)</li>
+              </ul>
+              <div class="example">Goal: 10+ tok/s with &lt;2 s first-token latency.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tb-manual-note reveal" style="max-width: 920px;">
+          <strong>Pro tip:</strong> Start with a smaller model (7B–13B) to verify your setup works end-to-end, then scale up once you've confirmed performance.
+        </div>
+      </div>
+    </section>
+
+    <!-- ── CTA strip ────────────────────────────────────────────── -->
+    <section class="tb-section tb-section-cta">
+      <div class="container">
+        <div class="tb-cta-strip reveal">
+          <h2>Skip the guesswork — <span class="accent">let the wizard pick</span></h2>
+          <p>Running local? <code style="font-family: var(--mono); font-size: 14px; background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 3px; color: var(--tb-accent);">llmfit</code> reads your hardware and picks a model that fits. Routing through 9router or OpenRouter? Skip this page and head straight to setup.</p>
+          <div class="actions">
+            <a href="docs.html#install" class="btn-primary">
+              Install &amp; run wizard
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            </a>
+            <a href="https://github.com/luongnv89/llmfit" target="_blank" rel="noopener" class="btn-secondary">
+              View llmfit
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ─────────────────────────────────────────────── -->
     <footer>
       <div class="footer-inner">
         <div class="footer-logo">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 64 64"
-            fill="none"
-          >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
             <rect width="64" height="64" rx="14" fill="#111111" />
-            <line
-              x1="32"
-              y1="6"
-              x2="32"
-              y2="18"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="32"
-              y1="46"
-              x2="32"
-              y2="58"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="6"
-              y1="32"
-              x2="18"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="46"
-              y1="32"
-              x2="58"
-              y2="32"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="13.5"
-              x2="21.9"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="42.1"
-              y1="42.1"
-              x2="50.5"
-              y2="50.5"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="50.5"
-              y1="13.5"
-              x2="42.1"
-              y2="21.9"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <line
-              x1="13.5"
-              y1="50.5"
-              x2="21.9"
-              y2="42.1"
-              stroke="#A1A1A1"
-              stroke-width="2.2"
-              stroke-linecap="round"
-            />
-            <path
-              d="M22,27 L28,32 L22,37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              fill="none"
-            />
-            <line
-              x1="31"
-              y1="37"
-              x2="39"
-              y2="37"
-              stroke="#00FF41"
-              stroke-width="2.8"
-              stroke-linecap="round"
-            />
+            <line x1="32" y1="6" x2="32" y2="18" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="32" y1="46" x2="32" y2="58" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="6" y1="32" x2="18" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="46" y1="32" x2="58" y2="32" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="13.5" x2="21.9" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="42.1" y1="42.1" x2="50.5" y2="50.5" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="50.5" y1="13.5" x2="42.1" y2="21.9" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="13.5" y1="50.5" x2="21.9" y2="42.1" stroke="#A1A1A1" stroke-width="2.2" stroke-linecap="round" />
+            <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
           <strong>claude-codex-local</strong> · v0.12.0
         </div>
         <ul class="footer-links">
-          <li>
-            <a
-              href="https://github.com/luongnv89/claude-codex-local"
-              target="_blank"
-              rel="noopener"
-              >GitHub</a
-            >
-          </li>
-          <li>
-            <a href="docs.html">Docs</a>
-          </li>
-          <li>
-            <a href="changelog.html">Changelog</a>
-          </li>
-          <li>
-            <a
-              href="https://github.com/luongnv89/claude-codex-local/issues"
-              target="_blank"
-              rel="noopener"
-              >Issues</a
-            >
-          </li>
+          <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="docs.html">Docs</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+          <li><a href="https://github.com/luongnv89/claude-codex-local/issues" target="_blank" rel="noopener">Issues</a></li>
         </ul>
-        <div class="footer-right">
-          MIT License · Built for developers, by developers
-        </div>
+        <div class="footer-right">MIT License · Built for developers, by developers</div>
       </div>
     </footer>
 

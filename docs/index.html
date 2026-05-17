@@ -8,7 +8,7 @@
     </title>
     <meta
       name="description"
-      content="When quotas hit or code can't leave your machine — one alias swaps Claude Code or Codex to a local model. Every skill, agent, and MCP server intact."
+      content="When quotas hit or you need a different backend — one alias swaps Claude Code or Codex to a local model, 9router cloud, or OpenRouter SaaS. Every skill, agent, MCP server intact."
     />
     <meta property="og:title" content="claude-codex-local" />
     <meta
@@ -155,7 +155,7 @@
               d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
             />
           </svg>
-          GitHub
+          <span class="nav-gh-text">GitHub</span>
         </a>
       </div>
     </nav>
@@ -363,43 +363,40 @@
 
     <hr class="section-divider" />
 
+    <!-- ════════════════════════════════════════════════════════════
+         Below the hero: Terminal Brutalism redesign
+         ════════════════════════════════════════════════════════════ -->
+    <div class="tb-page">
+
     <!-- ── Problem ───────────────────────────────────────────────── -->
-    <section id="problem">
+    <section id="problem" class="tb-section">
       <div class="container">
-        <div class="section-label reveal">Sound Familiar?</div>
-        <h2 class="section-title reveal">
-          You shouldn't have to stop<br />because the cloud did.
-        </h2>
-        <p class="section-sub reveal">
-          Developer time is expensive. Cloud limits are arbitrary. You deserve a
-          local fallback that actually works.
+        <div class="tb-frame-head reveal">
+          <span class="glyph">┌─</span>
+          <span class="path">/problem</span>
+          <span class="meta">sound familiar?</span>
+        </div>
+        <span class="tb-eyebrow reveal">Sound familiar?</span>
+        <h2 class="tb-h2 reveal"><span class="ord">01</span>You shouldn't have to stop<br />because the cloud did.</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 40px;">
+          Developer time is expensive. Cloud limits are arbitrary. You deserve a backend swap that actually works — local, alternative cloud, or hosted SaaS.
         </p>
 
-        <div class="problem-grid">
-          <div class="problem-card reveal reveal-delay-1">
-            <div class="problem-icon">⚡</div>
+        <div class="tb-grid tb-grid-3 reveal">
+          <div class="tb-card danger">
+            <div class="tb-card-ord">01 · QUOTA</div>
             <h3>Your quota ran out — mid-session</h3>
-            <p>
-              You're deep in a refactor, context loaded, momentum built. Then
-              boom. Rate limit hit. Everything's gone. Back to square one.
-            </p>
+            <p>You're deep in a refactor, context loaded, momentum built. Then — rate limit. Everything gone. Back to square one.</p>
           </div>
-          <div class="problem-card reveal reveal-delay-2">
-            <div class="problem-icon">🔒</div>
+          <div class="tb-card danger">
+            <div class="tb-card-ord">02 · PRIVACY</div>
             <h3>Your code can't leave your machine</h3>
-            <p>
-              Consulting contracts. IP clauses. Air-gapped servers. You need a
-              backend that respects your constraints — whether that's local-only
-              or a different cloud provider.
-            </p>
+            <p>Consulting contracts. IP clauses. Air-gapped servers. You need a backend that respects your constraints.</p>
           </div>
-          <div class="problem-card reveal reveal-delay-3">
-            <div class="problem-icon">🔧</div>
-            <h3>Every alternative setup breaks your workflow</h3>
-            <p>
-              New tool. New configs. New muscle memory. You don't want to learn
-              something new. You just wanted a backend swap.
-            </p>
+          <div class="tb-card danger">
+            <div class="tb-card-ord">03 · FRICTION</div>
+            <h3>Every alternative breaks your workflow</h3>
+            <p>New tool. New configs. New muscle memory. You don't want to learn something new. You just wanted a backend swap.</p>
           </div>
         </div>
       </div>
@@ -408,438 +405,294 @@
     <hr class="section-divider" />
 
     <!-- ── Features ──────────────────────────────────────────────── -->
-    <section id="features">
+    <section id="features" class="tb-section">
       <div class="container">
-        <div class="section-label reveal">Solution</div>
-        <h2 class="section-title reveal">Meet claude-codex-local</h2>
-        <p class="section-sub reveal">
-          Keep your tools. Swap the backend. Ship locally or route to cloud.
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/solution</span>
+          <span class="meta">keep your tools · swap the backend</span>
+        </div>
+        <span class="tb-eyebrow reveal">Solution</span>
+        <h2 class="tb-h2 reveal"><span class="ord">02</span>Meet claude-codex-local</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 40px;">
+          Keep your tools. Swap the backend. Ship locally or route to cloud. Every skill, agent, MCP server intact.
         </p>
 
-        <div class="features-grid">
-          <div class="feature-card reveal reveal-delay-1">
-            <div class="feature-icon">🧙</div>
-            <h3>9-Step Guided Wizard</h3>
-            <p>
-              From zero to working local session in under 10 minutes.
-              Auto-detects Ollama, LM Studio, and llama.cpp. Resumes on failure.
-              No manual file surgery.
-            </p>
+        <div class="tb-grid tb-grid-3 reveal">
+          <div class="tb-card">
+            <div class="tb-card-ord">01 · WIZARD</div>
+            <h3>9-step guided setup</h3>
+            <p>From zero to working local session in under 10 minutes. Auto-detects Ollama, LM Studio, and llama.cpp. Resumes on failure. No manual file surgery.</p>
           </div>
-          <div class="feature-card reveal reveal-delay-2">
-            <div class="feature-icon">🧠</div>
-            <h3>Hardware-Aware Model Selection</h3>
-            <p>
-              <code>llmfit</code> analyzes your RAM and GPU. It recommends the
-              model that actually fits your machine — no more guessing or OOM
-              crashes.
-            </p>
+          <div class="tb-card">
+            <div class="tb-card-ord">02 · LLMFIT</div>
+            <h3>Hardware-aware model picking</h3>
+            <p><code>llmfit</code> analyzes RAM and GPU. Recommends models that actually fit — no more OOM crashes or guessing.</p>
           </div>
-          <div class="feature-card reveal reveal-delay-3">
-            <div class="feature-icon">🛡️</div>
-            <h3>Zero Config Breakage</h3>
-            <p>
-              Your real <code>~/.claude</code> and <code>~/.codex</code> are
-              never touched. All config stays isolated. Rollback in seconds —
-              remove one folder.
-            </p>
+          <div class="tb-card">
+            <div class="tb-card-ord">03 · ISOLATED</div>
+            <h3>Zero config breakage</h3>
+            <p>Your real <code>~/.claude</code> and <code>~/.codex</code> are never touched. All config isolated. Rollback in seconds.</p>
           </div>
-          <div class="feature-card reveal reveal-delay-1">
-            <div class="feature-icon">⚡</div>
-            <h3>One Alias to Rule Them All</h3>
-            <p>
-              After setup, type <code>cc</code> or <code>cx</code> for local.
-              Use <code>cc9</code> or <code>cx9</code> for 9router cloud
-              routing. All your skills, agents, MCP servers work exactly as
-              before.
-            </p>
+          <div class="tb-card">
+            <div class="tb-card-ord">04 · ALIASES</div>
+            <h3>One alias to rule them all</h3>
+            <p>Type <code>cc</code>/<code>cx</code> for local, <code>cc9</code>/<code>cx9</code> for 9router, <code>cco</code>/<code>cxo</code> for OpenRouter. Skills, agents, MCP — intact.</p>
           </div>
-          <div class="feature-card reveal reveal-delay-2">
-            <div class="feature-icon">🔒</div>
-            <h3>Offline &amp; Private (Local Mode)</h3>
-            <p>
-              Code never leaves your machine with local engines. No telemetry.
-              No phone-home. After model download, zero internet required.
-              Perfect for air-gapped projects.
-            </p>
+          <div class="tb-card">
+            <div class="tb-card-ord">05 · OFFLINE</div>
+            <h3>Offline & private (local mode)</h3>
+            <p>Code never leaves your machine. No telemetry. No phone-home. After model download, zero internet. Air-gap ready.</p>
           </div>
-          <div class="feature-card reveal reveal-delay-3">
-            <div class="feature-icon">☁️</div>
-            <h3>Cloud Routing (9router)</h3>
-            <p>
-              Need cloud power without Anthropic limits? 9router routes to
-              alternative providers (OpenAI, DeepSeek, etc.) while keeping your
-              Claude Code/Codex workflow intact.
-            </p>
+          <div class="tb-card">
+            <div class="tb-card-ord">06 · ROUTER</div>
+            <h3>Cloud routing (9router)</h3>
+            <p>Need cloud power without Anthropic limits? 9router routes to alternative providers — OpenAI, DeepSeek, more — while keeping your harness intact.</p>
           </div>
-          <div class="feature-card reveal reveal-delay-3">
-            <div class="feature-icon">🌐</div>
+          <div class="tb-card">
+            <div class="tb-card-ord">07 · SAAS</div>
             <h3>Hosted SaaS (OpenRouter)</h3>
-            <p>
-              Want a hosted alternative to running your own router? OpenRouter
-              forwards calls to dozens of cloud models (Claude, GPT-4o, Llama,
-              Mistral, ...). Use <code>cco</code>/<code>cxo</code>/<code>cpo</code>
-              aliases — your local <code>cc</code>/<code>cx</code>/<code>cp</code>
-              are untouched.
-            </p>
+            <p>Want a hosted alternative? OpenRouter forwards calls to dozens of cloud models. Use <code>cco</code>/<code>cxo</code>/<code>cpo</code> aliases; local <code>cc</code>/<code>cx</code>/<code>cp</code> untouched.</p>
           </div>
         </div>
       </div>
     </section>
-
-    <hr class="section-divider" />
 
     <!-- ── How it works ──────────────────────────────────────────── -->
-    <section id="how-it-works">
+    <section id="how-it-works" class="tb-section">
       <div class="container">
-        <div class="section-label reveal" style="text-align: center">
-          How It Works
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/how-it-works</span>
+          <span class="meta">3 steps · 10 minutes</span>
         </div>
-        <h2 class="section-title reveal" style="text-align: center">
-          Three steps. Ten minutes.<br />Local or cloud routing.
-        </h2>
+        <span class="tb-eyebrow reveal">How it works</span>
+        <h2 class="tb-h2 reveal"><span class="ord">03</span>Three steps. Ten minutes.</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 40px;">
+          Local or cloud routing — the wizard wires either path safely.
+        </p>
 
-        <div class="steps-grid" style="margin-top: 56px">
-          <div class="step reveal reveal-delay-1">
-            <div class="step-number">01</div>
+        <div class="tb-steps reveal">
+          <div class="tb-step">
+            <div class="ord"><span class="num">01</span><span>STEP</span></div>
             <h3>Install</h3>
-            <p>
-              Run one curl command. The wizard auto-detects your installed
-              runtimes, checks your hardware, and flags anything missing.
-            </p>
+            <p>Run one curl command. The wizard auto-detects your runtimes, checks your hardware, and flags anything missing.</p>
           </div>
-          <div class="step reveal reveal-delay-2">
-            <div class="step-number">02</div>
+          <div class="tb-step">
+            <div class="ord"><span class="num">02</span><span>STEP</span></div>
             <h3>Configure</h3>
-            <p>
-              Answer a few prompts. Pick your runtime, pick your model (or let
-              llmfit pick for you). The wizard wires everything up safely.
-            </p>
+            <p>Answer a few prompts. Pick your runtime, pick your model — or let <code>llmfit</code> pick for you. The wizard wires everything up safely.</p>
           </div>
-          <div class="step reveal reveal-delay-3">
-            <div class="step-number">03</div>
+          <div class="tb-step">
+            <div class="ord"><span class="num">03</span><span>STEP</span></div>
             <h3>Run</h3>
-            <p>
-              Type
-              <code
-                style="
-                  font-family: var(--mono);
-                  font-size: 13px;
-                  background: rgba(255, 255, 255, 0.06);
-                  padding: 2px 6px;
-                  border-radius: 4px;
-                  color: var(--cyan);
-                "
-                >cc</code
-              >
-              or
-              <code
-                style="
-                  font-family: var(--mono);
-                  font-size: 13px;
-                  background: rgba(255, 255, 255, 0.06);
-                  padding: 2px 6px;
-                  border-radius: 4px;
-                  color: var(--cyan);
-                "
-                >cx</code
-              >
-              for local. Use
-              <code
-                style="
-                  font-family: var(--mono);
-                  font-size: 13px;
-                  background: rgba(255, 255, 255, 0.06);
-                  padding: 2px 6px;
-                  border-radius: 4px;
-                  color: var(--cyan);
-                "
-                >cc9</code
-              >/<code
-                style="
-                  font-family: var(--mono);
-                  font-size: 13px;
-                  background: rgba(255, 255, 255, 0.06);
-                  padding: 2px 6px;
-                  border-radius: 4px;
-                  color: var(--cyan);
-                "
-                >cx9</code
-              >
-              for 9router cloud routing. Your full Claude Code or Codex
-              experience — every skill, every agent, every MCP server intact.
-            </p>
+            <p>Type <code>cc</code> or <code>cx</code> for local. <code>cc9</code>/<code>cx9</code> for 9router. <code>cco</code>/<code>cxo</code> for OpenRouter. Every skill, every agent, every MCP server intact.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <hr class="section-divider" />
-
-    <!-- ── Model Guide ────────────────────────────────────────────── -->
-    <section id="model-guide">
+    <!-- ── Model Guide CTA ───────────────────────────────────────── -->
+    <section id="model-guide" class="tb-section">
       <div class="container">
-        <div class="section-label reveal" style="text-align: center">
-          Model Guide
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/model-guide</span>
+          <span class="meta">8GB → 192GB · find your fit</span>
         </div>
-        <h2 class="section-title reveal" style="text-align: center">
-          Which coding model fits your memory?
-        </h2>
-        <p class="section-sub reveal" style="text-align: center; max-width: 720px; margin: 0 auto 32px;">
-          From 8GB to 128GB+ — find the right coding model for your hardware. Our guide covers Qwen2.5-Coder, DeepSeek-Coder, CodeLlama, and more.
+        <span class="tb-eyebrow reveal">Model guide</span>
+        <h2 class="tb-h2 reveal"><span class="ord">04</span>Which coding model fits your memory?</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 32px;">
+          From 8GB to 128GB+ — a hardware-tiered map of Qwen2.5-Coder, DeepSeek-Coder, CodeLlama, and more.
         </p>
-
-        <div class="reveal" style="text-align: center;">
-          <a
-            href="guides.html"
-            class="btn-primary"
-            style="display: inline-flex; align-items: center; gap: 8px;"
-          >
-            View Model Selection Guide
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 8h10M9 4l4 4-4 4" />
-            </svg>
+        <div class="reveal" style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <a href="guides.html" class="btn-primary">
+            View model selection guide
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
           </a>
         </div>
       </div>
     </section>
 
-    <hr class="section-divider" />
-    <section id="install">
-      <div class="container" style="text-align: center">
-        <div class="section-label reveal">Get Started</div>
-        <h2
-          class="section-title reveal"
-          style="margin-left: auto; margin-right: auto"
-        >
-          One command to start
-        </h2>
-        <p
-          class="section-sub reveal"
-          style="margin-left: auto; margin-right: auto; text-align: center"
-        >
-          Available on PyPI — install with pip or uv, or use the one-line shell
-          installer.
+    <!-- ── Install ───────────────────────────────────────────────── -->
+    <section id="install" class="tb-section">
+      <div class="container">
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/install</span>
+          <span class="meta">pip · uv · curl · source</span>
+        </div>
+        <span class="tb-eyebrow reveal">Get started</span>
+        <h2 class="tb-h2 reveal"><span class="ord">05</span>One command to start</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 32px;">
+          Available on PyPI. Pip, uv, or a one-line shell installer.
         </p>
 
-        <div class="install-card reveal">
-          <div class="install-header">
-            <span class="install-label">pip · recommended</span>
-            <button class="copy-btn" data-copy="pip install claude-codex-local">
-              <svg viewBox="0 0 24 24">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-              Copy
-            </button>
+        <div class="tb-install-stack reveal">
+          <div class="tb-install">
+            <div class="tb-install-head">
+              <div class="left">
+                <span class="ord">01</span>
+                <span class="label">pip</span>
+              </div>
+              <span class="tag">recommended</span>
+            </div>
+            <div class="tb-install-body">
+              <span class="ps">$</span>pip install claude-codex-local
+            </div>
           </div>
-          <div class="install-code">
-            <span class="ps">$ </span
-            ><span class="cmd">pip install claude-codex-local</span>
+
+          <div class="tb-install">
+            <div class="tb-install-head">
+              <div class="left">
+                <span class="ord">02</span>
+                <span class="label">uv</span>
+              </div>
+              <span style="font-family: var(--mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase;">alternative</span>
+            </div>
+            <div class="tb-install-body">
+              <span class="ps">$</span>uv tool install claude-codex-local
+            </div>
+          </div>
+
+          <div class="tb-install">
+            <div class="tb-install-head">
+              <div class="left">
+                <span class="ord">03</span>
+                <span class="label">curl · no clone required</span>
+              </div>
+              <span style="font-family: var(--mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase;">shell</span>
+            </div>
+            <div class="tb-install-body">
+              <span class="ps">$</span>bash &lt;(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+            </div>
+          </div>
+
+          <div class="tb-install">
+            <div class="tb-install-head">
+              <div class="left">
+                <span class="ord">04</span>
+                <span class="label">from source</span>
+              </div>
+              <span style="font-family: var(--mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; text-transform: uppercase;">advanced</span>
+            </div>
+            <div class="tb-install-body">
+              <div><span class="ps">$</span>git clone https://github.com/luongnv89/claude-codex-local.git</div>
+              <div><span class="ps">$</span>cd claude-codex-local</div>
+              <div><span class="ps">$</span>python3 -m venv .venv &amp;&amp; source .venv/bin/activate</div>
+              <div><span class="ps">$</span>pip install -e .</div>
+              <div><span class="ps">$</span>ccl</div>
+            </div>
           </div>
         </div>
 
-        <div class="install-card reveal" style="margin-top: 12px">
-          <div class="install-header">
-            <span class="install-label">uv · alternative</span>
-            <button
-              class="copy-btn"
-              data-copy="uv tool install claude-codex-local"
-            >
-              <svg viewBox="0 0 24 24">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-              Copy
-            </button>
+        <div class="reveal" style="margin-top: 36px;">
+          <div class="tb-res-head" style="margin-bottom: 14px;">
+            Proven paths <span class="count">[6 combinations]</span>
           </div>
-          <div class="install-code">
-            <span class="ps">$ </span
-            ><span class="cmd">uv tool install claude-codex-local</span>
-          </div>
-        </div>
-
-        <div class="install-alt reveal" style="margin-top: 32px">
-          <div class="install-alt-label">
-            <strong>Or use the shell installer (no clone required)</strong>
-          </div>
-          <div class="install-mini">
-            bash &lt;(curl -sSL
-            https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
-          </div>
-        </div>
-
-        <div class="install-alt reveal" style="margin-top: 16px">
-          <div class="install-alt-label">
-            <strong>Or install from source</strong>
-          </div>
-          <div class="install-mini">
-            git clone https://github.com/luongnv89/claude-codex-local.git<br />
-            cd claude-codex-local<br />
-            python3 -m venv .venv &amp;&amp; source .venv/bin/activate<br />
-            pip install -e .<br />
-            ccl
-          </div>
-        </div>
-
-        <!-- Proven paths -->
-        <div class="proof-grid reveal">
-          <div class="proof-pill">
-            <span class="check">✓</span> Claude Code + Ollama + gemma4:26b
-          </div>
-          <div class="proof-pill">
-            <span class="check">✓</span> Codex CLI + Ollama + gemma4:26b
-          </div>
-          <div class="proof-pill">
-            <span class="check">✓</span> Claude Code + 9router + OpenAI/DeepSeek
-          </div>
-          <div class="proof-pill">
-            <span class="check">✓</span> Claude Code + OpenRouter + anthropic/claude-sonnet-4.6
-          </div>
-          <div class="proof-pill">
-            <span class="warn">⚠</span> Claude Code + LM Studio + Qwen3
-          </div>
-          <div class="proof-pill">
-            <span class="check">✓</span> Any + llama.cpp + GGUF (from Hugging
-            Face)
+          <div class="tb-tags">
+            <span class="tb-tag ok"><span class="mark">✓</span> Claude Code + Ollama + gemma4:26b</span>
+            <span class="tb-tag ok"><span class="mark">✓</span> Codex CLI + Ollama + gemma4:26b</span>
+            <span class="tb-tag ok"><span class="mark">✓</span> Claude Code + 9router + OpenAI/DeepSeek</span>
+            <span class="tb-tag ok"><span class="mark">✓</span> Claude Code + OpenRouter + claude-sonnet-4.6</span>
+            <span class="tb-tag warn"><span class="mark">⚠</span> Claude Code + LM Studio + Qwen3</span>
+            <span class="tb-tag ok"><span class="mark">✓</span> Any + llama.cpp + GGUF (Hugging Face)</span>
           </div>
         </div>
       </div>
     </section>
-
-    <hr class="section-divider" />
 
     <!-- ── FAQ ───────────────────────────────────────────────────── -->
-    <section id="faq">
+    <section id="faq" class="tb-section">
       <div class="container">
-        <div class="section-label reveal" style="text-align: center">FAQ</div>
-        <h2
-          class="section-title reveal"
-          style="text-align: center; margin-left: auto; margin-right: auto"
-        >
-          Common questions
-        </h2>
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/faq</span>
+          <span class="meta">6 questions</span>
+        </div>
+        <span class="tb-eyebrow reveal">FAQ</span>
+        <h2 class="tb-h2 reveal"><span class="ord">06</span>Common questions</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 36px;">
+          The questions that actually show up in issues, ordered by frequency.
+        </p>
 
-        <div class="faq-list" style="margin-top: 48px">
-          <div class="faq-item reveal">
-            <button class="faq-question">
-              Does this replace Claude Code or Codex CLI?
-              <span class="faq-chevron"
-                ><svg viewBox="0 0 24 24">
-                  <polyline points="6 9 12 15 18 9" /></svg
-              ></span>
+        <div class="tb-faq reveal">
+          <div class="tb-faq-item">
+            <button class="tb-faq-q">
+              <span class="num">01</span>
+              <span class="label">Does this replace Claude Code or Codex CLI?</span>
+              <span class="toggle">+</span>
             </button>
-            <div class="faq-answer">
-              <div class="faq-answer-inner">
-                No. It keeps both tools exactly as-is and adds a local backend
-                bridge. Your harness, your skills, your muscle memory — all
-                intact. One alias, zero disruption.
+            <div class="tb-faq-a">
+              <div class="tb-faq-a-inner">
+                No. It keeps both tools exactly as-is and adds a local backend bridge. Your harness, your skills, your muscle memory — all intact. One alias, zero disruption.
               </div>
             </div>
           </div>
 
-          <div class="faq-item reveal reveal-delay-1">
-            <button class="faq-question">
-              Which backends are supported?
-              <span class="faq-chevron"
-                ><svg viewBox="0 0 24 24">
-                  <polyline points="6 9 12 15 18 9" /></svg
-              ></span>
+          <div class="tb-faq-item">
+            <button class="tb-faq-q">
+              <span class="num">02</span>
+              <span class="label">Which backends are supported?</span>
+              <span class="toggle">+</span>
             </button>
-            <div class="faq-answer">
-              <div class="faq-answer-inner">
-                <strong>Local engines:</strong>
-                <strong>Ollama</strong> (primary, with native
-                <code>ollama launch</code> support), <strong>LM Studio</strong>,
-                <strong>llama.cpp</strong>, <strong>vLLM</strong> — all with
-                auto-detection during setup. For llama.cpp, GGUF models can be
-                downloaded directly from <strong>Hugging Face</strong> via the
-                built-in <code>huggingface-cli</code> integration.<br /><br />
-                <strong>Cloud routing:</strong> <strong>9router</strong> — a
-                local cloud-routing proxy that lets you use alternative providers
-                (OpenAI, DeepSeek, etc.) while keeping your Claude Code/Codex
-                workflow. The wizard sets up <code>cc9</code>/<code>cx9</code>
-                aliases that route to cloud models while keeping your existing
-                <code>cc</code>/<code>cx</code> local aliases intact.<br /><br />
-                <strong>Hosted SaaS:</strong> <strong>OpenRouter</strong> — a
-                hosted alternative to 9router with an OpenAI-compatible API at
-                <code>openrouter.ai/api/v1</code>. No daemon to install, just an
-                API key. The wizard sets up <code>cco</code>/<code>cxo</code>/<code>cpo</code>
-                aliases routing to OpenRouter while leaving your local aliases
-                untouched.
+            <div class="tb-faq-a">
+              <div class="tb-faq-a-inner">
+                <strong>Local engines:</strong> <strong>Ollama</strong> (primary, with native <code>ollama launch</code>), <strong>LM Studio</strong>, <strong>llama.cpp</strong>, <strong>vLLM</strong> — all auto-detected during setup. For llama.cpp, GGUF models download directly from <strong>Hugging Face</strong> via the built-in <code>huggingface-cli</code> integration.<br /><br />
+                <strong>Cloud routing:</strong> <strong>9router</strong> — a local cloud-routing proxy for alternative providers (OpenAI, DeepSeek, etc.). The wizard wires <code>cc9</code>/<code>cx9</code> aliases alongside your existing local ones.<br /><br />
+                <strong>Hosted SaaS:</strong> <strong>OpenRouter</strong> — a hosted alternative with an OpenAI-compatible API at <code>openrouter.ai/api/v1</code>. No daemon, just an API key. Adds <code>cco</code>/<code>cxo</code>/<code>cpo</code> aliases.
               </div>
             </div>
           </div>
 
-          <div class="faq-item reveal reveal-delay-2">
-            <button class="faq-question">
-              Will it break my existing cloud setup?
-              <span class="faq-chevron"
-                ><svg viewBox="0 0 24 24">
-                  <polyline points="6 9 12 15 18 9" /></svg
-              ></span>
+          <div class="tb-faq-item">
+            <button class="tb-faq-q">
+              <span class="num">03</span>
+              <span class="label">Will it break my existing cloud setup?</span>
+              <span class="toggle">+</span>
             </button>
-            <div class="faq-answer">
-              <div class="faq-answer-inner">
-                Never. Your real <code>~/.claude</code> and
-                <code>~/.codex</code> are untouched. All local config lives in
-                <code>.claude-codex-local/</code>. To fully revert: remove that
-                folder and the alias block added to your shell rc. Done.
+            <div class="tb-faq-a">
+              <div class="tb-faq-a-inner">
+                Never. Your real <code>~/.claude</code> and <code>~/.codex</code> are untouched. All local config lives in <code>.claude-codex-local/</code>. To fully revert: remove that folder and the alias block added to your shell rc. Done.
               </div>
             </div>
           </div>
 
-          <div class="faq-item reveal reveal-delay-3">
-            <button class="faq-question">
-              What hardware do I need?
-              <span class="faq-chevron"
-                ><svg viewBox="0 0 24 24">
-                  <polyline points="6 9 12 15 18 9" /></svg
-              ></span>
+          <div class="tb-faq-item">
+            <button class="tb-faq-q">
+              <span class="num">04</span>
+              <span class="label">What hardware do I need?</span>
+              <span class="toggle">+</span>
             </button>
-            <div class="faq-answer">
-              <div class="faq-answer-inner">
-                It depends on the model. The wizard uses <code>llmfit</code> to
-                analyze your RAM and GPU, then recommends models that actually
-                fit. Smaller machines get smaller, faster models. Larger
-                machines unlock more capable ones.
+            <div class="tb-faq-a">
+              <div class="tb-faq-a-inner">
+                It depends on the model. The wizard uses <code>llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Smaller machines get smaller, faster models. Larger machines unlock more capable ones.
               </div>
             </div>
           </div>
 
-          <div class="faq-item reveal reveal-delay-4">
-            <button class="faq-question">
-              Is it really offline after setup?
-              <span class="faq-chevron"
-                ><svg viewBox="0 0 24 24">
-                  <polyline points="6 9 12 15 18 9" /></svg
-              ></span>
+          <div class="tb-faq-item">
+            <button class="tb-faq-q">
+              <span class="num">05</span>
+              <span class="label">Is it really offline after setup?</span>
+              <span class="toggle">+</span>
             </button>
-            <div class="faq-answer">
-              <div class="faq-answer-inner">
-                Yes, for local engines. After the initial model download
-                (handled by your runtime like Ollama), no internet connection is
-                required. There is no telemetry, no phone-home, and no license
-                server. Fully air-gap capable. Note: 9router is a cloud-routing
-                option and requires internet connectivity.
+            <div class="tb-faq-a">
+              <div class="tb-faq-a-inner">
+                Yes, for local engines. After the initial model download (handled by Ollama et al.), no internet connection is required. No telemetry, no phone-home, no license server. Fully air-gap capable. Note: 9router and OpenRouter route to cloud and need internet.
               </div>
             </div>
           </div>
 
-          <div class="faq-item reveal reveal-delay-5">
-            <button class="faq-question">
-              Can I switch back to cloud at any time?
-              <span class="faq-chevron"
-                ><svg viewBox="0 0 24 24">
-                  <polyline points="6 9 12 15 18 9" /></svg
-              ></span>
+          <div class="tb-faq-item">
+            <button class="tb-faq-q">
+              <span class="num">06</span>
+              <span class="label">Can I switch back to cloud at any time?</span>
+              <span class="toggle">+</span>
             </button>
-            <div class="faq-answer">
-              <div class="faq-answer-inner">
-                Instantly. Just run the official <code>claude</code> or
-                <code>codex</code> commands directly — they are completely
-                unmodified. The <code>cc</code> / <code>cx</code> aliases are
-                only for local sessions. Cloud and local coexist.
+            <div class="tb-faq-a">
+              <div class="tb-faq-a-inner">
+                Instantly. The official <code>claude</code> and <code>codex</code> commands are completely unmodified. The <code>cc</code>/<code>cx</code> aliases are only for local sessions. Cloud and local coexist.
               </div>
             </div>
           </div>
@@ -847,232 +700,68 @@
       </div>
     </section>
 
-    <hr class="section-divider" />
-
-    <!-- ── Changelog ─────────────────────────────────────────────── -->
-    <section id="changelog">
+    <!-- ── Changelog teaser ──────────────────────────────────────── -->
+    <section id="changelog" class="tb-section">
       <div class="container">
-        <div class="section-label reveal" style="text-align: center">
-          What's New
+        <div class="tb-frame-head reveal">
+          <span class="glyph">├─</span>
+          <span class="path">/whats-new</span>
+          <span class="meta">latest release</span>
         </div>
-        <h2
-          class="section-title reveal"
-          style="text-align: center; margin-left: auto; margin-right: auto"
-        >
-          Latest Release
-        </h2>
-        <p
-          class="section-sub reveal"
-          style="text-align: center; margin-left: auto; margin-right: auto"
-        >
-          Release history following
-          <a
-            href="https://keepachangelog.com/en/1.0.0/"
-            target="_blank"
-            rel="noopener"
-            style="color: var(--cyan)"
-            >Keep a Changelog</a
-          >
-          and
-          <a
-            href="https://semver.org/"
-            target="_blank"
-            rel="noopener"
-            style="color: var(--cyan)"
-            >Semantic Versioning</a
-          >.
+        <span class="tb-eyebrow reveal">What's new</span>
+        <h2 class="tb-h2 reveal"><span class="ord">07</span>Latest release</h2>
+        <p class="tb-lede reveal" style="margin-bottom: 36px;">
+          Following <a href="https://keepachangelog.com/en/1.0.0/" target="_blank" rel="noopener" style="color: var(--tb-accent);">Keep a Changelog</a> and <a href="https://semver.org/" target="_blank" rel="noopener" style="color: var(--tb-accent);">SemVer</a>.
         </p>
 
-        <div
-          style="
-            max-width: 720px;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-            gap: 32px;
-          "
-        >
-          <!-- v0.12.0 -->
-          <div
-            class="reveal"
-            style="
-              background: var(--bg-card);
-              border: 1px solid var(--border);
-              border-radius: var(--radius-lg);
-              padding: 28px 32px;
-            "
-          >
-            <div
-              style="
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                margin-bottom: 20px;
-              "
-            >
-              <span
-                style="
-                  font-family: var(--mono);
-                  font-size: 15px;
-                  font-weight: 700;
-                  color: var(--green);
-                "
-                >v0.12.0</span
-              >
-              <span
-                style="
-                  font-size: 12px;
-                  color: var(--text-dim);
-                  font-family: var(--mono);
-                "
-                >2026-05-16</span
-              >
-              <span
-                style="
-                  margin-left: auto;
-                  font-size: 11px;
-                  font-family: var(--mono);
-                  font-weight: 600;
-                  letter-spacing: 0.1em;
-                  text-transform: uppercase;
-                  color: var(--green);
-                  background: rgba(63, 185, 80, 0.08);
-                  border: 1px solid rgba(63, 185, 80, 0.25);
-                  border-radius: 20px;
-                  padding: 3px 10px;
-                "
-                >Latest</span
-              >
+        <div class="tb-changelog reveal" style="max-width: 860px; margin: 0 auto;">
+          <div class="tb-clog-entry">
+            <div class="tb-clog-side">
+              <div class="ver">v0.12.0</div>
+              <div class="date">2026-05-16</div>
+              <div class="latest">Latest</div>
             </div>
-            <div style="margin-bottom: 12px">
-              <div
-                style="
-                  font-size: 11px;
-                  font-weight: 700;
-                  letter-spacing: 0.1em;
-                  text-transform: uppercase;
-                  color: var(--green);
-                  margin-bottom: 8px;
-                "
-              >
-                Added
+            <div class="tb-clog-body">
+              <div class="tb-clog-group added">
+                <div class="tb-clog-group-head">Added</div>
+                <ul class="tb-clog-list">
+                  <li><strong>OpenRouter Integration:</strong> Cloud-routing backend alongside 9router</li>
+                  <li>Browse OpenRouter free-tier models in the setup wizard</li>
+                  <li>New <code>cco</code>/<code>cxo</code>/<code>cpo</code> aliases</li>
+                </ul>
               </div>
-              <ul
-                style="
-                  list-style: none;
-                  display: flex;
-                  flex-direction: column;
-                  gap: 6px;
-                "
-              >
-                <li
-                  style="
-                    font-size: 14px;
-                    color: var(--text-muted);
-                    padding-left: 16px;
-                    position: relative;
-                  "
-                >
-                  <span style="position: absolute; left: 0; color: var(--green)"
-                    >+</span
-                  >
-                  <strong>OpenRouter Integration</strong>: Cloud-routing backend alongside 9router
-                </li>
-                <li
-                  style="
-                    font-size: 14px;
-                    color: var(--text-muted);
-                    padding-left: 16px;
-                    position: relative;
-                  "
-                >
-                  <span style="position: absolute; left: 0; color: var(--green)"
-                    >+</span
-                  >
-                  Browse OpenRouter free-tier models in setup wizard
-                </li>
-              </ul>
+              <a href="changelog.html" class="tb-clog-link">
+                View full changelog →
+              </a>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
 
-          <div class="reveal" style="text-align: center; margin-top: 16px;">
-            <a
-              href="changelog.html"
-              style="
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                color: var(--cyan);
-                font-size: 15px;
-                font-weight: 600;
-                text-decoration: none;
-                transition: gap 0.2s ease;
-              "
-              onmouseover="this.style.gap='12px'"
-              onmouseout="this.style.gap='8px'"
-            >
-              View full changelog on GitHub
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 8h10M9 4l4 4-4 4" />
-              </svg>
+    <!-- ── Final CTA ─────────────────────────────────────────────── -->
+    <section id="cta" class="tb-section tb-section-cta">
+      <div class="container">
+        <div class="tb-cta-strip reveal">
+          <div style="font-family: var(--mono); font-size: 11px; color: var(--tb-accent); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 16px;">Open source · free forever</div>
+          <h2>Ready to <span class="accent">swap the backend</span>?</h2>
+          <p>Local model, alternative cloud, or hosted SaaS — same harness, one alias. Free, open-source, MIT licensed. Under 10 minutes.</p>
+          <div class="actions">
+            <a href="#install" class="btn-primary">
+              Start my setup
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            </a>
+            <a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener" class="btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              View on GitHub
             </a>
           </div>
         </div>
       </div>
     </section>
 
-    <hr class="section-divider" />
-    <!-- ── Final CTA ─────────────────────────────────────────────── -->
-    <section id="cta">
-      <div class="container">
-        <div class="section-label reveal" style="text-align: center">
-          Open Source · Free Forever
-        </div>
-        <h2
-          class="reveal"
-          style="
-            font-size: clamp(28px, 5vw, 52px);
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            margin-bottom: 16px;
-          "
-        >
-          Ready to run <span style="color: var(--green)">locally</span>?
-        </h2>
-        <p class="sub reveal">
-          Free, open-source, MIT licensed. Takes under 10 minutes.
-        </p>
-
-        <div class="cta-actions reveal">
-          <a href="#install" class="btn-primary">
-            Start My Local Setup
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M3 8h10M9 4l4 4-4 4" />
-            </svg>
-          </a>
-          <a
-            href="https://github.com/luongnv89/claude-codex-local"
-            target="_blank"
-            rel="noopener"
-            class="btn-secondary"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path
-                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-              />
-            </svg>
-            View on GitHub
-          </a>
-        </div>
-      </div>
-    </section>
+    </div>
+    <!-- end .tb-page wrapper -->
 
     <!-- ── Footer ────────────────────────────────────────────────── -->
     <footer>
