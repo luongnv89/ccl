@@ -4215,6 +4215,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Triage: print wizard state and re-run the presence check",
         description="Show the current wizard state and re-check that harness, engine, and model are healthy.",
     )
+    session = sub.add_parser(
+        "session",
+        help="Manage opt-in shared conversation sessions between agents",
+        description=(
+            "Manage JSONL session files under ~/.claude-codex-local/sessions. "
+            "Use `ccl session sync` to copy redacted context between agents."
+        ),
+    )
+    session_sub = session.add_subparsers(dest="session_subcommand", required=True)
+    session_sync = session_sub.add_parser(
+        "sync", help="Copy redacted messages from one agent to another"
+    )
+    session_sync.add_argument("--from", dest="from_agent", default="claude", help="Source agent id")
+    session_sync.add_argument("--to", dest="to_agent", default="codex", help="Target agent id")
+    session_list = session_sub.add_parser("list", help="List known session files")
+    session_list.add_argument("--agent", help="Filter by agent id")
+    session_show = session_sub.add_parser("show", help="Show messages for an agent")
+    session_show.add_argument("agent", help="Agent id to show")
+    session_clear = session_sub.add_parser("clear", help="Clear one agent session")
+    session_clear.add_argument("agent", help="Agent id to clear")
+    session_truncate = session_sub.add_parser("truncate", help="Keep only the last N messages")
+    session_truncate.add_argument("agent", help="Agent id to truncate")
+    session_truncate.add_argument(
+        "--keep",
+        type=int,
+        required=True,
+        help=(
+            "Number of messages to keep (required). Use `ccl session clear` "
+            "to wipe the session entirely; passing --keep 0 is treated as an "
+            "explicit truncate to zero."
+        ),
+    )
     sub.add_parser(
         "serve",
         help="Ensure the llama-server backing the wizard's chosen model is up",
@@ -4269,6 +4301,35 @@ def main() -> int:
         return run_find_model_standalone()
     if cmd == "doctor":
         return run_doctor()
+    if cmd == "session":
+        from claude_codex_local import session as sess
+        from claude_codex_local.core import print_payload
+
+        subcmd = getattr(args, "session_subcommand", "")
+        if subcmd == "sync":
+            print_payload(sess.sync_session(agent_id=args.to_agent, other_agent_id=args.from_agent))
+            return 0
+        if subcmd == "list":
+            summaries = sess.get_all_sessions()
+            if getattr(args, "agent", None):
+                summaries = [item for item in summaries if item.get("agent_id") == args.agent]
+            print_payload({"sessions": summaries})
+            return 0
+        if subcmd == "show":
+            messages = [
+                message.to_dict(agent_id=message.agent_id or args.agent)
+                for message in sess.load_session(args.agent)
+            ]
+            print_payload({"agent": args.agent, "messages": messages})
+            return 0
+        if subcmd == "clear":
+            print_payload(sess.clear_session(args.agent))
+            return 0
+        if subcmd == "truncate":
+            print_payload(sess.truncate_session(args.agent, keep_last=args.keep))
+            return 0
+        parser.print_help()
+        return 2
     if cmd == "serve":
         return run_serve()
     if cmd == "run":
