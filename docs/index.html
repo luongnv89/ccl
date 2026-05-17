@@ -1054,6 +1054,22 @@
         color: var(--green);
         font-family: var(--mono);
         font-size: 15px;
+        width: 25%;
+        vertical-align: top;
+      }
+
+      .model-guide-table td:last-child {
+        width: 75%;
+      }
+
+      .hw-examples {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        font-weight: 400;
+        font-family: var(--sans);
+        margin-top: 6px;
+        opacity: 0.7;
       }
 
       .model-guide-table td strong {
@@ -1801,101 +1817,71 @@
     <section id="model-guide">
       <div class="container">
         <div class="section-label reveal" style="text-align: center">
-          Hardware Guide
+          Model Guide
         </div>
         <h2 class="section-title reveal" style="text-align: center">
-          Which model fits your machine?
+          Which coding model fits your memory?
         </h2>
         <p class="model-guide-intro reveal">
-          The wizard uses <code>llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what works on common hardware configurations.
+          The wizard uses <code>llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what coding models work at each memory tier.
         </p>
 
         <div class="reveal table-wrapper">
           <table class="model-guide-table">
-            <caption class="sr-only">Model recommendations by memory tier and platform</caption>
+            <caption class="sr-only">Coding model recommendations by memory tier</caption>
             <thead>
               <tr>
-                <th>Memory Tier</th>
-                <th>Mac Models</th>
-                <th>Mac Notes</th>
-                <th>NVIDIA Models</th>
-                <th>NVIDIA Notes</th>
+                <th>Memory Tier (Hardware)</th>
+                <th>Recommended Coding Models</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td data-label="Memory">16-24GB</td>
-                <td data-label="Mac Models">
-                  <strong>M3 Pro</strong> (18GB unified)<br />
-                  <strong>M2 Pro</strong> (16GB unified)<br />
-                  <strong>M1 Pro</strong> (16GB unified)
+                <td data-label="Memory Tier">
+                  <strong>24GB</strong><br />
+                  <span class="hw-examples">M3 Pro (18GB), RTX 4090 (24GB)</span>
                 </td>
-                <td data-label="Mac Notes">
-                  M3 Pro recommended for balanced performance. Unified memory shared between CPU/GPU enables efficient inference.
-                </td>
-                <td data-label="NVIDIA Models">
-                  <strong>RTX 4090</strong> (24GB VRAM)<br />
-                  <strong>RTX 3090</strong> (24GB VRAM)<br />
-                  <strong>A5000</strong> (24GB VRAM)
-                </td>
-                <td data-label="NVIDIA Notes">
-                  RTX 4090 optimal for consumer workloads. Professional A5000 for data center deployments.
+                <td data-label="Recommended Models">
+                  <strong>Qwen2.5-Coder-7B</strong> — Fast, efficient for most coding tasks<br />
+                  <strong>DeepSeek-Coder-6.7B</strong> — Strong code completion<br />
+                  <strong>CodeLlama-13B</strong> — Balanced performance<br />
+                  <strong>Mistral-7B-Instruct</strong> — General purpose with coding ability
                 </td>
               </tr>
               <tr>
-                <td data-label="Memory">32-48GB</td>
-                <td data-label="Mac Models">
-                  <strong>M1 Max</strong> (32GB unified)<br />
-                  <strong>M2 Max</strong> (32GB unified)<br />
-                  <strong>M3 Max</strong> (36GB unified)<br />
-                  <strong>M3 Pro</strong> (36GB unified)
+                <td data-label="Memory Tier">
+                  <strong>32GB</strong><br />
+                  <span class="hw-examples">M3 Max (36GB), RTX 6000 Ada (48GB)</span>
                 </td>
-                <td data-label="Mac Notes">
-                  M3 Max sweet spot for local development. Handles larger context windows and multi-agent workflows.
-                </td>
-                <td data-label="NVIDIA Models">
-                  <strong>RTX A5000</strong> (24GB + system RAM)<br />
-                  <strong>RTX 6000 Ada</strong> (48GB VRAM)
-                </td>
-                <td data-label="NVIDIA Notes">
-                  A5000 with 32GB system RAM for offloading. RTX 6000 Ada for pure GPU inference.
+                <td data-label="Recommended Models">
+                  <strong>Qwen2.5-Coder-14B</strong> — Enhanced reasoning for complex refactoring<br />
+                  <strong>DeepSeek-Coder-33B</strong> — Advanced code generation<br />
+                  <strong>CodeLlama-34B</strong> — Large context window (16K tokens)<br />
+                  <strong>Phind-CodeLlama-34B</strong> — Optimized for code search and explanation
                 </td>
               </tr>
               <tr>
-                <td data-label="Memory">64-96GB</td>
-                <td data-label="Mac Models">
-                  <strong>M1 Ultra</strong> (64GB unified)<br />
-                  <strong>M2 Ultra</strong> (64GB unified)<br />
-                  <strong>M3 Max</strong> (96GB unified)
+                <td data-label="Memory Tier">
+                  <strong>64GB</strong><br />
+                  <span class="hw-examples">M2 Ultra (64GB), H100 (80GB)</span>
                 </td>
-                <td data-label="Mac Notes">
-                  Mac Studio with M2 Ultra ideal for production workloads. Supports largest open models (70B+).
-                </td>
-                <td data-label="NVIDIA Models">
-                  <strong>A6000</strong> (48GB VRAM)<br />
-                  <strong>H100</strong> (80GB HBM3)<br />
-                  <strong>A100</strong> (40GB/80GB HBM2e)
-                </td>
-                <td data-label="NVIDIA Notes">
-                  A6000 for workstation. H100/A100 for data center. H100 delivers 3x throughput vs A100.
+                <td data-label="Recommended Models">
+                  <strong>Qwen2.5-Coder-32B</strong> — Top-tier coding performance<br />
+                  <strong>DeepSeek-Coder-V2-Lite</strong> — 16B with 128K context<br />
+                  <strong>CodeLlama-70B</strong> — Maximum capability for architecture design<br />
+                  <strong>Mixtral-8x7B-Instruct</strong> — MoE architecture, efficient 47B params
                 </td>
               </tr>
               <tr>
-                <td data-label="Memory">128GB+</td>
-                <td data-label="Mac Models">
-                  <strong>Mac Studio</strong> (M2 Ultra, 192GB)<br />
-                  <strong>Mac Pro</strong> (M2 Ultra, 192GB)
+                <td data-label="Memory Tier">
+                  <strong>128GB+</strong><br />
+                  <span class="hw-examples">Mac Studio (192GB), H100 NVL (188GB)</span>
                 </td>
-                <td data-label="Mac Notes">
-                  Top-tier unified memory for multi-model serving, long context (100K+ tokens), and agent orchestration.
-                </td>
-                <td data-label="NVIDIA Models">
-                  <strong>H100 NVL</strong> (188GB HBM3)<br />
-                  <strong>2x A100</strong> (160GB total)<br />
-                  <strong>2x H100</strong> (160GB total)
-                </td>
-                <td data-label="NVIDIA Notes">
-                  H100 NVL for single-node 175B+ models. Multi-GPU with NVLink for model parallelism. DGX systems for enterprise.
+                <td data-label="Recommended Models">
+                  <strong>DeepSeek-Coder-V2-236B</strong> — State-of-the-art coding model<br />
+                  <strong>Qwen2.5-Coder-72B</strong> — Massive context, multi-file reasoning<br />
+                  <strong>Mixtral-8x22B</strong> — 141B params, expert routing<br />
+                  <strong>CodeLlama-70B + long context</strong> — 100K+ token context for entire codebases
                 </td>
               </tr>
             </tbody>
