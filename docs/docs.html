@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Documentation — claude-codex-local</title>
+    <meta
+      name="description"
+      content="Installation instructions and usage guide for claude-codex-local. Get started in minutes."
+    />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ── Nav ──────────────────────────────────────────────────── -->
+    <nav id="main-nav">
+      <div class="nav-inner">
+        <a href="index.html" class="nav-logo">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 64 64"
+            fill="none"
+          >
+            <rect width="64" height="64" rx="14" fill="#111111" />
+            <line
+              x1="32"
+              y1="6"
+              x2="32"
+              y2="18"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="32"
+              y1="46"
+              x2="32"
+              y2="58"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="6"
+              y1="32"
+              x2="18"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="46"
+              y1="32"
+              x2="58"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="13.5"
+              x2="21.9"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="42.1"
+              y1="42.1"
+              x2="50.5"
+              y2="50.5"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="50.5"
+              y1="13.5"
+              x2="42.1"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="50.5"
+              x2="21.9"
+              y2="42.1"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M22,27 L28,32 L22,37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <line
+              x1="31"
+              y1="37"
+              x2="39"
+              y2="37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+            />
+          </svg>
+          CCL<span> · claude-codex-local</span>
+        </a>
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="docs.html" class="active">Docs</a></li>
+          <li><a href="guides.html">Guides</a></li>
+          <li><a href="resources.html">Resources</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+        <a
+          href="https://github.com/luongnv89/claude-codex-local"
+          target="_blank"
+          rel="noopener"
+          class="nav-gh"
+        >
+          <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </nav>
+
+    <!-- ── Installation ───────────────────────────────────────────── -->
+    <section id="install">
+      <div class="container" style="text-align: center">
+        <div class="section-label reveal">Get Started</div>
+        <h2
+          class="section-title reveal"
+          style="margin-left: auto; margin-right: auto"
+        >
+          Installation
+        </h2>
+        <p
+          class="section-sub reveal"
+          style="margin-left: auto; margin-right: auto; text-align: center"
+        >
+          Available on PyPI — install with pip or uv, or use the one-line shell
+          installer.
+        </p>
+
+        <div class="install-card reveal">
+          <div class="install-header">
+            <span class="install-label">pip · recommended</span>
+            <button class="copy-btn" data-copy="pip install claude-codex-local">
+              <svg viewBox="0 0 24 24">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+              </svg>
+              Copy
+            </button>
+          </div>
+          <div class="install-code">
+            <span class="ps">$ </span
+            ><span class="cmd">pip install claude-codex-local</span>
+          </div>
+        </div>
+
+        <div class="install-card reveal" style="margin-top: 12px">
+          <div class="install-header">
+            <span class="install-label">uv · alternative</span>
+            <button
+              class="copy-btn"
+              data-copy="uv tool install claude-codex-local"
+            >
+              <svg viewBox="0 0 24 24">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+              </svg>
+              Copy
+            </button>
+          </div>
+          <div class="install-code">
+            <span class="ps">$ </span
+            ><span class="cmd">uv tool install claude-codex-local</span>
+          </div>
+        </div>
+
+        <div class="install-alt reveal" style="margin-top: 32px">
+          <div class="install-alt-label">
+            <strong>Or use the shell installer (no clone required)</strong>
+          </div>
+          <div class="install-mini">
+            bash &lt;(curl -sSL
+            https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+          </div>
+        </div>
+
+        <div class="install-alt reveal" style="margin-top: 16px">
+          <div class="install-alt-label">
+            <strong>Or install from source</strong>
+          </div>
+          <div class="install-mini">
+            git clone https://github.com/luongnv89/claude-codex-local.git<br />
+            cd claude-codex-local<br />
+            python3 -m venv .venv &amp;&amp; source .venv/bin/activate<br />
+            pip install -e .<br />
+            ccl
+          </div>
+        </div>
+
+        <!-- Proven paths -->
+        <div class="proof-grid reveal">
+          <div class="proof-pill">
+            <span class="check">✓</span> Claude Code + Ollama + gemma4:26b
+          </div>
+          <div class="proof-pill">
+            <span class="check">✓</span> Codex CLI + Ollama + gemma4:26b
+          </div>
+          <div class="proof-pill">
+            <span class="check">✓</span> Claude Code + 9router + OpenAI/DeepSeek
+          </div>
+          <div class="proof-pill">
+            <span class="check">✓</span> Claude Code + OpenRouter + anthropic/claude-sonnet-4.6
+          </div>
+          <div class="proof-pill">
+            <span class="warn">⚠</span> Claude Code + LM Studio + Qwen3
+          </div>
+          <div class="proof-pill">
+            <span class="check">✓</span> Any + llama.cpp + GGUF (from Hugging
+            Face)
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-divider" />
+
+    <!-- ── How It Works ───────────────────────────────────────────── -->
+    <section id="how-it-works">
+      <div class="container">
+        <div class="section-label reveal" style="text-align: center">
+          Usage
+        </div>
+        <h2 class="section-title reveal" style="text-align: center">
+          Three steps. Ten minutes.<br />Local or cloud routing.
+        </h2>
+
+        <div class="steps-grid" style="margin-top: 56px">
+          <div class="step reveal reveal-delay-1">
+            <div class="step-number">01</div>
+            <h3>Install</h3>
+            <p>
+              Run one curl command. The wizard auto-detects your installed
+              runtimes, checks your hardware, and flags anything missing.
+            </p>
+          </div>
+          <div class="step reveal reveal-delay-2">
+            <div class="step-number">02</div>
+            <h3>Configure</h3>
+            <p>
+              Answer a few prompts. Pick your runtime, pick your model (or let
+              llmfit pick for you). The wizard wires everything up safely.
+            </p>
+          </div>
+          <div class="step reveal reveal-delay-3">
+            <div class="step-number">03</div>
+            <h3>Run</h3>
+            <p>
+              Type
+              <code
+                style="
+                  font-family: var(--mono);
+                  font-size: 13px;
+                  background: rgba(255, 255, 255, 0.06);
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  color: var(--cyan);
+                "
+                >cc</code
+              >
+              or
+              <code
+                style="
+                  font-family: var(--mono);
+                  font-size: 13px;
+                  background: rgba(255, 255, 255, 0.06);
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  color: var(--cyan);
+                "
+                >cx</code
+              >
+              for local. Use
+              <code
+                style="
+                  font-family: var(--mono);
+                  font-size: 13px;
+                  background: rgba(255, 255, 255, 0.06);
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  color: var(--cyan);
+                "
+                >cc9</code
+              >/<code
+                style="
+                  font-family: var(--mono);
+                  font-size: 13px;
+                  background: rgba(255, 255, 255, 0.06);
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  color: var(--cyan);
+                "
+                >cx9</code
+              >
+              for 9router cloud routing. Your full Claude Code or Codex
+              experience — every skill, every agent, every MCP server intact.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-divider" />
+
+    <!-- ── CLI Commands ───────────────────────────────────────────── -->
+    <section id="cli-commands">
+      <div class="container">
+        <div class="section-label reveal" style="text-align: center">
+          CLI Reference
+        </div>
+        <h2 class="section-title reveal" style="text-align: center">
+          Available Commands
+        </h2>
+
+        <div style="max-width: 800px; margin: 0 auto; margin-top: 48px;">
+          <div class="feature-card reveal" style="margin-bottom: 16px;">
+            <h3 style="font-family: var(--mono); color: var(--cyan); margin-bottom: 12px;">ccl setup</h3>
+            <p>Run the interactive setup wizard. Auto-detects your hardware, installed runtimes, and guides you through configuration.</p>
+            <div style="margin-top: 12px; padding: 12px; background: rgba(255, 255, 255, 0.03); border-radius: 6px; font-family: var(--mono); font-size: 12px;">
+              <div style="color: var(--text-muted);">Options:</div>
+              <div style="margin-top: 8px;"><code>--resume</code> — Resume from last failed step</div>
+              <div><code>--non-interactive</code> — Run without prompts (CI mode)</div>
+            </div>
+          </div>
+
+          <div class="feature-card reveal" style="margin-bottom: 16px;">
+            <h3 style="font-family: var(--mono); color: var(--cyan); margin-bottom: 12px;">ccl doctor</h3>
+            <p>Verify your configuration. Checks API keys, model availability, server connectivity, and configuration validity.</p>
+          </div>
+
+          <div class="feature-card reveal" style="margin-bottom: 16px;">
+            <h3 style="font-family: var(--mono); color: var(--cyan); margin-bottom: 12px;">ccl find-model</h3>
+            <p>Get hardware-aware model recommendations using llmfit. Analyzes your RAM and GPU to suggest models that will actually fit.</p>
+          </div>
+
+          <div class="feature-card reveal" style="margin-bottom: 16px;">
+            <h3 style="font-family: var(--mono); color: var(--cyan); margin-bottom: 12px;">ccl serve</h3>
+            <p>Start llama.cpp server with automatic restart on crashes. Useful for long-running inference sessions.</p>
+          </div>
+
+          <div class="feature-card reveal">
+            <h3 style="font-family: var(--mono); color: var(--cyan); margin-bottom: 12px;">ccl run -p "prompt"</h3>
+            <p>Non-interactive mode for scripted workflows. Execute a single prompt and exit.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-divider" />
+
+    <!-- ── Configuration ───────────────────────────────────────────── -->
+    <section id="configuration">
+      <div class="container">
+        <div class="section-label reveal" style="text-align: center">
+          Advanced
+        </div>
+        <h2 class="section-title reveal" style="text-align: center">
+          Configuration
+        </h2>
+
+        <div style="max-width: 800px; margin: 0 auto; margin-top: 48px;">
+          <div class="feature-card reveal" style="margin-bottom: 24px;">
+            <h3>Configuration Directory</h3>
+            <p style="margin-bottom: 12px;">All configuration lives in <code>~/.claude-codex-local/</code></p>
+            <ul style="list-style: none; padding: 0; margin-top: 12px;">
+              <li style="padding-left: 20px; position: relative; margin-bottom: 8px; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>config.json</code> — Main configuration file
+              </li>
+              <li style="padding-left: 20px; position: relative; margin-bottom: 8px; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>models.json</code> — Model registry and metadata
+              </li>
+              <li style="padding-left: 20px; position: relative; margin-bottom: 8px; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>.9router_key</code> — 9router API key (chmod 0600)
+              </li>
+              <li style="padding-left: 20px; position: relative; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>.openrouter_key</code> — OpenRouter API key (chmod 0600)
+              </li>
+            </ul>
+          </div>
+
+          <div class="feature-card reveal" style="margin-bottom: 24px;">
+            <h3>Shell Aliases</h3>
+            <p style="margin-bottom: 12px;">The wizard adds fenced blocks to your <code>~/.zshrc</code> or <code>~/.bashrc</code></p>
+            <ul style="list-style: none; padding: 0; margin-top: 12px;">
+              <li style="padding-left: 20px; position: relative; margin-bottom: 8px; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>cc</code> / <code>cx</code> — Local model sessions
+              </li>
+              <li style="padding-left: 20px; position: relative; margin-bottom: 8px; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>cc9</code> / <code>cx9</code> — 9router cloud routing
+              </li>
+              <li style="padding-left: 20px; position: relative; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>cco</code> / <code>cxo</code> / <code>cpo</code> — OpenRouter hosted routing
+              </li>
+            </ul>
+          </div>
+
+          <div class="feature-card reveal">
+            <h3>Environment Variables</h3>
+            <p style="margin-bottom: 12px;">Override defaults with environment variables</p>
+            <ul style="list-style: none; padding: 0; margin-top: 12px;">
+              <li style="padding-left: 20px; position: relative; margin-bottom: 8px; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>CCL_OPENROUTER_MODEL</code> — Override default OpenRouter model
+              </li>
+              <li style="padding-left: 20px; position: relative; color: var(--text-muted);">
+                <span style="position: absolute; left: 0; color: var(--green);">→</span>
+                <code>NO_COLOR</code> — Disable colored output
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ─────────────────────────────────────────────────── -->
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-logo">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 64 64"
+            fill="none"
+          >
+            <rect width="64" height="64" rx="14" fill="#111111" />
+            <line
+              x1="32"
+              y1="6"
+              x2="32"
+              y2="18"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="32"
+              y1="46"
+              x2="32"
+              y2="58"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="6"
+              y1="32"
+              x2="18"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="46"
+              y1="32"
+              x2="58"
+              y2="32"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="13.5"
+              x2="21.9"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="42.1"
+              y1="42.1"
+              x2="50.5"
+              y2="50.5"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="50.5"
+              y1="13.5"
+              x2="42.1"
+              y2="21.9"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <line
+              x1="13.5"
+              y1="50.5"
+              x2="21.9"
+              y2="42.1"
+              stroke="#A1A1A1"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M22,27 L28,32 L22,37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <line
+              x1="31"
+              y1="37"
+              x2="39"
+              y2="37"
+              stroke="#00FF41"
+              stroke-width="2.8"
+              stroke-linecap="round"
+            />
+          </svg>
+          <strong>claude-codex-local</strong> · v0.12.0
+        </div>
+        <ul class="footer-links">
+          <li>
+            <a
+              href="https://github.com/luongnv89/claude-codex-local"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li>
+            <a href="docs.html">Docs</a>
+          </li>
+          <li>
+            <a href="changelog.html">Changelog</a>
+          </li>
+          <li>
+            <a
+              href="https://github.com/luongnv89/claude-codex-local/issues"
+              target="_blank"
+              rel="noopener"
+              >Issues</a
+            >
+          </li>
+        </ul>
+        <div class="footer-right">
+          MIT License · Built for developers, by developers
+        </div>
+      </div>
+    </footer>
+
+    <script src="nav.js"></script>
+  </body>
+</html>
