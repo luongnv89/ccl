@@ -46,27 +46,30 @@
       ];
       const navLinks = document.querySelectorAll(".nav-links a");
 
-      const sectionObserver = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (entry.isIntersecting) {
-              const id = entry.target.id;
-              navLinks.forEach((a) => {
-                a.classList.toggle(
-                  "active",
-                  a.getAttribute("href") === "#" + id,
-                );
-              });
-            }
-          });
-        },
-        { threshold: 0.4 },
-      );
+      // Only set up section observer if any of the sections exist (index.html only)
+      if (sections.some((id) => document.getElementById(id))) {
+        const sectionObserver = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                const id = entry.target.id;
+                navLinks.forEach((a) => {
+                  a.classList.toggle(
+                    "active",
+                    a.getAttribute("href") === "#" + id,
+                  );
+                });
+              }
+            });
+          },
+          { threshold: 0.4 },
+        );
 
-      sections.forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) sectionObserver.observe(el);
-      });
+        sections.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) sectionObserver.observe(el);
+        });
+      }
 
       // ── Copy buttons ───────────────────────────────────────────
       document.querySelectorAll(".copy-btn").forEach((btn) => {
