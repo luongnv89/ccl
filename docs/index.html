@@ -954,6 +954,155 @@
         color: var(--cyan);
       }
 
+      /* ── Model Guide Table ──────────────────────────────────── */
+      #model-guide {
+        background: var(--bg);
+      }
+
+      .model-guide-intro {
+        font-size: 15px;
+        color: var(--text-muted);
+        max-width: 720px;
+        margin: 0 auto 40px;
+        text-align: center;
+        line-height: 1.7;
+      }
+
+      .model-guide-table {
+        width: 100%;
+        max-width: 1000px;
+        margin: 0 auto;
+        border-collapse: collapse;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+
+      .model-guide-table thead {
+        background: var(--bg-card2);
+        position: sticky;
+        top: 56px;
+        z-index: 10;
+      }
+
+      .model-guide-table th {
+        padding: 16px 20px;
+        text-align: left;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .model-guide-table td {
+        padding: 18px 20px;
+        font-size: 14px;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border-dim);
+        line-height: 1.6;
+      }
+
+      .model-guide-table tbody tr {
+        transition: background 0.15s;
+      }
+
+      .model-guide-table tbody tr:hover {
+        background: rgba(88, 166, 255, 0.04);
+      }
+
+      .model-guide-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .model-guide-table td:first-child {
+        font-weight: 700;
+        color: var(--green);
+        font-family: var(--mono);
+        font-size: 15px;
+      }
+
+      .model-guide-table td strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .model-guide-table td code {
+        font-family: var(--mono);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 5px;
+        border-radius: 4px;
+        color: var(--cyan);
+      }
+
+      /* Mobile: Card layout */
+      @media (max-width: 768px) {
+        .model-guide-table {
+          display: block;
+          border: none;
+          background: transparent;
+        }
+
+        .model-guide-table thead {
+          display: none;
+        }
+
+        .model-guide-table tbody {
+          display: grid;
+          gap: 16px;
+        }
+
+        .model-guide-table tr {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 20px;
+        }
+
+        .model-guide-table tr:hover {
+          background: var(--bg-card);
+          border-color: rgba(88, 166, 255, 0.35);
+        }
+
+        .model-guide-table td {
+          display: grid;
+          grid-template-columns: 120px 1fr;
+          gap: 12px;
+          padding: 0;
+          border: none;
+          align-items: start;
+        }
+
+        .model-guide-table td::before {
+          content: attr(data-label);
+          font-weight: 700;
+          color: var(--text-dim);
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          font-family: var(--mono);
+        }
+
+        .model-guide-table td:first-child {
+          grid-column: 1 / -1;
+          font-size: 16px;
+          margin-bottom: 8px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--border-dim);
+        }
+
+        .model-guide-table td:first-child::before {
+          display: none;
+        }
+      }
+
       /* ── Final CTA ──────────────────────────────────────────── */
       #cta {
         background: var(--bg-card);
@@ -1180,6 +1329,7 @@
           <li><a href="#problem">Problem</a></li>
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How It Works</a></li>
+          <li><a href="#model-guide">Model Guide</a></li>
           <li><a href="#install">Install</a></li>
           <li><a href="#faq">FAQ</a></li>
           <li><a href="#changelog">Changelog</a></li>
@@ -1610,6 +1760,113 @@
               experience — every skill, every agent, every MCP server intact.
             </p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-divider" />
+
+    <!-- ── Model Guide ────────────────────────────────────────────── -->
+    <section id="model-guide">
+      <div class="container">
+        <div class="section-label reveal" style="text-align: center">
+          Hardware Guide
+        </div>
+        <h2 class="section-title reveal" style="text-align: center">
+          Which model fits your machine?
+        </h2>
+        <p class="model-guide-intro reveal">
+          The wizard uses <code style="font-family: var(--mono); font-size: 13px; background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 4px; color: var(--cyan);">llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what works on common hardware configurations.
+        </p>
+
+        <div class="reveal" style="overflow-x: auto;">
+          <table class="model-guide-table">
+            <thead>
+              <tr>
+                <th>Memory Tier</th>
+                <th>Mac Models</th>
+                <th>Mac Notes</th>
+                <th>NVIDIA Models</th>
+                <th>NVIDIA Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-label="Memory">24GB</td>
+                <td data-label="Mac Models">
+                  <strong>M3 Pro</strong> (18GB unified)<br />
+                  <strong>M2 Pro</strong> (16GB unified)<br />
+                  <strong>M1 Max</strong> (32GB unified)
+                </td>
+                <td data-label="Mac Notes">
+                  M3 Pro recommended for balanced performance. Unified memory shared between CPU/GPU enables efficient inference.
+                </td>
+                <td data-label="NVIDIA Models">
+                  <strong>RTX 4090</strong> (24GB VRAM)<br />
+                  <strong>RTX 3090</strong> (24GB VRAM)<br />
+                  <strong>A5000</strong> (24GB VRAM)
+                </td>
+                <td data-label="NVIDIA Notes">
+                  RTX 4090 optimal for consumer workloads. Professional A5000 for data center deployments.
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Memory">32GB</td>
+                <td data-label="Mac Models">
+                  <strong>M3 Max</strong> (36GB unified)<br />
+                  <strong>M2 Max</strong> (32GB unified)<br />
+                  <strong>M1 Ultra</strong> (64GB unified)
+                </td>
+                <td data-label="Mac Notes">
+                  M3 Max sweet spot for local development. Handles larger context windows and multi-agent workflows.
+                </td>
+                <td data-label="NVIDIA Models">
+                  <strong>RTX A5000</strong> (24GB + system RAM)<br />
+                  <strong>RTX 6000 Ada</strong> (48GB VRAM)
+                </td>
+                <td data-label="NVIDIA Notes">
+                  A5000 with 32GB system RAM for offloading. RTX 6000 Ada for pure GPU inference.
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Memory">64GB</td>
+                <td data-label="Mac Models">
+                  <strong>M2 Ultra</strong> (64GB–128GB unified)<br />
+                  <strong>Mac Studio</strong> (128GB unified)<br />
+                  <strong>M3 Max</strong> (96GB unified)
+                </td>
+                <td data-label="Mac Notes">
+                  Mac Studio with M2 Ultra ideal for production workloads. Supports largest open models (70B+).
+                </td>
+                <td data-label="NVIDIA Models">
+                  <strong>A6000</strong> (48GB VRAM)<br />
+                  <strong>H100</strong> (80GB HBM3)<br />
+                  <strong>A100</strong> (40GB/80GB HBM2e)
+                </td>
+                <td data-label="NVIDIA Notes">
+                  A6000 for workstation. H100/A100 for data center. H100 delivers 3x throughput vs A100.
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Memory">128GB+</td>
+                <td data-label="Mac Models">
+                  <strong>Mac Studio</strong> (192GB unified)<br />
+                  <strong>Mac Pro</strong> (192GB unified)
+                </td>
+                <td data-label="Mac Notes">
+                  Top-tier unified memory for multi-model serving, long context (100K+ tokens), and agent orchestration.
+                </td>
+                <td data-label="NVIDIA Models">
+                  <strong>Multi-GPU setups</strong><br />
+                  <strong>H100 NVL</strong> (188GB HBM3)<br />
+                  <strong>DGX systems</strong>
+                </td>
+                <td data-label="NVIDIA Notes">
+                  Multi-GPU with NVLink for model parallelism. H100 NVL for single-node 175B+ models.
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
