@@ -954,6 +954,368 @@
         color: var(--cyan);
       }
 
+      /* ── Model Guide Table ──────────────────────────────────── */
+      #model-guide {
+        background: var(--bg);
+      }
+
+      .model-guide-intro {
+        font-size: 15px;
+        color: var(--text-muted);
+        max-width: 720px;
+        margin: 0 auto 40px;
+        text-align: center;
+        line-height: 1.7;
+      }
+
+      .model-guide-intro code {
+        font-family: var(--mono);
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: var(--cyan);
+      }
+
+      .table-wrapper {
+        overflow-x: auto;
+      }
+
+      @media (max-width: 768px) {
+        .table-wrapper {
+          overflow-x: visible;
+        }
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+      }
+
+      .model-guide-table {
+        width: 100%;
+        max-width: 1000px;
+        margin: 0 auto;
+        border-collapse: collapse;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+
+      .model-guide-table thead {
+        background: var(--bg-card2);
+        position: sticky;
+        top: 56px;
+        z-index: 10;
+      }
+
+      .model-guide-table th {
+        padding: 16px 20px;
+        text-align: left;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .model-guide-table td {
+        padding: 18px 20px;
+        font-size: 14px;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border-dim);
+        line-height: 1.6;
+      }
+
+      .model-guide-table tbody tr {
+        transition: background 0.15s;
+      }
+
+      .model-guide-table tbody tr:hover {
+        background: rgba(88, 166, 255, 0.04);
+      }
+
+      .model-guide-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .model-guide-table td:first-child {
+        font-weight: 700;
+        color: var(--green);
+        font-family: var(--mono);
+        font-size: 15px;
+        width: 25%;
+        vertical-align: top;
+      }
+
+      .model-guide-table td:last-child {
+        width: 75%;
+      }
+
+      .hw-examples {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        font-weight: 400;
+        font-family: var(--sans);
+        margin-top: 6px;
+        opacity: 0.7;
+      }
+
+      .model-guide-table td strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .model-guide-table td code {
+        font-family: var(--mono);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 5px;
+        border-radius: 4px;
+        color: var(--cyan);
+      }
+
+      /* Mobile: Card layout */
+      @media (max-width: 768px) {
+        .model-guide-table {
+          display: block;
+          border: none;
+          background: transparent;
+        }
+
+        .model-guide-table thead {
+          display: none;
+        }
+
+        .model-guide-table tbody {
+          display: grid;
+          gap: 16px;
+        }
+
+        .model-guide-table tr {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: var(--radius-lg);
+          padding: 20px;
+        }
+
+        .model-guide-table tr:hover {
+          background: var(--bg-card);
+          border-color: rgba(88, 166, 255, 0.35);
+        }
+
+        .model-guide-table td {
+          display: grid;
+          grid-template-columns: 120px 1fr;
+          gap: 12px;
+          padding: 0;
+          border: none;
+          align-items: start;
+        }
+
+        .model-guide-table td::before {
+          content: attr(data-label);
+          font-weight: 700;
+          color: var(--text-dim);
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          font-family: var(--mono);
+        }
+
+        .model-guide-table td:first-child {
+          grid-column: 1 / -1;
+          font-size: 16px;
+          margin-bottom: 8px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--border-dim);
+        }
+
+        .model-guide-table td:first-child::before {
+          display: none;
+        }
+      }
+
+      /* ── Manual Selection Guide ─────────────────────────────── */
+      .manual-guide {
+        max-width: 900px;
+        margin: 0 auto;
+        padding-top: 60px;
+      }
+
+      .manual-guide-title {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 16px;
+        text-align: center;
+      }
+
+      .manual-guide-intro {
+        font-size: 15px;
+        color: var(--text-muted);
+        text-align: center;
+        margin-bottom: 40px;
+        line-height: 1.7;
+      }
+
+      .manual-guide-intro code {
+        font-family: var(--mono);
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: var(--cyan);
+      }
+
+      .manual-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .manual-step {
+        display: flex;
+        gap: 20px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 24px;
+        transition: border-color 0.2s;
+      }
+
+      .manual-step:hover {
+        border-color: rgba(88, 166, 255, 0.35);
+      }
+
+      .step-number {
+        flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--green);
+        color: var(--bg);
+        font-weight: 700;
+        font-size: 18px;
+        border-radius: 50%;
+        font-family: var(--mono);
+      }
+
+      .step-content {
+        flex: 1;
+      }
+
+      .step-content h4 {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 12px;
+      }
+
+      .step-content p {
+        font-size: 14px;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin-bottom: 12px;
+      }
+
+      .step-content ul {
+        list-style: none;
+        padding: 0;
+        margin: 12px 0;
+      }
+
+      .step-content ul li {
+        font-size: 14px;
+        color: var(--text-muted);
+        line-height: 1.7;
+        padding-left: 20px;
+        position: relative;
+        margin-bottom: 8px;
+      }
+
+      .step-content ul li::before {
+        content: "→";
+        position: absolute;
+        left: 0;
+        color: var(--green);
+        font-weight: 700;
+      }
+
+      .step-content ul li strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .step-example {
+        background: rgba(255, 255, 255, 0.03);
+        border-left: 3px solid var(--cyan);
+        padding: 10px 14px;
+        font-size: 13px;
+        color: var(--text-muted);
+        border-radius: 4px;
+        margin-top: 12px;
+        font-family: var(--mono);
+      }
+
+      .step-example code {
+        font-family: var(--mono);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 5px;
+        border-radius: 3px;
+        color: var(--cyan);
+      }
+
+      .manual-guide-footer {
+        margin-top: 32px;
+        padding: 20px 24px;
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: var(--radius-lg);
+      }
+
+      .manual-guide-footer p {
+        font-size: 14px;
+        color: var(--text-muted);
+        line-height: 1.7;
+        margin: 0;
+      }
+
+      .manual-guide-footer strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      @media (max-width: 768px) {
+        .manual-step {
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .step-number {
+          width: 36px;
+          height: 36px;
+          font-size: 16px;
+        }
+      }
+
       /* ── Final CTA ──────────────────────────────────────────── */
       #cta {
         background: var(--bg-card);
@@ -1180,6 +1542,7 @@
           <li><a href="#problem">Problem</a></li>
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How It Works</a></li>
+          <li><a href="#model-guide">Model Guide</a></li>
           <li><a href="#install">Install</a></li>
           <li><a href="#faq">FAQ</a></li>
           <li><a href="#changelog">Changelog</a></li>
@@ -1609,6 +1972,188 @@
               for 9router cloud routing. Your full Claude Code or Codex
               experience — every skill, every agent, every MCP server intact.
             </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-divider" />
+
+    <!-- ── Model Guide ────────────────────────────────────────────── -->
+    <section id="model-guide">
+      <div class="container">
+        <div class="section-label reveal" style="text-align: center">
+          Model Guide
+        </div>
+        <h2 class="section-title reveal" style="text-align: center">
+          Which coding model fits your memory?
+        </h2>
+        <p class="model-guide-intro reveal">
+          The wizard uses <code>llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what coding models work at each memory tier.
+        </p>
+
+        <div class="reveal table-wrapper">
+          <table class="model-guide-table">
+            <caption class="sr-only">Coding model recommendations by memory tier</caption>
+            <thead>
+              <tr>
+                <th>Memory Tier (Hardware)</th>
+                <th>Recommended Coding Models</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-label="Memory Tier">
+                  <strong>24GB</strong><br />
+                  <span class="hw-examples">M3 Pro (18GB), RTX 4090 (24GB)</span>
+                </td>
+                <td data-label="Recommended Models">
+                  <strong>Qwen2.5-Coder-7B</strong> — Fast, efficient for most coding tasks<br />
+                  <strong>DeepSeek-Coder-6.7B</strong> — Strong code completion<br />
+                  <strong>CodeLlama-13B</strong> — Balanced performance<br />
+                  <strong>Mistral-7B-Instruct</strong> — General purpose with coding ability
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Memory Tier">
+                  <strong>32GB</strong><br />
+                  <span class="hw-examples">M3 Max (36GB), RTX 6000 Ada (48GB)</span>
+                </td>
+                <td data-label="Recommended Models">
+                  <strong>Qwen2.5-Coder-14B</strong> — Enhanced reasoning for complex refactoring<br />
+                  <strong>DeepSeek-Coder-33B</strong> — Advanced code generation<br />
+                  <strong>CodeLlama-34B</strong> — Large context window (16K tokens)<br />
+                  <strong>Phind-CodeLlama-34B</strong> — Optimized for code search and explanation
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Memory Tier">
+                  <strong>64GB</strong><br />
+                  <span class="hw-examples">M2 Ultra (64GB), H100 (80GB)</span>
+                </td>
+                <td data-label="Recommended Models">
+                  <strong>Qwen2.5-Coder-32B</strong> — Top-tier coding performance<br />
+                  <strong>DeepSeek-Coder-V2-Lite</strong> — 16B with 128K context<br />
+                  <strong>CodeLlama-70B</strong> — Maximum capability for architecture design<br />
+                  <strong>Mixtral-8x7B-Instruct</strong> — MoE architecture, efficient 47B params
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Memory Tier">
+                  <strong>128GB+</strong><br />
+                  <span class="hw-examples">Mac Studio (192GB), H100 NVL (188GB)</span>
+                </td>
+                <td data-label="Recommended Models">
+                  <strong>DeepSeek-Coder-V2-236B</strong> — State-of-the-art coding model<br />
+                  <strong>Qwen2.5-Coder-72B</strong> — Massive context, multi-file reasoning<br />
+                  <strong>Mixtral-8x22B</strong> — 141B params, expert routing<br />
+                  <strong>CodeLlama-70B + long context</strong> — 100K+ token context for entire codebases
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Manual Selection Guide -->
+        <div class="manual-guide reveal" style="margin-top: 60px;">
+          <h3 class="manual-guide-title">How to Select & Verify Models Manually</h3>
+          <p class="manual-guide-intro">
+            While <code>llmfit</code> automates model selection, you can manually choose and verify models for your hardware. Here's how:
+          </p>
+
+          <div class="manual-steps">
+            <div class="manual-step">
+              <div class="step-number">1</div>
+              <div class="step-content">
+                <h4>Check Your Available Memory</h4>
+                <p>Determine your total available memory for model inference:</p>
+                <ul>
+                  <li><strong>Mac (unified memory):</strong> Total system RAM minus ~4-6GB for OS</li>
+                  <li><strong>NVIDIA GPU:</strong> VRAM + system RAM (for offloading layers)</li>
+                  <li><strong>CPU-only:</strong> Total system RAM minus ~8-12GB for OS and applications</li>
+                </ul>
+                <p class="step-example">Example: M3 Max with 36GB → ~30-32GB available for models</p>
+              </div>
+            </div>
+
+            <div class="manual-step">
+              <div class="step-number">2</div>
+              <div class="step-content">
+                <h4>Calculate Model Memory Requirements</h4>
+                <p>Estimate memory needed based on model size and quantization:</p>
+                <ul>
+                  <li><strong>FP16 (full precision):</strong> ~2 bytes per parameter</li>
+                  <li><strong>Q8 (8-bit quantization):</strong> ~1 byte per parameter</li>
+                  <li><strong>Q4 (4-bit quantization):</strong> ~0.5 bytes per parameter</li>
+                  <li><strong>Context buffer:</strong> Add 2-4GB for context window</li>
+                </ul>
+                <p class="step-example">Example: 7B model in Q4 → 7B × 0.5 = 3.5GB + 2GB context = ~5.5GB total</p>
+              </div>
+            </div>
+
+            <div class="manual-step">
+              <div class="step-number">3</div>
+              <div class="step-content">
+                <h4>Choose Quantization Level</h4>
+                <p>Balance quality vs. memory usage:</p>
+                <ul>
+                  <li><strong>Q8:</strong> Best quality, minimal degradation (~95% of FP16 performance)</li>
+                  <li><strong>Q5/Q6:</strong> Good balance for most use cases (~90% performance)</li>
+                  <li><strong>Q4:</strong> Acceptable quality, 2x memory savings (~85% performance)</li>
+                  <li><strong>Q3/Q2:</strong> Maximum compression, noticeable quality loss (not recommended for coding)</li>
+                </ul>
+                <p class="step-example">Recommendation: Start with Q4 or Q5 for coding models</p>
+              </div>
+            </div>
+
+            <div class="manual-step">
+              <div class="step-number">4</div>
+              <div class="step-content">
+                <h4>Test Model Performance</h4>
+                <p>Verify the model runs well on your hardware:</p>
+                <ul>
+                  <li><strong>Load time:</strong> Should load in under 30 seconds</li>
+                  <li><strong>First token latency:</strong> Under 2-3 seconds for good UX</li>
+                  <li><strong>Generation speed:</strong> Aim for 10+ tokens/second for interactive coding</li>
+                  <li><strong>Memory headroom:</strong> Keep 10-20% free memory to avoid swapping</li>
+                </ul>
+                <p class="step-example">Test command: <code>ccl chat --model &lt;model-name&gt; --benchmark</code></p>
+              </div>
+            </div>
+
+            <div class="manual-step">
+              <div class="step-number">5</div>
+              <div class="step-content">
+                <h4>Monitor System Resources</h4>
+                <p>Watch for performance issues during inference:</p>
+                <ul>
+                  <li><strong>Memory pressure:</strong> Check Activity Monitor (Mac) or Task Manager (Windows)</li>
+                  <li><strong>Swap usage:</strong> If swap increases significantly, model is too large</li>
+                  <li><strong>GPU utilization:</strong> Should be 70-90% during generation</li>
+                  <li><strong>Temperature:</strong> Sustained high temps may throttle performance</li>
+                </ul>
+                <p class="step-example">Red flags: Swap usage &gt;2GB, generation speed &lt;5 tokens/sec, system lag</p>
+              </div>
+            </div>
+
+            <div class="manual-step">
+              <div class="step-number">6</div>
+              <div class="step-content">
+                <h4>Optimize If Needed</h4>
+                <p>If performance is poor, try these adjustments:</p>
+                <ul>
+                  <li><strong>Lower quantization:</strong> Switch from Q5 to Q4 or Q4 to Q3</li>
+                  <li><strong>Smaller model:</strong> Drop from 34B to 13B or 13B to 7B</li>
+                  <li><strong>Reduce context:</strong> Lower max context length (e.g., 4K → 2K)</li>
+                  <li><strong>Enable offloading:</strong> Use GPU + CPU hybrid inference (if supported)</li>
+                </ul>
+                <p class="step-example">Goal: Consistent 10+ tokens/sec with &lt;2s first token latency</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="manual-guide-footer">
+            <p><strong>Pro tip:</strong> Start with a smaller model (7B-13B) to verify your setup works, then scale up to larger models once you've confirmed performance is acceptable.</p>
           </div>
         </div>
       </div>
