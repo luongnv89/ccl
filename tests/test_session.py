@@ -194,10 +194,15 @@ def test_sync_session(temp_state_dir, temp_session_dir):
 
     # Verify codex now has the messages
     codex_path = temp_session_dir / "codex.jsonl"
-    if codex_path.exists():
-        messages = sess.load_session("codex")
-        assert len(messages) == 1
-        assert messages[0].content == "Hello from Claude"
+    assert codex_path.exists()
+    messages = sess.load_session("codex")
+    assert len(messages) == 1
+    assert messages[0].content == "Hello from Claude"
+    # Provenance: synced rows must keep the source agent_id, not the target's.
+    assert messages[0].agent_id == "claude"
+    with codex_path.open("r", encoding="utf-8") as handle:
+        raw_rows = [json.loads(line) for line in handle if line.strip()]
+    assert raw_rows[0]["agent_id"] == "claude"
 
 
 def test_clear_session(temp_state_dir, temp_session_dir):

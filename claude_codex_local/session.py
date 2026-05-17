@@ -255,14 +255,16 @@ def sync_session(agent_id: str, other_agent_id: str) -> dict[str, Any]:
     target = _safe_agent_id(agent_id)
     source = _safe_agent_id(other_agent_id)
     source_messages = load_session(source)
+    target_path = get_session_path(target)
     existing_keys = {_message_key(message) for message in load_session(target)}
     copied = 0
     for message in source_messages:
         key = _message_key(message)
         if key in existing_keys:
             continue
-        save_message(
-            target,
+        _append_message(
+            target_path,
+            source,
             SessionMessage(
                 role=message.role,
                 content=message.content,
