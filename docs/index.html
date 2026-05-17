@@ -968,6 +968,37 @@
         line-height: 1.7;
       }
 
+      .model-guide-intro code {
+        font-family: var(--mono);
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: var(--cyan);
+      }
+
+      .table-wrapper {
+        overflow-x: auto;
+      }
+
+      @media (max-width: 768px) {
+        .table-wrapper {
+          overflow-x: visible;
+        }
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+      }
+
       .model-guide-table {
         width: 100%;
         max-width: 1000px;
@@ -1776,11 +1807,12 @@
           Which model fits your machine?
         </h2>
         <p class="model-guide-intro reveal">
-          The wizard uses <code style="font-family: var(--mono); font-size: 13px; background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 4px; color: var(--cyan);">llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what works on common hardware configurations.
+          The wizard uses <code>llmfit</code> to analyze your RAM and GPU, then recommends models that actually fit. Here's what works on common hardware configurations.
         </p>
 
-        <div class="reveal" style="overflow-x: auto;">
+        <div class="reveal table-wrapper">
           <table class="model-guide-table">
+            <caption class="sr-only">Model recommendations by memory tier and platform</caption>
             <thead>
               <tr>
                 <th>Memory Tier</th>
@@ -1792,11 +1824,11 @@
             </thead>
             <tbody>
               <tr>
-                <td data-label="Memory">24GB</td>
+                <td data-label="Memory">16-24GB</td>
                 <td data-label="Mac Models">
                   <strong>M3 Pro</strong> (18GB unified)<br />
                   <strong>M2 Pro</strong> (16GB unified)<br />
-                  <strong>M1 Max</strong> (32GB unified)
+                  <strong>M1 Pro</strong> (16GB unified)
                 </td>
                 <td data-label="Mac Notes">
                   M3 Pro recommended for balanced performance. Unified memory shared between CPU/GPU enables efficient inference.
@@ -1811,11 +1843,11 @@
                 </td>
               </tr>
               <tr>
-                <td data-label="Memory">32GB</td>
+                <td data-label="Memory">32-48GB</td>
                 <td data-label="Mac Models">
-                  <strong>M3 Max</strong> (36GB unified)<br />
+                  <strong>M1 Max</strong> (32GB unified)<br />
                   <strong>M2 Max</strong> (32GB unified)<br />
-                  <strong>M1 Ultra</strong> (64GB unified)
+                  <strong>M3 Max</strong> (36GB unified)
                 </td>
                 <td data-label="Mac Notes">
                   M3 Max sweet spot for local development. Handles larger context windows and multi-agent workflows.
@@ -1829,10 +1861,10 @@
                 </td>
               </tr>
               <tr>
-                <td data-label="Memory">64GB</td>
+                <td data-label="Memory">64-96GB</td>
                 <td data-label="Mac Models">
-                  <strong>M2 Ultra</strong> (64GB–128GB unified)<br />
-                  <strong>Mac Studio</strong> (128GB unified)<br />
+                  <strong>M1 Ultra</strong> (64GB unified)<br />
+                  <strong>M2 Ultra</strong> (64GB unified)<br />
                   <strong>M3 Max</strong> (96GB unified)
                 </td>
                 <td data-label="Mac Notes">
