@@ -298,7 +298,13 @@ def get_shared_session_data() -> list[dict[str, Any]]:
 
 
 def truncate_session(agent_id: str, keep_last: int | None = None) -> dict[str, Any]:
-    """Truncate a session file, keeping only the last N messages."""
+    """Truncate a session file, keeping only the last ``keep_last`` messages.
+
+    ``keep_last`` of ``None`` or ``0`` deletes every message in the file. The
+    CLI surface (``ccl session truncate``) requires ``--keep`` so this wipe
+    behavior is never accidental; callers using the function directly should
+    pass an explicit value and use :func:`clear_session` to remove the file.
+    """
     keep = max(0, keep_last or 0)
     path = get_session_path(agent_id)
     if not path.exists():

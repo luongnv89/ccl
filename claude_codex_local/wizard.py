@@ -4238,7 +4238,16 @@ def _build_parser() -> argparse.ArgumentParser:
     session_clear.add_argument("agent", help="Agent id to clear")
     session_truncate = session_sub.add_parser("truncate", help="Keep only the last N messages")
     session_truncate.add_argument("agent", help="Agent id to truncate")
-    session_truncate.add_argument("--keep", type=int, default=0, help="Number of messages to keep")
+    session_truncate.add_argument(
+        "--keep",
+        type=int,
+        required=True,
+        help=(
+            "Number of messages to keep (required). Use `ccl session clear` "
+            "to wipe the session entirely; passing --keep 0 is treated as an "
+            "explicit truncate to zero."
+        ),
+    )
     sub.add_parser(
         "serve",
         help="Ensure the llama-server backing the wizard's chosen model is up",
