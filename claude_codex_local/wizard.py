@@ -663,7 +663,6 @@ def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
             "version": pb.command_version("lms")["version"] if lms.get("present") else "",
             "error": lms.get("error", ""),
         }
-
     elif engine == "llamacpp":
         info = pb.llamacpp_detect()
         tools["llamacpp"] = info

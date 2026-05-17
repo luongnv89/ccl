@@ -59,11 +59,6 @@ def _ensure_sessions_dir() -> Path:
     return path
 
 
-def _get_session_file() -> Path:
-    """Get the shared session file path."""
-    return _get_sessions_dir() / "shared.jsonl"
-
-
 def _safe_agent_id(agent_id: str) -> str:
     """Normalize an agent id so it cannot escape the sessions directory."""
     value = (agent_id or get_current_agent_id() or "default").strip()
@@ -139,16 +134,6 @@ class SessionMessage:
         }
 
 
-@dataclass
-class Session:
-    """A snapshot of a shared session at a point in time."""
-
-    session_id: str
-    messages: list[SessionMessage]
-    agent_id: str
-    timestamp: datetime = field(default_factory=_utcnow)
-
-
 def get_current_agent_id() -> str:
     """Get the current agent identifier from the environment."""
     return os.environ.get(_AGENT_ID_ENV, "").strip()
@@ -157,12 +142,6 @@ def get_current_agent_id() -> str:
 def get_session_path(agent_id: str) -> Path:
     """Get the path to a session file for a specific agent."""
     return _ensure_sessions_dir() / f"{_safe_agent_id(agent_id)}.jsonl"
-
-
-def get_shared_session_path() -> Path:
-    """Get the path to the shared session file."""
-    _ensure_sessions_dir()
-    return _get_session_file()
 
 
 def _load_jsonl(path: Path) -> list[SessionMessage]:
@@ -201,16 +180,6 @@ def _append_message(path: Path, agent_id: str, message: SessionMessage) -> None:
 def save_message(agent_id: str, message: SessionMessage) -> None:
     """Append a redacted message to an agent's session file."""
     _append_message(get_session_path(agent_id), _safe_agent_id(agent_id), message)
-
-
-def save_message_to_shared(agent_id: str, message: SessionMessage) -> None:
-    """Append a redacted message to the shared session file."""
-    _append_message(get_shared_session_path(), _safe_agent_id(agent_id), message)
-
-
-def get_shared_messages() -> list[SessionMessage]:
-    """Load all messages from the shared session file."""
-    return _load_jsonl(get_shared_session_path())
 
 
 def clear_session(agent_id: str) -> dict[str, Any]:
@@ -288,13 +257,6 @@ def get_all_sessions() -> list[dict[str, Any]]:
     """Get summaries for all discovered session files."""
     sessions_dir = _ensure_sessions_dir()
     return [get_session_summary(path.stem) for path in sorted(sessions_dir.glob("*.jsonl"))]
-
-
-def get_shared_session_data() -> list[dict[str, Any]]:
-    """Get all shared-session messages as dictionaries."""
-    return [
-        message.to_dict(agent_id=message.agent_id or "shared") for message in get_shared_messages()
-    ]
 
 
 def truncate_session(agent_id: str, keep_last: int | None = None) -> dict[str, Any]:

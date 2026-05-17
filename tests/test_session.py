@@ -47,13 +47,6 @@ def test_get_session_path(temp_state_dir, temp_session_dir):
     assert path == expected
 
 
-def test_get_shared_session_path(temp_state_dir, temp_session_dir):
-    """Test getting the shared session path."""
-    path = sess.get_shared_session_path()
-    expected = temp_session_dir / "shared.jsonl"
-    assert path == expected
-
-
 def test_load_empty_session(temp_state_dir, temp_session_dir):
     """Test loading an empty session."""
     agent_id = "test-agent"
@@ -138,25 +131,6 @@ def test_save_message_auto_agent_id(temp_state_dir, temp_session_dir):
     assert messages[0].content == "Test auto-detect"
     # Clean up
     del os.environ["__CCL_AGENT_ID"]
-
-
-def test_save_message_to_shared(temp_state_dir, temp_session_dir):
-    """Test saving a message to the shared session."""
-    from claude_codex_local.session import SessionMessage
-
-    message = SessionMessage(
-        role="user",
-        content="Shared message",
-        timestamp=datetime.now(timezone.utc),
-        session_id="shared123",
-        agent_id="test-agent",
-    )
-    sess.save_message_to_shared("test-agent", message)
-
-    # Verify it was saved to shared
-    shared_messages = sess.get_shared_messages()
-    assert len(shared_messages) == 1
-    assert shared_messages[0].content == "Shared message"
 
 
 def test_save_message_redacts_secrets(temp_state_dir, temp_session_dir):
@@ -336,26 +310,3 @@ def test_get_all_sessions(temp_state_dir, temp_session_dir):
 
     sessions = sess.get_all_sessions()
     assert len(sessions) >= 3
-
-
-def test_get_shared_session_data(temp_state_dir, temp_session_dir):
-    """Test getting all shared session data."""
-    # Write to shared
-    shared_path = temp_session_dir / "shared.jsonl"
-    with shared_path.open("w") as f:
-        f.write(
-            json.dumps(
-                {
-                    "role": "user",
-                    "content": "shared test",
-                    "timestamp": "2024-01-01T00:00:00",
-                    "session_id": "shared1",
-                    "agent_id": "test-agent",
-                }
-            )
-            + "\n"
-        )
-
-    data = sess.get_shared_session_data()
-    assert len(data) == 1
-    assert data[0]["content"] == "shared test"
