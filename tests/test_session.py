@@ -159,6 +159,58 @@ def test_save_message_to_shared(temp_state_dir, temp_session_dir):
     assert shared_messages[0].content == "Shared message"
 
 
+def test_save_message_redacts_secrets(temp_state_dir, temp_session_dir):
+    """Redaction must scrub secret patterns before they hit the JSONL file."""
+    agent_id = "redact-agent"
+    secrets = {
+        "openai": "sk-1234567890abcdef1234567890abcdef",
+        "aws": "AKIAIOSFODNN7EXAMPLE",
+        "github": "ghp_1234567890abcdef1234567890abcdef1234",
+    }
+    message = SessionMessage(
+        role="user",
+        content=(f"openai={secrets['openai']} aws={secrets['aws']} github={secrets['github']}"),
+        timestamp=datetime.now(timezone.utc),
+        session_id="redact1",
+        agent_id=agent_id,
+    )
+    sess.save_message(agent_id, message)
+
+    raw = sess.get_session_path(agent_id).read_text(encoding="utf-8")
+    for label, secret in secrets.items():
+        assert secret not in raw, f"{label} secret leaked into persisted JSONL"
+    assert "[REDACTED]" in raw
+
+
+def test_sync_session_redacts_secrets(temp_state_dir, temp_session_dir):
+    """Synced rows must be redacted and keep the source agent_id."""
+    source = "claude"
+    target = "codex"
+    secret = "sk-1234567890abcdef1234567890abcdef"
+    message = SessionMessage(
+        role="user",
+        content=f"token={secret}",
+        timestamp=datetime.now(timezone.utc),
+        session_id="sync-redact",
+        agent_id=source,
+    )
+    sess.save_message(source, message)
+
+    result = sess.sync_session(target, source)
+    assert result["success"] is True
+    assert result["message_count"] == 1
+
+    target_path = sess.get_session_path(target)
+    raw = target_path.read_text(encoding="utf-8")
+    assert secret not in raw, "secret leaked into target JSONL during sync"
+    assert "[REDACTED]" in raw
+
+    with target_path.open("r", encoding="utf-8") as handle:
+        rows = [json.loads(line) for line in handle if line.strip()]
+    assert rows, "expected at least one row in target after sync"
+    assert rows[0]["agent_id"] == source, "synced row must preserve source agent_id"
+
+
 def test_get_session_summary(temp_state_dir, temp_session_dir):
     """Test getting a session summary."""
     agent_id = "test-agent"
