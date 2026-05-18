@@ -159,41 +159,61 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 ## Sharing Context Between Agents
 
-`ccl session` manages an opt-in JSONL store under
-`~/.claude-codex-local/sessions/<agent_id>.jsonl` for copying conversation
-context between local harnesses (Claude Code ↔ Codex ↔ Pi). It is **not** an
-auto-capture pipeline: CCL does not record harness conversations on its own.
-You (or an external script) write messages into an agent's JSONL file using
-the Python API, and the CLI lets you list, view, sync, truncate, or clear
-those files.
+`ccl run` automatically bridges conversation context across local harnesses
+so you can hand off mid-task between Claude Code, Codex, and Pi without
+re-explaining what you were doing. The bridge runs in two halves:
+
+- **Post-run capture (both paths)** — after the harness exits, CCL reads its
+  native session file for the current `$PWD`
+  (`~/.claude/projects/...`, `~/.codex/sessions/...`, `~/.pi/agent/sessions/...`)
+  and imports the cleaned, redacted messages into
+  `~/.claude-codex-local/sessions/<harness>.jsonl`.
+- **Pre-run injection (one-shot only)** — when you `ccl run -p PROMPT`, the
+  freshest *other* harness's transcript for `$PWD` is rendered as a
+  `[prior context, agent=…]\n…\n[end prior context]` block and prepended
+  to `PROMPT`. Interactive sessions don't inject — each harness has its
+  own `--resume`/`--continue` and stdin is the user's TTY. The
+  cc-interactive → cx-one-shot handoff is the prototypical flow.
 
 ```bash
-ccl session list                                # show all known agent files + counts
-ccl session show claude                         # print one agent's messages (JSON)
-ccl session sync --from claude --to codex       # copy redacted messages claude → codex
-ccl session truncate codex --keep 50            # keep only the last N (--keep required)
-ccl session clear codex                         # delete one agent's file
+ccl run -p "continue from where claude left off"   # auto-injects context if claude has one
+ccl run --no-context -p "fresh start"              # disable bridge (also CCL_SESSION_BRIDGE=0)
+ccl session list                                   # show captured per-harness JSONL files
+ccl session show claude                            # print one harness's messages (JSON)
+ccl session sync --from claude --to codex          # manual copy if you want to force it
+ccl session truncate codex --keep 50               # keep only the last N (--keep required)
+ccl session clear codex                            # delete one harness's file
 ```
 
-`sync` is **idempotent** (a content-hash dedup key per message prevents
-double-copies), preserves the source `agent_id` on the target side as
-provenance, and applies **best-effort redaction** of common token shapes
-(OpenAI, Anthropic, AWS, GitHub PAT/OAuth, Slack, GitLab, Google API)
-before persisting. Treat the JSONL files as semi-sensitive — the scrub
-covers known patterns, not arbitrary secrets in prose.
+**Scope guards** keep the bridge predictable:
 
-Programmatic write path (for harness adapters or your own tooling):
+- **cwd-scoped** — context only flows for the same repository. Switching
+  directories starts fresh.
+- **7-day staleness cap** — native sessions older than a week are ignored
+  so months-old transcripts can't get silently re-injected. The injection
+  banner shows the source's age (`last activity 6m ago`) so you can spot a
+  stale handoff before it ships to the model.
+- **Source picker** — when multiple non-self harnesses have history, the
+  most recently modified file wins. Same-harness one-shot continuity
+  (`cc -p "foo"` then `cc -p "bar"`) is *not* covered — use Claude Code's
+  own `--resume` for that.
+- **Boilerplate filter** — `AGENTS.md` / `CLAUDE.md` re-dumps, slash-command
+  echoes, skill loads, tool calls, reasoning traces, and other harness
+  internals are dropped on import; only user/assistant text survives.
+- **Redaction** — best-effort scrub of common token shapes (OpenAI,
+  Anthropic, AWS, GitHub PAT/OAuth, Slack, GitLab, Google API) on every
+  import and sync. Treat the JSONL files as semi-sensitive — the scrub
+  covers known patterns, not arbitrary secrets in prose.
+- **Idempotent** — re-running `ccl run` against the same native file does
+  not duplicate messages; a content-hash dedup key skips already-imported
+  rows.
 
-```python
-from claude_codex_local.session import SessionMessage, save_message
+The capture path is exercised on both interactive and one-shot via the same
+post-run import. The injection path is currently wired only on the one-shot
+(`-p`) branch.
 
-save_message(
-    agent_id="claude",
-    message=SessionMessage(role="user", content="hello from claude"),
-)
-```
-
-State directory can be overridden with `CLAUDE_CODEX_LOCAL_STATE_DIR` (useful
+State directory can be overridden with `CLAUDE_CODEX_LOCAL_STATE_DIR`; the
+native-home base can be overridden with `CCL_NATIVE_HOME_OVERRIDE` (useful
 for tests and CI). `--keep` is **required** on `truncate` to prevent
 accidental wipes; use `ccl session clear` if you want to remove the file
 entirely.

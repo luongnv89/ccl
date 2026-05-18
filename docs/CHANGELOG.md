@@ -9,18 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-- **Session sync between agents**: New `ccl session` command group manages an opt-in JSONL store at `~/.claude-codex-local/sessions/<agent_id>.jsonl` for sharing conversation context between Claude Code, Codex, and Pi (#62, #93)
-  - Subcommands: `list`, `show`, `sync --from A --to B`, `truncate <agent> --keep N`, `clear <agent>`
-  - `sync` is idempotent (content-hash dedup) and preserves source `agent_id` as provenance on the target file
-  - Best-effort redaction of common token shapes (OpenAI, AWS, GitHub PAT/OAuth, Slack, GitLab, Google API) before persisting
-  - `truncate` requires `--keep` to prevent accidental wipes; use `clear` to remove a file entirely
-  - State directory overridable via `CLAUDE_CODEX_LOCAL_STATE_DIR` for tests and CI
-  - Producer side is manual today — messages are written via `claude_codex_local.session.save_message()`; harness auto-capture is not wired
+- **Cross-harness session bridge**: `ccl run` now auto-captures and auto-injects conversation context across Claude Code, Codex, and Pi (#62, #93)
+  - Post-run capture (both interactive and one-shot): after the harness exits, CCL reads its native session file for `$PWD` (`~/.claude/projects/...`, `~/.codex/sessions/...`, `~/.pi/agent/sessions/...`) and imports cleaned messages into `~/.claude-codex-local/sessions/<harness>.jsonl`
+  - Pre-run injection (one-shot `-p` only): the freshest *other* harness's transcript for `$PWD` is rendered as a `[prior context, agent=…]` block and prepended to the prompt
+  - New `session_adapters.py` with per-harness JSONL readers; drops AGENTS.md/CLAUDE.md re-dumps, slash-command echoes, tool calls, reasoning traces, and other harness internals
+  - Bridge is **cwd-scoped** (no context leaks across repos), capped at **7 days** staleness, with an injection banner that shows source age (`last activity 6m ago`)
+  - macOS symlink-aware: `/var/folders/...` ↔ `/private/var/folders/...` resolved consistently when matching cwd against the harnesses' stored paths
+  - Opt out per-call with `ccl run --no-context`, or globally with `CCL_SESSION_BRIDGE=0`
+  - `ccl session` command group (`list` / `show` / `sync --from A --to B` / `truncate --keep N` / `clear`) for review and manual operations on the imported store
+  - Best-effort redaction of common token shapes (OpenAI, AWS, GitHub PAT/OAuth, Slack, GitLab, Google API) on every import and sync
+  - Idempotent: a content-hash dedup key skips already-imported messages, so re-runs are safe
+  - Same-harness one-shot continuity (`cc -p` then `cc -p`) is *not* covered — use the harness's own `--resume` / `--continue` for that
+  - State directory overridable via `CLAUDE_CODEX_LOCAL_STATE_DIR`; native-home base overridable via `CCL_NATIVE_HOME_OVERRIDE`
 
 ### Documentation
 
-- README: add `## Sharing Context Between Agents` section after Usage
-- docs.html: add `ccl session` card to CLI reference
+- README: rewrite `## Sharing Context Between Agents` to describe the auto-bridge, scope guards, and the interactive-capture / one-shot-inject asymmetry
+- docs.html: update `ccl run` card with `--no-context` and the auto-bridge note; refresh the `ccl session` card to describe inspection rather than manual seeding
 
 ## v0.12.0 — 2026-05-16
 

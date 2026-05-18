@@ -256,21 +256,25 @@
               <div class="tb-cmd">
                 <div class="tb-cmd-name">ccl run -p "prompt"</div>
                 <div class="tb-cmd-desc">
-                  Non-interactive mode for scripted workflows. Execute a single prompt and exit. Streams output to stdout.
+                  Non-interactive mode for scripted workflows. Execute a single prompt and exit. Streams output to stdout. Automatically prepends the freshest *other* harness's transcript for <code>$PWD</code> as a <code>[prior context]</code> block so you can hand off mid-task.
+                  <div class="tb-cmd-flags">
+                    <div class="tb-cmd-flags-title">Options</div>
+                    <div><code>--no-context</code> &nbsp;— skip the cross-harness bridge (also via <code>CCL_SESSION_BRIDGE=0</code>)</div>
+                  </div>
                 </div>
               </div>
 
               <div class="tb-cmd">
                 <div class="tb-cmd-name">ccl session</div>
                 <div class="tb-cmd-desc">
-                  Manage opt-in shared conversation JSONL files under <code>~/.claude-codex-local/sessions/</code>. Lets you copy redacted context between local harnesses (Claude Code ↔ Codex ↔ Pi). Not an auto-capture pipeline — messages are written by you or external tooling via the Python API.
+                  Inspect and manage the shared conversation JSONL files under <code>~/.claude-codex-local/sessions/</code>. CCL auto-imports each harness's native session for <code>$PWD</code> after every <code>ccl run</code>; this command surface is for review and manual sync. cwd-scoped, 7-day staleness cap, best-effort secret redaction.
                   <div class="tb-cmd-flags">
                     <div class="tb-cmd-flags-title">Subcommands</div>
-                    <div><code>list</code> &nbsp;— show all known agent files + counts</div>
-                    <div><code>show &lt;agent&gt;</code> &nbsp;— print one agent's messages</div>
+                    <div><code>list</code> &nbsp;— show all captured harness files + counts</div>
+                    <div><code>show &lt;agent&gt;</code> &nbsp;— print one harness's messages</div>
                     <div><code>sync --from A --to B</code> &nbsp;— copy messages A → B (idempotent, redacted)</div>
                     <div><code>truncate &lt;agent&gt; --keep N</code> &nbsp;— keep only the last N (--keep required)</div>
-                    <div><code>clear &lt;agent&gt;</code> &nbsp;— delete one agent's file</div>
+                    <div><code>clear &lt;agent&gt;</code> &nbsp;— delete one harness's file</div>
                   </div>
                 </div>
               </div>

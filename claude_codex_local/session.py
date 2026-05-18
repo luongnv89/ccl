@@ -295,3 +295,237 @@ def truncate_session(agent_id: str, keep_last: int | None = None) -> dict[str, A
         "kept": len(kept_messages),
         "error": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Cross-harness bridge: locate native session files, import them, render a
+# context prefix for the consumer side. The producer (ccl run) imports its own
+# harness's latest session file after the harness exits; the consumer reads
+# the *opposite* agent's accumulated transcript and prepends it to the prompt.
+# ---------------------------------------------------------------------------
+
+_CWD_BRIDGE_SCAN_DAYS = 14
+_CONTEXT_PREFIX_CHAR_BUDGET = 16_000  # ~4k tokens at 4 chars/token rule of thumb
+_BRIDGE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60  # 7-day staleness cap
+
+
+def _normalize_cwd(cwd: str) -> str:
+    """Resolve symlinks so encoded directory names match what the harnesses see.
+
+    macOS aliases ``/tmp`` → ``/private/tmp``, ``/var`` → ``/private/var``, and
+    similar. ``os.getcwd()`` returns the resolved form, but a caller may pass
+    a non-resolved path; harnesses encode whatever they themselves saw at
+    launch. Use :py:meth:`Path.resolve` to make both sides comparable.
+    """
+    try:
+        return str(Path(cwd).resolve())
+    except OSError:
+        return cwd
+
+
+def _encode_cwd_claude(cwd: str) -> str:
+    """Claude Code's project-dir encoding: leading dash, slashes → dashes."""
+    return "-" + _normalize_cwd(cwd).lstrip("/").replace("/", "-")
+
+
+def _encode_cwd_pi(cwd: str) -> str:
+    """Pi's session-dir encoding: double-dash leading and trailing."""
+    return "--" + _normalize_cwd(cwd).lstrip("/").replace("/", "-") + "--"
+
+
+def _native_root(harness: str) -> Path:
+    """Resolve the harness's native state root (overridable for tests)."""
+    home = Path(os.environ.get("CCL_NATIVE_HOME_OVERRIDE", str(Path.home())))
+    if harness == "claude":
+        return home / ".claude"
+    if harness == "codex":
+        return home / ".codex"
+    if harness == "pi":
+        return home / ".pi" / "agent"
+    return home
+
+
+def find_latest_native_session(
+    harness: str, cwd: str, *, max_age_seconds: int = _BRIDGE_MAX_AGE_SECONDS
+) -> Path | None:
+    """Return the most recently modified native session file for ``cwd``.
+
+    Claude and Pi shard by encoded cwd directory; we return the newest
+    ``*.jsonl`` under that directory. Codex shards by date and stores cwd in
+    each file's ``session_meta`` line, so we walk the last
+    ``_CWD_BRIDGE_SCAN_DAYS`` date directories newest-first and confirm the
+    cwd match by reading the first line. Files older than ``max_age_seconds``
+    are excluded so stale months-old transcripts don't get silently
+    re-injected. Returns ``None`` if no match.
+    """
+    root = _native_root(harness)
+    if not root.exists():
+        return None
+
+    cwd_resolved = _normalize_cwd(cwd)
+    cutoff = datetime.now(tz=timezone.utc).timestamp() - max_age_seconds
+
+    def _fresh(path: Path) -> bool:
+        try:
+            return path.stat().st_mtime >= cutoff
+        except OSError:
+            return False
+
+    if harness == "claude":
+        project_dir = root / "projects" / _encode_cwd_claude(cwd_resolved)
+        if not project_dir.exists():
+            return None
+        candidates = sorted(
+            (p for p in project_dir.glob("*.jsonl") if _fresh(p)),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+
+    if harness == "pi":
+        project_dir = root / "sessions" / _encode_cwd_pi(cwd_resolved)
+        if not project_dir.exists():
+            return None
+        candidates = sorted(
+            (p for p in project_dir.glob("*.jsonl") if _fresh(p)),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+
+    if harness == "codex":
+        sessions_dir = root / "sessions"
+        if not sessions_dir.exists():
+            return None
+        # Walk all rollout-*.jsonl across recent dates, newest first, and
+        # pick the first one whose session_meta.cwd matches. The staleness
+        # cap also bounds how far back we scan in practice.
+        candidates = sorted(
+            (p for p in sessions_dir.rglob("rollout-*.jsonl") if _fresh(p)),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for path in candidates[: 50 * _CWD_BRIDGE_SCAN_DAYS]:  # cap scan size
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    first = handle.readline()
+            except OSError:
+                continue
+            try:
+                meta = json.loads(first)
+            except json.JSONDecodeError:
+                continue
+            payload = meta.get("payload") or {}
+            stored_cwd = _normalize_cwd(str(payload.get("cwd", "")))
+            if stored_cwd == cwd_resolved:
+                return path
+        return None
+
+    return None
+
+
+def import_native_session(harness: str, agent_id: str, cwd: str) -> dict[str, Any]:
+    """Import the latest native session for ``harness`` into ``<agent_id>.jsonl``.
+
+    Idempotent: messages already present (matched by the same content-hash
+    dedup key as :func:`sync_session`) are skipped. Returns a status dict
+    with the number of messages imported and the source path.
+    """
+    # Local import: keeps the adapters module's import of session.py from
+    # cycling back through session.py at top-level load time.
+    from claude_codex_local.session_adapters import read_native_session
+
+    safe_agent = _safe_agent_id(agent_id)
+    source_path = find_latest_native_session(harness, cwd)
+    if source_path is None:
+        return {
+            "success": True,
+            "agent_id": safe_agent,
+            "harness": harness,
+            "source_path": None,
+            "imported": 0,
+            "error": None,
+        }
+    messages = read_native_session(harness, source_path)
+    if not messages:
+        return {
+            "success": True,
+            "agent_id": safe_agent,
+            "harness": harness,
+            "source_path": str(source_path),
+            "imported": 0,
+            "error": None,
+        }
+    target_path = get_session_path(safe_agent)
+    existing_keys = {_message_key(message) for message in load_session(safe_agent)}
+    imported = 0
+    for message in messages:
+        key = _message_key(message)
+        if key in existing_keys:
+            continue
+        _append_message(target_path, safe_agent, message)
+        existing_keys.add(key)
+        imported += 1
+    return {
+        "success": True,
+        "agent_id": safe_agent,
+        "harness": harness,
+        "source_path": str(source_path),
+        "imported": imported,
+        "error": None,
+    }
+
+
+def _content_to_text(content: Any) -> str:
+    """Reduce SessionMessage.content (string | dict | list) to plain text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(item, str):
+                parts.append(item)
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        text = content.get("text")
+        return text if isinstance(text, str) else json.dumps(content, ensure_ascii=False)
+    return ""
+
+
+def build_context_prefix(agent_id: str, *, char_budget: int = _CONTEXT_PREFIX_CHAR_BUDGET) -> str:
+    """Render an agent's accumulated transcript as a prompt-prefix block.
+
+    The block is tail-keep: most-recent messages first wins, walking backward
+    until we hit the character budget. Returns an empty string when the agent
+    has no messages, so callers can no-op cleanly. The output is wrapped in
+    explicit ``[prior context …]`` / ``[end prior context]`` delimiters so
+    the consumer harness recognizes it as preamble rather than user intent.
+    """
+    safe_agent = _safe_agent_id(agent_id)
+    messages = load_session(safe_agent)
+    if not messages:
+        return ""
+    rendered: list[str] = []
+    used = 0
+    for message in reversed(messages):
+        text = _content_to_text(message.content).strip()
+        if not text:
+            continue
+        line = f"{message.role}: {text}"
+        if used + len(line) + 2 > char_budget:
+            break
+        rendered.append(line)
+        used += len(line) + 2
+    if not rendered:
+        return ""
+    rendered.reverse()
+    body = "\n".join(rendered)
+    return (
+        f"[prior context, agent={safe_agent}, {len(rendered)} messages]\n"
+        f"{body}\n"
+        f"[end prior context]\n\n"
+    )

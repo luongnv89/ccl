@@ -3996,16 +3996,132 @@ def _resolve_wire_env(wire_result: dict[str, Any]) -> dict[str, str]:
     return env
 
 
-def run_session(prompt: str | None = None) -> int:
+_BRIDGE_HARNESSES = ("claude", "codex", "pi")
+
+
+def _bridge_disabled(no_context: bool) -> bool:
+    """Resolve the bridge opt-out: --no-context flag or CCL_SESSION_BRIDGE=0."""
+    if no_context:
+        return True
+    return os.environ.get("CCL_SESSION_BRIDGE", "").strip() == "0"
+
+
+def _pick_source_agent(harness: str, cwd: str) -> str | None:
+    """Pick the most recently active *other* harness with native session content for ``cwd``.
+
+    Returns the harness name (== agent_id) of the freshest match, or ``None``
+    when no other harness has a session for this cwd. Self is always
+    excluded so we don't replay our own transcript to ourselves.
     """
-    Exposed as `ccl run [-p PROMPT]`. Launch the configured harness with an
-    optional initial prompt so external agents can drive CCL non-interactively.
+    from claude_codex_local.session import find_latest_native_session
+
+    best: tuple[float, str] | None = None
+    for candidate in _BRIDGE_HARNESSES:
+        if candidate == harness:
+            continue
+        path = find_latest_native_session(candidate, cwd)
+        if path is None:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if best is None or mtime > best[0]:
+            best = (mtime, candidate)
+    return best[1] if best else None
+
+
+def _bridge_pre_run_prefix(harness: str, cwd: str) -> tuple[str, str | None, float | None]:
+    """Build the cross-agent context prefix for the consumer side.
+
+    Returns ``(prefix_text, source_agent, age_seconds)``. ``prefix_text`` is
+    empty when there's nothing to inject. ``source_agent`` is the harness
+    name we pulled from, useful for the info banner. ``age_seconds`` is the
+    wall-clock age of the source's native file (useful for surfacing in the
+    info banner so the user can spot a stale handoff). Imports the other
+    agent's latest native session first so the prefix reflects the freshest
+    state.
+    """
+    import time
+
+    from claude_codex_local.session import (
+        build_context_prefix,
+        find_latest_native_session,
+        import_native_session,
+    )
+
+    source = _pick_source_agent(harness, cwd)
+    if source is None:
+        return "", None, None
+    source_path = find_latest_native_session(source, cwd)
+    age = None
+    if source_path is not None:
+        try:
+            age = time.time() - source_path.stat().st_mtime
+        except OSError:
+            age = None
+    # Refresh the source agent's CCL JSONL from its native store before
+    # rendering, so the prefix carries the latest turn even if `ccl session
+    # sync` hasn't been run since the producer harness exited.
+    import_native_session(source, source, cwd)
+    prefix = build_context_prefix(source)
+    return prefix, source, age
+
+
+def _format_age(seconds: float) -> str:
+    """Render a wall-clock age as a short, scannable string for the banner."""
+    if seconds < 90:
+        return f"{int(seconds)}s ago"
+    if seconds < 5400:  # < 90 min
+        return f"{int(seconds / 60)}m ago"
+    if seconds < 36 * 3600:  # < 36h
+        return f"{int(seconds / 3600)}h ago"
+    return f"{int(seconds / 86400)}d ago"
+
+
+def _bridge_post_run_capture(harness: str, cwd: str) -> None:
+    """Import the just-run harness's native session into ``<harness>.jsonl``.
+
+    Best-effort: errors are surfaced as a single info line and never
+    propagate, because failing the user's session over a capture issue
+    would be hostile. The dedup key inside ``import_native_session`` makes
+    repeated runs idempotent.
+    """
+    from claude_codex_local.session import import_native_session
+
+    try:
+        result = import_native_session(harness, harness, cwd)
+    except Exception as exc:  # noqa: BLE001 - capture must never break the run
+        info(f"session bridge: capture failed ({exc})")
+        return
+    imported = int(result.get("imported", 0) or 0)
+    if imported > 0:
+        info(f"session bridge: captured {imported} message(s) into {harness}.jsonl")
+
+
+def run_session(prompt: str | None = None, no_context: bool = False) -> int:
+    """
+    Exposed as `ccl run [-p PROMPT] [--no-context]`. Launch the configured
+    harness with an optional initial prompt so external agents can drive CCL
+    non-interactively, with an optional cross-agent context bridge.
 
     With `-p PROMPT`, the harness runs in one-shot mode (Claude Code's `-p` /
     Codex's `exec` subcommand) and exits when the response is complete — the
     common automation case. Without `-p`, behavior is identical to invoking
     the alias (`cc` / `cx` / `cc9` / `cx9`): the helper script execs the
     wired argv and the user gets an interactive session.
+
+    The session bridge runs in two halves unless ``--no-context`` (or
+    ``CCL_SESSION_BRIDGE=0``) opts out:
+
+    * **Pre-run injection** — one-shot only. If another harness has a
+      native session for ``$PWD``, its transcript is rendered as a
+      ``[prior context …]`` prefix and prepended to ``PROMPT``. Interactive
+      sessions don't inject, because each harness already exposes its own
+      ``--resume``/``--continue`` and stdin is the user's TTY.
+    * **Post-run capture** — both paths. After the harness exits we import
+      its newest native session file for ``$PWD`` into
+      ``~/.claude-codex-local/sessions/<harness>.jsonl``. Idempotent.
 
     Returns the harness's exit code, or a non-zero CCL-level code when
     preconditions fail (no setup, missing helper script, unknown harness).
@@ -4035,7 +4151,20 @@ def run_session(prompt: str | None = None) -> int:
             fail(f"Cannot start llama-server: {ensure.get('error')}")
             return 1
 
-    if prompt is None:
+    bridge_off = _bridge_disabled(no_context)
+    cwd = os.getcwd()
+    effective_prompt = prompt
+
+    # Pre-run injection: one-shot only. Builds the prior-context prefix from
+    # the freshest *other* harness's native session for this cwd.
+    if prompt is not None and not bridge_off and harness in _BRIDGE_HARNESSES:
+        prefix, source, age = _bridge_pre_run_prefix(harness, cwd)
+        if prefix:
+            age_str = f" (last activity {_format_age(age)})" if age is not None else ""
+            info(f"session bridge: injecting context from {source}{age_str}")
+            effective_prompt = prefix + prompt
+
+    if effective_prompt is None:
         # Interactive: defer to the helper script so the user gets the same
         # behavior as `cc` / `cx`, including any pre-flight stanzas baked in
         # by step 6.5.
@@ -4050,9 +4179,12 @@ def run_session(prompt: str | None = None) -> int:
             proc = subprocess.run([str(helper)])
         except KeyboardInterrupt:
             return 130
-        return proc.returncode
+        rc = proc.returncode
+        if not bridge_off and harness in _BRIDGE_HARNESSES:
+            _bridge_post_run_capture(harness, cwd)
+        return rc
 
-    cmd = _build_oneshot_cmd(harness, engine, tag, state.wire_result, prompt)
+    cmd = _build_oneshot_cmd(harness, engine, tag, state.wire_result, effective_prompt)
     if cmd is None:
         fail(f"Unknown harness for `ccl run`: {harness}")
         return 1
@@ -4066,7 +4198,10 @@ def run_session(prompt: str | None = None) -> int:
         return 127
     except KeyboardInterrupt:
         return 130
-    return proc.returncode
+    rc = proc.returncode
+    if not bridge_off and harness in _BRIDGE_HARNESSES:
+        _bridge_post_run_capture(harness, cwd)
+    return rc
 
 
 def run_serve() -> int:
@@ -4275,6 +4410,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--prompt",
         help="Initial prompt to submit; runs the harness in one-shot mode",
     )
+    run.add_argument(
+        "--no-context",
+        action="store_true",
+        help=(
+            "Skip the cross-agent context bridge (no prefix injection, no "
+            "capture). Same effect as CCL_SESSION_BRIDGE=0."
+        ),
+    )
 
     return parser
 
@@ -4333,7 +4476,10 @@ def main() -> int:
     if cmd == "serve":
         return run_serve()
     if cmd == "run":
-        return run_session(prompt=getattr(args, "prompt", None))
+        return run_session(
+            prompt=getattr(args, "prompt", None),
+            no_context=bool(getattr(args, "no_context", False)),
+        )
     parser.print_help()
     return 2
 
