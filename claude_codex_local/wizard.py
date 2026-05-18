@@ -4502,6 +4502,14 @@ def _extract_native_params(
     Returns ``(argv_without_native_params, native_params_or_None)``. When the
     flag is absent the second element is ``None`` so callers can preserve the
     pre-existing "flag was never passed" launch path.
+
+    Limitations:
+    - Only the first ``--native-params`` occurrence is treated as the
+      boundary; later occurrences are forwarded verbatim as harness args.
+    - We do not respect option-consuming flags, so the pathological case of
+      ``ccl run -p --native-params`` (i.e. the literal string
+      ``--native-params`` as a flag value) will be misinterpreted. Not a
+      real-world concern but documented for future maintainers.
     """
     if "--native-params" not in argv:
         return list(argv), None

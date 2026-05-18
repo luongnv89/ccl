@@ -59,6 +59,17 @@ def test_extract_preserves_args_with_spaces_verbatim():
     assert native == ["--system", 'You are "helpful" & terse']
 
 
+def test_extract_treats_first_occurrence_as_boundary():
+    """Only the first ``--native-params`` is the slice point; later
+    occurrences pass through as ordinary harness args. Pins the documented
+    behavior so future refactors can't silently regress it."""
+    cleaned, native = wizard._extract_native_params(
+        ["run", "--native-params", "--foo", "--native-params", "--bar"]
+    )
+    assert cleaned == ["run"]
+    assert native == ["--foo", "--native-params", "--bar"]
+
+
 # ---------------------------------------------------------------------------
 # _build_oneshot_cmd: per-harness insertion position
 # ---------------------------------------------------------------------------
