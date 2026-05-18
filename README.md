@@ -146,6 +146,8 @@ ccl find-model                                  # standalone model recommendatio
 ccl doctor                                      # wizard state + presence check
 ccl run                                         # launch the configured session interactively
 ccl run -p "what is 2+2?"                       # one-shot: drive CCL from another agent
+ccl run --native-params -- --dangerously-skip-permissions
+                                                # forward harness-native flags verbatim
 ccl --version                                   # print version and exit
 ```
 
@@ -153,6 +155,26 @@ ccl --version                                   # print version and exit
 Code's `-p`, Codex's `exec`, Pi's `--print`) so external agents and CI scripts
 can drive a local model end-to-end without keystrokes. Without `-p`, behavior
 matches the `cc` / `cx` / `cp` alias and the session starts interactively.
+
+### Forwarding harness-native flags (`--native-params`)
+
+`ccl run --native-params -- <ARGS…>` forwards everything after `--native-params`
+verbatim to the launched harness. It is a generic escape hatch for harness
+options that ccl does not wrap explicitly (e.g. Claude Code's
+`--dangerously-skip-permissions`). Must be the last flag on the line; use `--`
+to make the boundary between ccl flags and native ones explicit. ccl does not
+validate native params — the harness does.
+
+```bash
+# Claude Code: skip permission prompts (interactive)
+ccl run --native-params -- --dangerously-skip-permissions
+
+# Codex: set extra exec-time flag (one-shot)
+ccl run -p "summarize this repo" --native-params -- --some-codex-flag
+
+# Pi: forward any pi-native option
+ccl run --native-params -- --some-pi-option value
+```
 
 Advanced / debug (no user binary — run as a Python module):
 
