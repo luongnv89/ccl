@@ -6,6 +6,9 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/luongnv89/claude-codex-local/actions/workflows/ci.yml/badge.svg)](https://github.com/luongnv89/claude-codex-local/actions/workflows/ci.yml)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![PyPI version](https://img.shields.io/pypi/v/claude-codex-local.svg)](https://pypi.org/project/claude-codex-local/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/claude-codex-local.svg)](https://pypi.org/project/claude-codex-local/)
+[![PyPI total downloads](https://static.pepy.tech/badge/claude-codex-local)](https://pepy.tech/project/claude-codex-local)
 
 </div>
 
@@ -157,7 +160,7 @@ python -m claude_codex_local.core adapters     # list all engine adapters
 
 ---
 
-## Sharing Context Between Agents
+## Sharing Context Between Agents ![experiment](https://img.shields.io/badge/status-experiment-orange)
 
 `ccl run` automatically bridges conversation context across local harnesses
 so you can hand off mid-task between Claude Code, Codex, and Pi without
