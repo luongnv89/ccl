@@ -3949,6 +3949,7 @@ def _build_oneshot_cmd(
     tag: str,
     wire_result: dict[str, Any],
     prompt: str,
+    native_params: list[str] | None = None,
 ) -> list[str] | None:
     """
     Build the harness/engine-specific argv for a one-shot session driven by
@@ -3958,7 +3959,12 @@ def _build_oneshot_cmd(
     automation drivers get the same dispatch path the wizard already exercises.
     The Codex+Ollama branch sidesteps the documented top-level-flag limitation
     by placing `--oss --local-provider=ollama` AFTER the `exec` subcommand.
+
+    `native_params`, when provided, is inserted verbatim immediately before
+    the prompt-bearing tail so the harness (not ccl, not the prompt) consumes
+    the flags. See `ccl run --native-params` for the user-facing surface.
     """
+    extra = list(native_params or [])
     if harness == "claude":
         if engine == "ollama":
             return [
@@ -3968,12 +3974,13 @@ def _build_oneshot_cmd(
                 "--model",
                 tag,
                 "--",
+                *extra,
                 "-p",
                 prompt,
                 "--model",
                 tag,
             ]
-        return list(wire_result.get("argv", [])) + ["-p", prompt]
+        return list(wire_result.get("argv", [])) + extra + ["-p", prompt]
     if harness == "codex":
         if engine == "ollama":
             return [
@@ -3987,11 +3994,20 @@ def _build_oneshot_cmd(
                 "--skip-git-repo-check",
                 "--oss",
                 "--local-provider=ollama",
+                *extra,
                 prompt,
             ]
-        return ["codex", "exec", "--skip-git-repo-check", "-m", tag, prompt]
+        return [
+            "codex",
+            "exec",
+            "--skip-git-repo-check",
+            "-m",
+            tag,
+            *extra,
+            prompt,
+        ]
     if harness == "pi":
-        return list(wire_result.get("argv", [])) + ["-p", prompt]
+        return list(wire_result.get("argv", [])) + extra + ["-p", prompt]
     return None
 
 
@@ -4136,11 +4152,21 @@ def _bridge_post_run_capture(harness: str, cwd: str) -> None:
         info(f"session bridge: captured {imported} message(s) into {harness}.jsonl")
 
 
-def run_session(prompt: str | None = None, no_context: bool = False) -> int:
+def run_session(
+    prompt: str | None = None,
+    no_context: bool = False,
+    native_params: list[str] | None = None,
+) -> int:
     """
-    Exposed as `ccl run [-p PROMPT] [--no-context]`. Launch the configured
-    harness with an optional initial prompt so external agents can drive CCL
-    non-interactively, with an optional cross-agent context bridge.
+    Exposed as `ccl run [-p PROMPT] [--no-context] [--native-params ...]`.
+    Launch the configured harness with an optional initial prompt so external
+    agents can drive CCL non-interactively, with an optional cross-agent
+    context bridge.
+
+    `native_params`, when provided, is forwarded verbatim to the launched
+    harness — Claude Code, Codex, or Pi — so users can opt into harness-native
+    flags (e.g. Claude Code's `--dangerously-skip-permissions`) without ccl
+    needing a first-class wrapper for every option.
 
     With `-p PROMPT`, the harness runs in one-shot mode (Claude Code's `-p` /
     Codex's `exec` subcommand) and exits when the response is complete — the
@@ -4212,8 +4238,9 @@ def run_session(prompt: str | None = None, no_context: bool = False) -> int:
         if not helper.exists():
             fail(f"Helper script missing at {helper}. Re-run `ccl setup`.")
             return 1
+        helper_cmd = [str(helper), *(native_params or [])]
         try:
-            proc = subprocess.run([str(helper)])
+            proc = subprocess.run(helper_cmd)
         except KeyboardInterrupt:
             return 130
         rc = proc.returncode
@@ -4221,7 +4248,21 @@ def run_session(prompt: str | None = None, no_context: bool = False) -> int:
             _bridge_post_run_capture(harness, cwd)
         return rc
 
-    cmd = _build_oneshot_cmd(harness, engine, tag, state.wire_result, effective_prompt)
+    # Only pass `native_params` when the flag was actually used. Calling
+    # without the kwarg keeps the function-call shape identical to pre-#97
+    # behavior and avoids breaking external/test code that monkeypatches
+    # _build_oneshot_cmd with a positional-only signature.
+    if native_params is not None:
+        cmd = _build_oneshot_cmd(
+            harness,
+            engine,
+            tag,
+            state.wire_result,
+            effective_prompt,
+            native_params=native_params,
+        )
+    else:
+        cmd = _build_oneshot_cmd(harness, engine, tag, state.wire_result, effective_prompt)
     if cmd is None:
         fail(f"Unknown harness for `ccl run`: {harness}")
         return 1
@@ -4325,6 +4366,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  ccl find-model                   Show a recommended coding model\n"
             "  ccl run                          Launch the configured session interactively\n"
             '  ccl run -p "what is 2+2?"        Launch one-shot for agent automation\n'
+            "  ccl run --native-params -- --dangerously-skip-permissions\n"
+            "                                   Forward harness-native flags verbatim\n"
         ),
     )
     parser.add_argument("--version", action="version", version=f"ccl {__version__}")
@@ -4455,13 +4498,73 @@ def _build_parser() -> argparse.ArgumentParser:
             "capture). Same effect as CCL_SESSION_BRIDGE=0."
         ),
     )
+    # `--native-params` is intentionally NOT declared with argparse: argparse's
+    # REMAINDER has a long-standing interaction bug with subparsers plus the
+    # `--` token, and a positional collector would shadow ccl's own flags. The
+    # flag is sliced out of sys.argv by `_extract_native_params` before
+    # argparse runs. We add a no-op argument here purely so it appears in
+    # `ccl run --help` per the issue's acceptance criteria.
+    run.add_argument(
+        "--native-params",
+        nargs="*",
+        default=None,
+        metavar="ARG",
+        help=(
+            "Forward all following arguments verbatim to the launched harness "
+            "(Claude Code, Codex, or Pi). Must be the last flag on the line; "
+            "use `--` to separate ccl flags from native ones, e.g. "
+            "`ccl run --native-params -- --dangerously-skip-permissions`. "
+            "ccl does not validate native params — the harness does. "
+            "(Parsed before argparse; the argparse declaration exists only "
+            "for `--help` documentation.)"
+        ),
+    )
 
     return parser
 
 
+def _extract_native_params(
+    argv: list[str],
+) -> tuple[list[str], list[str] | None]:
+    """
+    Slice ``--native-params ARG…`` (and any leading ``--`` separator) out of
+    a raw argv list, returning the argv that argparse should see and the
+    captured passthrough list.
+
+    Pre-processing sidesteps two argparse pitfalls: ``argparse.REMAINDER``
+    misbehaves under subparsers, and a regular positional collector would
+    swallow ``ccl run``'s own flags. Doing the split ourselves keeps the
+    passthrough verbatim — exactly the property AC #2 asks for.
+
+    Returns ``(argv_without_native_params, native_params_or_None)``. When the
+    flag is absent the second element is ``None`` so callers can preserve the
+    pre-existing "flag was never passed" launch path.
+
+    Limitations:
+    - Only the first ``--native-params`` occurrence is treated as the
+      boundary; later occurrences are forwarded verbatim as harness args.
+    - We do not respect option-consuming flags, so the pathological case of
+      ``ccl run -p --native-params`` (i.e. the literal string
+      ``--native-params`` as a flag value) will be misinterpreted. Not a
+      real-world concern but documented for future maintainers.
+    """
+    if "--native-params" not in argv:
+        return list(argv), None
+    idx = argv.index("--native-params")
+    tail = list(argv[idx + 1 :])
+    if tail and tail[0] == "--":
+        tail = tail[1:]
+    return list(argv[:idx]), tail
+
+
 def main() -> int:
     parser = _build_parser()
-    args = parser.parse_args()
+    # Strip `--native-params …` out of argv before argparse sees it; argparse's
+    # subparser + REMAINDER + `--` interactions are unreliable, and we need
+    # the tail forwarded verbatim per issue #97 AC #2/#4.
+    raw_argv = sys.argv[1:]
+    cleaned_argv, native_params = _extract_native_params(raw_argv)
+    args = parser.parse_args(cleaned_argv)
 
     # Honor --no-color and NO_COLOR env var for the Rich console.
     if getattr(args, "no_color", False) or os.environ.get("NO_COLOR"):
@@ -4516,6 +4619,7 @@ def main() -> int:
         return run_session(
             prompt=getattr(args, "prompt", None),
             no_context=bool(getattr(args, "no_context", False)),
+            native_params=native_params,
         )
     parser.print_help()
     return 2
