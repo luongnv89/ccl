@@ -4442,3 +4442,332 @@ class TestClaudeOllamaThenClaudeoCoexist:
         assert body2.count("# >>> claude-codex-local:claudeo >>>") == 1
         assert str(cco_script) in body2  # untouched
         assert f"alias cc={cc_script}\n" not in body2  # original cc replaced
+
+
+class TestRunStatus:
+    """
+    `ccl status` must give the user an internally consistent picture of which
+    shortcuts are wired and which would actually work today. The regressions
+    pinned here all shipped in the original run_status and caused the table
+    to disagree with the summary (e.g. cc=available while engine=off, cx
+    inheriting cc's engine, openrouter=available with no helper script).
+    """
+
+    def _make_profile(self, installed_engines: list[str]) -> dict[str, Any]:
+        return {
+            "presence": {"harnesses": ["claude", "codex", "pi"], "engines": installed_engines},
+            "ollama": {"models": []},
+            "lmstudio": {"models": []},
+        }
+
+    def _write_helper(self, state_dir, name: str, body: str) -> None:
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        script = bin_dir / name
+        script.write_text("#!/usr/bin/env bash\n" + body + "\n")
+        script.chmod(0o755)
+
+    def _run_status(self, wiz, pb, monkeypatch, installed_engines: list[str]) -> tuple[int, str]:
+        monkeypatch.setattr(pb, "machine_profile", lambda **_: self._make_profile(installed_engines))
+        # Avoid real network probes inside _get_engine_health.
+        monkeypatch.setattr(wiz, "_get_engine_health", lambda engine, profile: {"ok": False})
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_status()
+        return rc, cap.get()
+
+    def test_returns_1_and_warns_when_no_state_file(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_status()
+        out = cap.get()
+        assert rc == 1
+        assert "No wizard state found" in out
+        assert "ccl setup" in out
+
+    def test_empty_state_no_scripts_marks_all_rows_unconfigured(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=[])
+
+        assert rc == 0
+        assert out.count("unconfigured") == 9
+        assert "available" not in out
+        assert "Default harness" not in out
+        assert "Default engine" not in out
+        assert "Selected model" not in out
+
+    def test_local_script_with_engine_installed_is_available(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+        self._write_helper(
+            state_dir,
+            "cp",
+            'exec pi --provider ccl-ollama --model qwen3-coder-next:latest "$@"',
+        )
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=["ollama"])
+
+        assert rc == 0
+        cp_line = next(line for line in out.splitlines() if "cp, pi-local" in line)
+        assert "qwen3-coder-next" in cp_line
+        assert "ollama" in cp_line
+        assert "available" in cp_line
+        assert "unavailable" not in cp_line
+
+    def test_local_script_without_engine_installed_is_unavailable_not_available(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        Regression for the "cc=available + engine=off" contradiction. A
+        llamacpp helper with no llama-server binary cannot start; the row
+        must say "unavailable", not "available".
+        """
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+        self._write_helper(
+            state_dir,
+            "cc",
+            "export ANTHROPIC_BASE_URL=http://localhost:8001\n"
+            'exec claude --model Qwen3.6-27B-Q4_K_M.gguf "$@"',
+        )
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=[])
+
+        assert rc == 0
+        lines = out.splitlines()
+        cc_idx = next(i for i, line in enumerate(lines) if "│ cc," in line)
+        cc_block = "\n".join(lines[cc_idx : cc_idx + 2])
+        assert "Qwen3.6" in cc_block
+        assert "llamacpp" in cc_block
+        assert "off" in cc_block
+        assert "unavailable" in cc_block
+
+    def test_missing_helper_does_not_inherit_other_harness_engine(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        Regression: previously when `cc` existed (engine=llamacpp) but `cx`
+        didn't, the cx row showed engine="llamacpp" inherited from cc's
+        script. Each harness must inspect its own script independently.
+        """
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+        self._write_helper(
+            state_dir,
+            "cc",
+            "export ANTHROPIC_BASE_URL=http://localhost:8001\n"
+            'exec claude --model Qwen3.6-27B-Q4_K_M.gguf "$@"',
+        )
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=[])
+
+        assert rc == 0
+        lines = out.splitlines()
+        cx_idx = next(i for i, line in enumerate(lines) if "│ cx," in line)
+        cx_block = "\n".join(lines[cx_idx : cx_idx + 2])
+        assert "(unset)" in cx_block
+        assert "(not set)" in cx_block
+        assert "unconfigured" in cx_block
+        assert "llamacpp" not in cx_block
+
+    def test_router_api_key_without_helper_script_is_unconfigured(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        Regression: openrouter API key alone made cco/cxo/cpo say "available",
+        even when no helper script existed and the alias wouldn't resolve.
+        """
+        pb, wiz, _ = isolated_state
+        wiz.WizardState().save()
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=["openrouter"])
+
+        for short in ("cco", "cxo", "cpo"):
+            line = next(line for line in out.splitlines() if f"│ {short} " in line)
+            assert "unconfigured" in line, f"{short!r}: {line!r}"
+            assert "available" not in line, f"{short!r}: {line!r}"
+
+    def test_router_helper_script_plus_api_key_is_available(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+        self._write_helper(state_dir, "cco", 'exec claude "$@"')
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=["openrouter"])
+
+        cco_line = next(line for line in out.splitlines() if "│ cco " in line)
+        assert "openrouter" in cco_line
+        assert "available" in cco_line
+        assert "unavailable" not in cco_line
+
+    def test_summary_shows_only_wizard_state_not_inferred(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        Regression: when wizard state was empty but a `cc` script existed,
+        the summary fabricated "Default harness=claude" / "Default
+        engine=llamacpp", contradicting "Engines detected" (which omitted
+        llamacpp). The summary must reflect wizard-state choices only.
+        """
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+        self._write_helper(
+            state_dir,
+            "cc",
+            "export ANTHROPIC_BASE_URL=http://localhost:8001\n"
+            'exec claude --model Qwen3.6-27B-Q4_K_M.gguf "$@"',
+        )
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=[])
+
+        assert "Default harness" not in out
+        assert "Default engine" not in out
+        assert "Selected model" not in out
+        # But the cc row should still show what cc would run.
+        assert "llamacpp" in out
+        assert "Qwen3.6" in out
+
+    def test_summary_uses_wizard_state_when_set(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        wiz.WizardState(
+            primary_harness="claude",
+            primary_engine="ollama",
+            model_name="qwen3-coder-next:latest",
+            engine_model_tag="qwen3-coder-next:latest",
+        ).save()
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=["ollama"])
+
+        assert rc == 0
+        assert "Default harness" in out
+        assert "Default engine" in out
+        assert "Selected model" in out
+        assert "qwen3-coder-next" in out
+
+    def test_codex_harness_not_corrupted_by_letter_o(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        Regression for the buggy fence_tag.replace("o","") that turned
+        "codex" into "cdex". With the lookup table, a cx local helper must
+        keep harness="codex" and produce the codex-local long alias.
+        """
+        pb, wiz, state_dir = isolated_state
+        wiz.WizardState().save()
+        self._write_helper(
+            state_dir,
+            "cx",
+            'exec codex --provider ccl-ollama --model qwen3-coder-next:latest "$@"',
+        )
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=["ollama"])
+
+        assert rc == 0
+        assert "codex-local" in out
+        assert "cdex" not in out
+        lines = out.splitlines()
+        cx_idx = next(i for i, line in enumerate(lines) if "│ cx," in line)
+        cx_block = "\n".join(lines[cx_idx : cx_idx + 2])
+        assert "qwen3-coder-next" in cx_block
+        assert "ollama" in cx_block
+        assert "available" in cx_block
+
+
+class TestInferEngineFromScript:
+    """Direct coverage for _infer_engine_from_script's regex shapes."""
+
+    def test_llamacpp_helper_with_model_flag(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cc"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            "export ANTHROPIC_BASE_URL=http://localhost:8001\n"
+            'exec claude --model Qwen3.6-27B-Q4_K_M.gguf "$@"\n'
+        )
+        engine, model = wiz._infer_engine_from_script(str(script))
+        assert engine == "llamacpp"
+        assert model == "Qwen3.6-27B-Q4_K_M.gguf"
+
+    def test_llamacpp_helper_with_custom_model_option(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cc"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            "export ANTHROPIC_BASE_URL=http://localhost:8001\n"
+            "export ANTHROPIC_CUSTOM_MODEL_OPTION='Qwen3.6-27B-Q4_K_M.gguf'\n"
+            "exec claude\n"
+        )
+        engine, model = wiz._infer_engine_from_script(str(script))
+        assert engine == "llamacpp"
+        assert model == "Qwen3.6-27B-Q4_K_M.gguf"
+
+    def test_ollama_helper_via_pi_provider(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        script = tmp_path / "cp"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            'exec pi --provider ccl-ollama --model qwen3-coder-next:latest "$@"\n'
+        )
+        engine, model = wiz._infer_engine_from_script(str(script))
+        assert engine == "ollama"
+        assert model == "qwen3-coder-next:latest"
+
+    def test_unknown_shape_returns_none_none(self, isolated_state, tmp_path):
+        _, wiz, _ = isolated_state
+        script = tmp_path / "weird"
+        script.write_text("#!/usr/bin/env bash\nexec some-other-tool\n")
+        engine, model = wiz._infer_engine_from_script(str(script))
+        assert engine is None
+        assert model is None
+
+
+class TestDetectExistingShortcuts:
+    """Sanity check that the basename → fence-tag → harness mapping is correct."""
+
+    def test_empty_when_bin_dir_missing(self, isolated_state):
+        _, wiz, _ = isolated_state
+        assert wiz._detect_existing_shortcuts() == {}
+
+    def test_codex_basenames_resolve_to_codex_harness(self, isolated_state):
+        """Pins the explicit lookup tables against the old string-replace bug."""
+        _, wiz, state_dir = isolated_state
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        for name in ("cx", "cx9", "cxo"):
+            p = bin_dir / name
+            p.write_text("#!/usr/bin/env bash\n")
+            p.chmod(0o755)
+
+        result = wiz._detect_existing_shortcuts()
+        assert {b: result[b]["harness"] for b in ("cx", "cx9", "cxo")} == {
+            "cx": "codex",
+            "cx9": "codex",
+            "cxo": "codex",
+        }
+        assert result["cx"]["engine_kind"] == "local"
+        assert result["cx9"]["engine_kind"] == "9router"
+        assert result["cxo"]["engine_kind"] == "openrouter"
+
+    def test_non_executable_files_ignored(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "cc").write_text("#!/usr/bin/env bash\n")
+        assert wiz._detect_existing_shortcuts() == {}
+
+    def test_unknown_basenames_ignored(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        p = bin_dir / "some-other-script"
+        p.write_text("#!/usr/bin/env bash\n")
+        p.chmod(0o755)
+        assert wiz._detect_existing_shortcuts() == {}
