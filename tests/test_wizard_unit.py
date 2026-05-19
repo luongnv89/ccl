@@ -3600,9 +3600,11 @@ class TestStep1LazyLlmfit:
         monkeypatch.setattr(
             pb,
             "command_version",
-            lambda name: {"present": True, "version": "llmfit 1.2.3"}
-            if name == "llmfit"
-            else {"present": False, "version": ""},
+            lambda name: (
+                {"present": True, "version": "llmfit 1.2.3"}
+                if name == "llmfit"
+                else {"present": False, "version": ""}
+            ),
         )
         # Keep persistence a no-op so the test doesn't depend on cache write internals.
         monkeypatch.setattr(wiz, "_persist_targeted_profile_update", lambda profile: None)
@@ -3664,9 +3666,11 @@ class TestStep1LazyLlmfit:
         monkeypatch.setattr(
             pb,
             "command_version",
-            lambda name: {"present": True, "version": "llmfit 1.2.3"}
-            if name == "llmfit"
-            else {"present": False, "version": ""},
+            lambda name: (
+                {"present": True, "version": "llmfit 1.2.3"}
+                if name == "llmfit"
+                else {"present": False, "version": ""}
+            ),
         )
         monkeypatch.setattr(wiz, "_persist_targeted_profile_update", lambda profile: None)
 
