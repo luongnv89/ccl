@@ -67,11 +67,11 @@
         <div class="tb-page-stats reveal">
           <div class="stat">
             <div class="stat-label">Latest</div>
-            <div class="stat-value"><span class="dot"></span>v0.12.0</div>
+            <div class="stat-value"><span class="dot"></span>v0.13.0</div>
           </div>
           <div class="stat">
             <div class="stat-label">Released</div>
-            <div class="stat-value">2026-05-16</div>
+            <div class="stat-value">2026-05-19</div>
           </div>
           <div class="stat">
             <div class="stat-label">Releases shown</div>
@@ -92,12 +92,48 @@
 
         <div class="tb-changelog">
 
+          <!-- v0.13.0 -->
+          <div class="tb-clog-entry reveal">
+            <div class="tb-clog-side">
+              <div class="ver">v0.13.0</div>
+              <div class="date">2026-05-19</div>
+              <div class="latest">Latest</div>
+            </div>
+            <div class="tb-clog-body">
+              <div class="tb-clog-group added">
+                <div class="tb-clog-group-head">Added</div>
+                <ul class="tb-clog-list">
+                  <li><strong>Cross-harness session bridge:</strong> <code>ccl run</code> auto-captures and auto-injects conversation context across Claude Code, Codex, and Pi (#62, #93)</li>
+                  <li>Post-run capture from native session files into <code>~/.claude-codex-local/sessions/&lt;harness&gt;.jsonl</code></li>
+                  <li>Pre-run injection (one-shot <code>-p</code> only): freshest <em>other</em> harness's transcript prepended as a <code>[prior context, agent=…]</code> block</li>
+                  <li>Cwd-scoped, 7-day staleness cap, macOS symlink-aware path resolution</li>
+                  <li>Opt out per-call with <code>ccl run --no-context</code> or globally via <code>CCL_SESSION_BRIDGE=0</code></li>
+                  <li><code>ccl session</code> command group (<code>list</code> / <code>show</code> / <code>sync</code> / <code>truncate</code> / <code>clear</code>)</li>
+                  <li>Best-effort token redaction (OpenAI, AWS, GitHub, Slack, GitLab, Google API) on every import</li>
+                  <li><strong><code>ccl run --native-params</code> flag</strong> (#97, #99): forward everything after <code>--native-params --</code> verbatim to the launched harness — escape hatch for options ccl does not wrap first-class (e.g. <code>--dangerously-skip-permissions</code>)</li>
+                  <li><strong>Wizard <code>llmfit</code> fallback</strong> (#95, #100): when step 1 hardware scan is deferred, opportunistically run <code>llmfit</code> and persist the result to the machine-profile cache</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group changed">
+                <div class="tb-clog-group-head">Documentation</div>
+                <ul class="tb-clog-list">
+                  <li>README: rewrite <em>Sharing Context Between Agents</em> for the auto-bridge, scope guards, and interactive-capture / one-shot-inject asymmetry</li>
+                  <li>README: theme-aware logo for dark/light mode rendering on GitHub</li>
+                  <li>README: add PyPI download badges and experiment tag</li>
+                  <li>docs.html: refresh <code>ccl run</code> and <code>ccl session</code> cards for the auto-bridge</li>
+                </ul>
+              </div>
+              <a href="https://github.com/luongnv89/ccl/compare/v0.12.0...v0.13.0" target="_blank" rel="noopener" class="tb-clog-link">
+                Full compare diff →
+              </a>
+            </div>
+          </div>
+
           <!-- v0.12.0 -->
           <div class="tb-clog-entry reveal">
             <div class="tb-clog-side">
               <div class="ver">v0.12.0</div>
               <div class="date">2026-05-16</div>
-              <div class="latest">Latest</div>
             </div>
             <div class="tb-clog-body">
               <div class="tb-clog-group added">
@@ -356,7 +392,7 @@
             <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
-          <strong>claude-codex-local</strong> · v0.12.0
+          <strong>claude-codex-local</strong> · v0.13.0
         </div>
         <ul class="footer-links">
           <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>

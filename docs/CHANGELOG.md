@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.13.0 — 2026-05-19
+
 ### Features
 
 - **Cross-harness session bridge**: `ccl run` now auto-captures and auto-injects conversation context across Claude Code, Codex, and Pi (#62, #93)
@@ -21,11 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Idempotent: a content-hash dedup key skips already-imported messages, so re-runs are safe
   - Same-harness one-shot continuity (`cc -p` then `cc -p`) is *not* covered — use the harness's own `--resume` / `--continue` for that
   - State directory overridable via `CLAUDE_CODEX_LOCAL_STATE_DIR`; native-home base overridable via `CCL_NATIVE_HOME_OVERRIDE`
+- **`ccl run --native-params` passthrough flag** (#97, #99): forward everything after `--native-params --` verbatim to the launched harness, as a generic escape hatch for options ccl does not wrap first-class (e.g. Claude Code's `--dangerously-skip-permissions`). Argv is sliced before argparse runs; first-occurrence boundary only, does not interpret option-consuming flags.
+- **Wizard `llmfit` fallback on deferred scan** (#95, #100): when step 1 auto-detection defers the hardware scan (the `LLMFIT_SKIPPED` sentinel), opportunistically invoke `llmfit` and render its result in place of `(scan deferred)`. Result is persisted to the machine-profile cache so the next wizard run benefits from it; falls back silently to the deferred-scan message if `llmfit` is missing or errors.
 
 ### Documentation
 
 - README: rewrite `## Sharing Context Between Agents` to describe the auto-bridge, scope guards, and the interactive-capture / one-shot-inject asymmetry
+- README: use theme-aware logo for dark/light mode rendering on GitHub
+- README: add PyPI download badges and experiment tag
 - docs.html: update `ccl run` card with `--no-context` and the auto-bridge note; refresh the `ccl session` card to describe inspection rather than manual seeding
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.12.0...v0.13.0
 
 ## v0.12.0 — 2026-05-16
 
