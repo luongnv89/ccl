@@ -1965,8 +1965,8 @@ def _write_minimal_gguf(
 
     with open(path, "wb") as fh:
         fh.write(b"GGUF")
-        fh.write(_struct.pack("<I", 3))            # version
-        fh.write(_struct.pack("<Q", 0))            # tensor_count
+        fh.write(_struct.pack("<I", 3))  # version
+        fh.write(_struct.pack("<Q", 0))  # tensor_count
         fh.write(_struct.pack("<Q", len(kv_pairs)))  # kv_count
         for key, vtype, val in kv_pairs:
             key_b = key.encode("utf-8")
@@ -2008,7 +2008,9 @@ class TestProbeGgufIsMtp:
     def test_detects_mtp_via_metadata_key(self, tmp_path):
         p = tmp_path / "mtp-key.gguf"
         _write_minimal_gguf(
-            p, arch="qwen3moe", name="quiet",
+            p,
+            arch="qwen3moe",
+            name="quiet",
             extra_keys=[("qwen3moe.mtp.layers", "8")],
         )
         out = pb.probe_gguf_is_mtp(p)
@@ -2026,12 +2028,13 @@ class TestProbeGgufIsMtp:
         # GGUFv1 used uint32 counts; parsing it as v3 would silently
         # misalign the KV walk and read tensor data as kv pairs.
         import struct as _struct
+
         p = tmp_path / "v1.gguf"
         with open(p, "wb") as fh:
             fh.write(b"GGUF")
-            fh.write(_struct.pack("<I", 1))   # version 1
-            fh.write(_struct.pack("<Q", 0))   # tensor_count
-            fh.write(_struct.pack("<Q", 0))   # kv_count
+            fh.write(_struct.pack("<I", 1))  # version 1
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 0))  # kv_count
         out = pb.probe_gguf_is_mtp(p)
         assert out["is_mtp"] is False
         assert "unsupported-gguf-version" in out["reason"]
@@ -2040,20 +2043,21 @@ class TestProbeGgufIsMtp:
         # A malicious header claiming element_type=ARRAY would normally drive
         # unbounded recursion; the probe must refuse it.
         import struct as _struct
+
         T_ARRAY = 9
         T_UINT8 = 0
         p = tmp_path / "nested.gguf"
         with open(p, "wb") as fh:
             fh.write(b"GGUF")
             fh.write(_struct.pack("<I", 3))
-            fh.write(_struct.pack("<Q", 0))   # tensor_count
-            fh.write(_struct.pack("<Q", 1))   # kv_count = 1
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 1))  # kv_count = 1
             key = b"bad.key"
             fh.write(_struct.pack("<Q", len(key)))
             fh.write(key)
-            fh.write(_struct.pack("<I", T_ARRAY))            # outer is array
-            fh.write(_struct.pack("<IQ", T_ARRAY, 1))        # of arrays, len 1
-            fh.write(_struct.pack("<IQ", T_UINT8, 0))        # inner array
+            fh.write(_struct.pack("<I", T_ARRAY))  # outer is array
+            fh.write(_struct.pack("<IQ", T_ARRAY, 1))  # of arrays, len 1
+            fh.write(_struct.pack("<IQ", T_UINT8, 0))  # inner array
         out = pb.probe_gguf_is_mtp(p)
         assert out["is_mtp"] is False
         assert "nested-array" in out["reason"] or out["reason"].startswith("probe-failed")

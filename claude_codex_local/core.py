@@ -2161,11 +2161,17 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
     T_STRING = 8
     T_ARRAY = 9
     SCALAR_SIZE = {
-        0: 1, 1: 1,            # UINT8, INT8
-        2: 2, 3: 2,            # UINT16, INT16
-        4: 4, 5: 4, 6: 4,      # UINT32, INT32, FLOAT32
-        7: 1,                  # BOOL
-        10: 8, 11: 8, 12: 8,   # UINT64, INT64, FLOAT64
+        0: 1,
+        1: 1,  # UINT8, INT8
+        2: 2,
+        3: 2,  # UINT16, INT16
+        4: 4,
+        5: 4,
+        6: 4,  # UINT32, INT32, FLOAT32
+        7: 1,  # BOOL
+        10: 8,
+        11: 8,
+        12: 8,  # UINT64, INT64, FLOAT64
     }
     MAX_KEY_LEN = 512
     MAX_STR_LEN = 4096
@@ -2300,8 +2306,12 @@ def detect_llamacpp_mtp(
     if env_raw is not None:
         token = env_raw.strip().lower()
         if token in {"0", "false", "off", "no"}:
-            return {"enabled": False, "spec_draft_n_max": spec_n,
-                    "source": "env-override", "warning": None}
+            return {
+                "enabled": False,
+                "spec_draft_n_max": spec_n,
+                "source": "env-override",
+                "warning": None,
+            }
         if token in {"1", "true", "on", "yes"}:
             decided_enabled = True
             decided_source = "env-override"
@@ -2318,29 +2328,33 @@ def detect_llamacpp_mtp(
                 decided_source = "filename"
 
     if not decided_enabled:
-        return {"enabled": False, "spec_draft_n_max": spec_n,
-                "source": "disabled", "warning": None}
+        return {"enabled": False, "spec_draft_n_max": spec_n, "source": "disabled", "warning": None}
 
     if extra_argv:
         argv = list(extra_argv)
         for i, tok in enumerate(argv):
             if tok == "--mmproj":
-                return {"enabled": False, "spec_draft_n_max": spec_n,
-                        "source": "conflict",
-                        "warning": "MTP disabled: --mmproj is not yet supported with --spec-type draft-mtp"}
+                return {
+                    "enabled": False,
+                    "spec_draft_n_max": spec_n,
+                    "source": "conflict",
+                    "warning": "MTP disabled: --mmproj is not yet supported with --spec-type draft-mtp",
+                }
             if tok in ("-np", "--parallel") and i + 1 < len(argv):
                 try:
                     n_par = int(argv[i + 1])
                 except ValueError:
                     continue
                 if n_par > 1:
-                    return {"enabled": False, "spec_draft_n_max": spec_n,
-                            "source": "conflict",
-                            "warning": f"MTP disabled: -np {n_par} (>1) is not yet supported with --spec-type draft-mtp"}
+                    return {
+                        "enabled": False,
+                        "spec_draft_n_max": spec_n,
+                        "source": "conflict",
+                        "warning": f"MTP disabled: -np {n_par} (>1) is not yet supported with --spec-type draft-mtp",
+                    }
 
     assert decided_source is not None  # set on every branch that enabled MTP
-    return {"enabled": True, "spec_draft_n_max": spec_n,
-            "source": decided_source, "warning": None}
+    return {"enabled": True, "spec_draft_n_max": spec_n, "source": decided_source, "warning": None}
 
 
 def build_llamacpp_server_args(

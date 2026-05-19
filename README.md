@@ -468,7 +468,7 @@ llama.cpp ≥ 2026-05-16 supports Multi-Token Prediction speculative decoding fo
 | `LLAMACPP_MTP_ENABLED`        | `0` forces MTP off; `1` forces it on. Unset → auto-detect from GGUF / filename.        |
 | `LLAMACPP_SPEC_DRAFT_N_MAX`   | Override `--spec-draft-n-max` (default `5`; valid 1–16; Unsloth recommends 3–6).      |
 
-MTP is auto-disabled (with a warning) when paired with llama.cpp options that don't yet support it: `--mmproj`, or `-np` / `--parallel` > 1.
+Note: llama.cpp does not yet support combining `--spec-type draft-mtp` with `--mmproj` or `-np`/`--parallel > 1`. CCL's auto-started `llama-server` does not pass those flags today, so this is a forward-looking caveat: if you run `llama-server` manually alongside those flags, set `LLAMACPP_MTP_ENABLED=0`.
 
 ### Codex CLI → Ollama
 
