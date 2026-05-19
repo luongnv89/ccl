@@ -35,6 +35,14 @@ LLAMACPP_CTX_SIZE = int(os.environ.get("LLAMACPP_CTX_SIZE", "131072"))
 # "-1" offloads everything to GPU, "33" offloads N layers).
 LLAMACPP_N_GPU_LAYERS = os.environ.get("LLAMACPP_N_GPU_LAYERS")
 LLAMACPP_THREADS = os.environ.get("LLAMACPP_THREADS")
+# MTP (Multi-Token Prediction) support for llama.cpp ≥ 2026-05-16.
+# Unset → auto-detect (GGUF metadata probe, then filename pattern).
+# "0/false/off/no" → force off; "1/true/on/yes" → force on.
+LLAMACPP_MTP_ENABLED = os.environ.get("LLAMACPP_MTP_ENABLED")
+# --spec-draft-n-max value when MTP is enabled. Unsloth recommends 3–6; 5 is
+# our middle-of-the-road default. Clamped to [1, 16].
+LLAMACPP_SPEC_DRAFT_N_MAX = os.environ.get("LLAMACPP_SPEC_DRAFT_N_MAX")
+LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX = 5
 # Per-port pid + log files live under STATE_DIR; we never assume /tmp.
 LLAMACPP_LOG_DIR = STATE_DIR / "logs"
 LLAMACPP_PID_DIR = STATE_DIR / "run"
@@ -2130,6 +2138,211 @@ def detect_llamacpp_threads(profile: dict[str, Any] | None = None) -> int:
     return min(cpu, 16)
 
 
+def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
+    """Probe a GGUF file's metadata header to detect Multi-Token Prediction.
+
+    GGUF stores model metadata as a typed key/value table immediately after a
+    short fixed header (magic + version + tensor_count + kv_count). We walk
+    the kv pairs looking for three MTP indicators:
+
+      - Any metadata key with an ``.mtp.`` segment or starting with ``mtp.``
+        (architecture-specific MTP block — strongest signal).
+      - ``general.architecture`` value containing ``mtp`` (case-insensitive).
+      - ``general.name`` value containing ``mtp`` (case-insensitive).
+
+    Returns ``{"is_mtp": bool, "reason": str}``. On any IO / parse / truncation
+    error, returns ``is_mtp=False`` with a descriptive reason so the caller can
+    decide whether to fall back to a filename heuristic.
+    """
+    import struct as _struct
+
+    GGUF_MAGIC = b"GGUF"
+    # GGUF value types (per gguf-py/gguf/constants.py).
+    T_STRING = 8
+    T_ARRAY = 9
+    SCALAR_SIZE = {
+        0: 1, 1: 1,            # UINT8, INT8
+        2: 2, 3: 2,            # UINT16, INT16
+        4: 4, 5: 4, 6: 4,      # UINT32, INT32, FLOAT32
+        7: 1,                  # BOOL
+        10: 8, 11: 8, 12: 8,   # UINT64, INT64, FLOAT64
+    }
+    MAX_KEY_LEN = 512
+    MAX_STR_LEN = 4096
+    MAX_KV_COUNT = 8192
+    MAX_ARRAY_LEN = 65536
+
+    try:
+        path = Path(model_path)
+    except (TypeError, OSError) as exc:
+        return {"is_mtp": False, "reason": f"path-error: {exc}"}
+    if not path.is_file():
+        return {"is_mtp": False, "reason": "file-not-found"}
+
+    try:
+        with path.open("rb") as fh:
+            magic = fh.read(4)
+            if magic != GGUF_MAGIC:
+                return {"is_mtp": False, "reason": "not-gguf"}
+            head = fh.read(4 + 8 + 8)  # version, tensor_count, kv_count
+            if len(head) < 20:
+                return {"is_mtp": False, "reason": "truncated-header"}
+            _version, _tensor_count, kv_count = _struct.unpack("<IQQ", head)
+            # GGUFv1 packed counts as uint32; reading them as uint64 would
+            # silently consume tensor data and misalign the entire KV walk.
+            # All in-the-wild MTP GGUFs are v3+; reject older versions
+            # explicitly rather than parse them incorrectly.
+            if _version < 2:
+                return {"is_mtp": False, "reason": f"unsupported-gguf-version:{_version}"}
+            kv_count = min(int(kv_count), MAX_KV_COUNT)
+
+            def read_string(limit: int) -> str:
+                hdr = fh.read(8)
+                if len(hdr) < 8:
+                    raise ValueError("truncated string length")
+                (slen,) = _struct.unpack("<Q", hdr)
+                if slen > limit:
+                    # Skip oversized strings without allocating.
+                    fh.seek(int(slen), os.SEEK_CUR)
+                    return ""
+                data = fh.read(int(slen))
+                if len(data) < slen:
+                    raise ValueError("truncated string body")
+                return data.decode("utf-8", errors="replace")
+
+            def skip_value(vtype: int, *, depth: int = 0) -> None:
+                # GGUF disallows nested arrays; refuse them to keep recursion
+                # bounded against malicious headers that might claim
+                # element_type=ARRAY repeatedly.
+                if depth > 1:
+                    raise ValueError("nested-array exceeds gguf spec")
+                size = SCALAR_SIZE.get(vtype)
+                if size is not None:
+                    fh.seek(size, os.SEEK_CUR)
+                    return
+                if vtype == T_STRING:
+                    hdr = fh.read(8)
+                    if len(hdr) < 8:
+                        raise ValueError("truncated string skip")
+                    (slen,) = _struct.unpack("<Q", hdr)
+                    fh.seek(int(slen), os.SEEK_CUR)
+                    return
+                if vtype == T_ARRAY:
+                    arr_hdr = fh.read(12)
+                    if len(arr_hdr) < 12:
+                        raise ValueError("truncated array header")
+                    elem_type, arr_len = _struct.unpack("<IQ", arr_hdr)
+                    if int(elem_type) == T_ARRAY:
+                        raise ValueError("nested-array forbidden by gguf spec")
+                    arr_len = min(int(arr_len), MAX_ARRAY_LEN)
+                    for _ in range(arr_len):
+                        skip_value(int(elem_type), depth=depth + 1)
+                    return
+                raise ValueError(f"unknown gguf value type: {vtype}")
+
+            for _ in range(kv_count):
+                key = read_string(MAX_KEY_LEN)
+                vtype_buf = fh.read(4)
+                if len(vtype_buf) < 4:
+                    return {"is_mtp": False, "reason": "truncated-value-type"}
+                (vtype,) = _struct.unpack("<I", vtype_buf)
+                key_lc = key.lower()
+                if ".mtp." in key_lc or key_lc.startswith("mtp."):
+                    return {"is_mtp": True, "reason": f"metadata-key:{key}"}
+                if vtype == T_STRING and key_lc in {"general.architecture", "general.name"}:
+                    val = read_string(MAX_STR_LEN)
+                    if "mtp" in val.lower():
+                        return {"is_mtp": True, "reason": f"{key}={val}"}
+                else:
+                    skip_value(int(vtype))
+            return {"is_mtp": False, "reason": "scanned-no-mtp"}
+    except (ValueError, OSError, _struct.error) as exc:
+        return {"is_mtp": False, "reason": f"probe-failed: {exc}"}
+
+
+def detect_llamacpp_mtp(
+    model_path: str | Path,
+    *,
+    extra_argv: list[str] | None = None,
+) -> dict[str, Any]:
+    """Decide whether llama-server should be launched with MTP flags.
+
+    Resolution order:
+      1. ``LLAMACPP_MTP_ENABLED=0/false/off/no`` → forced off.
+      2. ``LLAMACPP_MTP_ENABLED=1/true/on/yes`` → forced on.
+      3. GGUF metadata probe finds MTP indicators → on.
+      4. Filename matches ``*mtp*`` (case-insensitive, basename) → on.
+      5. Otherwise → off.
+
+    When MTP would be enabled, ``extra_argv`` is inspected for
+    llama.cpp-incompatible flags (``-np`` / ``--parallel`` with N>1,
+    ``--mmproj``). On conflict, MTP is forced off and a warning is set so
+    the caller can surface it.
+
+    Returns ``{"enabled": bool, "spec_draft_n_max": int, "source": str,
+    "warning": str | None}``. ``source`` is one of ``"env-override"``,
+    ``"gguf-metadata"``, ``"filename"``, ``"disabled"``, ``"conflict"``.
+    """
+    raw = LLAMACPP_SPEC_DRAFT_N_MAX
+    spec_n = LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+    if raw is not None:
+        try:
+            candidate = int(raw)
+            if 1 <= candidate <= 16:
+                spec_n = candidate
+        except (TypeError, ValueError):
+            pass
+
+    decided_source: str | None = None
+    decided_enabled: bool | None = None
+
+    env_raw = LLAMACPP_MTP_ENABLED
+    if env_raw is not None:
+        token = env_raw.strip().lower()
+        if token in {"0", "false", "off", "no"}:
+            return {"enabled": False, "spec_draft_n_max": spec_n,
+                    "source": "env-override", "warning": None}
+        if token in {"1", "true", "on", "yes"}:
+            decided_enabled = True
+            decided_source = "env-override"
+
+    if decided_enabled is None:
+        probe = probe_gguf_is_mtp(model_path)
+        if probe.get("is_mtp"):
+            decided_enabled = True
+            decided_source = "gguf-metadata"
+        else:
+            name = Path(model_path).name
+            if re.search(r"(?:^|[^a-z0-9])mtp(?:[^a-z0-9]|$)", name, re.IGNORECASE):
+                decided_enabled = True
+                decided_source = "filename"
+
+    if not decided_enabled:
+        return {"enabled": False, "spec_draft_n_max": spec_n,
+                "source": "disabled", "warning": None}
+
+    if extra_argv:
+        argv = list(extra_argv)
+        for i, tok in enumerate(argv):
+            if tok == "--mmproj":
+                return {"enabled": False, "spec_draft_n_max": spec_n,
+                        "source": "conflict",
+                        "warning": "MTP disabled: --mmproj is not yet supported with --spec-type draft-mtp"}
+            if tok in ("-np", "--parallel") and i + 1 < len(argv):
+                try:
+                    n_par = int(argv[i + 1])
+                except ValueError:
+                    continue
+                if n_par > 1:
+                    return {"enabled": False, "spec_draft_n_max": spec_n,
+                            "source": "conflict",
+                            "warning": f"MTP disabled: -np {n_par} (>1) is not yet supported with --spec-type draft-mtp"}
+
+    assert decided_source is not None  # set on every branch that enabled MTP
+    return {"enabled": True, "spec_draft_n_max": spec_n,
+            "source": decided_source, "warning": None}
+
+
 def build_llamacpp_server_args(
     *,
     binary: str,
@@ -2139,9 +2352,14 @@ def build_llamacpp_server_args(
     ctx_size: int = LLAMACPP_CTX_SIZE,
     n_gpu_layers: int = 0,
     threads: int = 4,
+    mtp: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Compose the argv list for llama-server with the wizard's defaults."""
-    return [
+    """Compose the argv list for llama-server with the wizard's defaults.
+
+    When ``mtp`` is supplied and ``mtp["enabled"]`` is true, append the MTP
+    spec-decoding flags (``--spec-type draft-mtp --spec-draft-n-max N``).
+    """
+    argv = [
         binary,
         "--model",
         model_path,
@@ -2156,6 +2374,10 @@ def build_llamacpp_server_args(
         "--threads",
         str(threads),
     ]
+    if mtp and mtp.get("enabled"):
+        spec_n = int(mtp.get("spec_draft_n_max", LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX))
+        argv += ["--spec-type", "draft-mtp", "--spec-draft-n-max", str(spec_n)]
+    return argv
 
 
 def llamacpp_wait_until_ready(
@@ -2277,8 +2499,9 @@ def llamacpp_start_server(
     default parameter set, then poll ``/health`` until it is ready.
 
     Returns ``{"ok": bool, "handle": LlamaServerHandle | None, "argv": list[str],
-    "error": str | None, "log_path": str}``. Always returns the argv that was
-    attempted (or would have been attempted) so callers can echo it on failure.
+    "error": str | None, "log_path": str, "mtp": dict | None}``. Always returns
+    the argv that was attempted (or would have been attempted) so callers can
+    echo it on failure.
     """
     detect = llamacpp_detect()
     if not detect.get("present"):
@@ -2288,6 +2511,7 @@ def llamacpp_start_server(
             "argv": [],
             "error": "llama-server binary not found on PATH",
             "log_path": "",
+            "mtp": None,
         }
     binary = shutil.which(detect["binary"]) or detect["binary"]
 
@@ -2298,10 +2522,12 @@ def llamacpp_start_server(
             "argv": [],
             "error": f"model file not found: {model_path}",
             "log_path": "",
+            "mtp": None,
         }
 
     gpu = detect_llamacpp_gpu_offload(profile)
     threads = detect_llamacpp_threads(profile)
+    mtp = detect_llamacpp_mtp(model_path)
     argv = build_llamacpp_server_args(
         binary=binary,
         model_path=model_path,
@@ -2310,6 +2536,7 @@ def llamacpp_start_server(
         ctx_size=ctx_size,
         n_gpu_layers=int(gpu["n_gpu_layers"]),
         threads=threads,
+        mtp=mtp,
     )
 
     LLAMACPP_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -2336,6 +2563,7 @@ def llamacpp_start_server(
             "argv": argv,
             "error": f"could not open log file {log_path}: {exc}",
             "log_path": str(log_path),
+            "mtp": mtp,
         }
 
     try:
@@ -2354,6 +2582,7 @@ def llamacpp_start_server(
             "argv": argv,
             "error": f"failed to spawn llama-server: {exc}",
             "log_path": str(log_path),
+            "mtp": mtp,
         }
     except OSError as exc:
         log_handle.close()
@@ -2363,6 +2592,7 @@ def llamacpp_start_server(
             "argv": argv,
             "error": f"failed to spawn llama-server: {exc}",
             "log_path": str(log_path),
+            "mtp": mtp,
         }
     finally:
         # The child inherits the file descriptor; we don't need our copy.
@@ -2403,6 +2633,7 @@ def llamacpp_start_server(
             "error": err,
             "hint": diagnose_llama_server_log(log_path),
             "log_path": str(log_path),
+            "mtp": mtp,
         }
 
     # Confirm the process is still running after the readiness probe; some
@@ -2417,6 +2648,7 @@ def llamacpp_start_server(
             "error": f"llama-server exited with status {proc.returncode} after readiness probe",
             "hint": diagnose_llama_server_log(log_path),
             "log_path": str(log_path),
+            "mtp": mtp,
         }
 
     return {
@@ -2425,6 +2657,7 @@ def llamacpp_start_server(
         "argv": argv,
         "error": None,
         "log_path": str(log_path),
+        "mtp": mtp,
     }
 
 

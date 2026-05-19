@@ -2448,6 +2448,15 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
         f"llama-server is ready (pid {handle.pid}, port {handle.port}). "
         f"args: {' '.join(handle.argv[1:])}"
     )
+    mtp = start_result.get("mtp") or {}
+    if mtp.get("enabled"):
+        info(
+            f"MTP speculative decoding enabled "
+            f"(--spec-draft-n-max {mtp.get('spec_draft_n_max')}, "
+            f"source: {mtp.get('source')})"
+        )
+    elif mtp.get("warning"):
+        warn(mtp["warning"])
     info(f"Server log: {handle.log_path}")
 
     smoke = pb.smoke_test_llamacpp_model(tag)
@@ -2512,6 +2521,15 @@ def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
         }
     handle = start_result["handle"]
     ok(f"llama-server is ready (pid {handle.pid}, port {handle.port}).")
+    mtp = start_result.get("mtp") or {}
+    if mtp.get("enabled"):
+        info(
+            f"MTP speculative decoding enabled "
+            f"(--spec-draft-n-max {mtp.get('spec_draft_n_max')}, "
+            f"source: {mtp.get('source')})"
+        )
+    elif mtp.get("warning"):
+        warn(mtp["warning"])
     return {"ok": True, "reused": False}
 
 

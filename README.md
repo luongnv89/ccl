@@ -459,6 +459,17 @@ This means:
 | `CLAUDE_CODE_ATTRIBUTION_HEADER`           | `"0"`                    | `"0"`                    |
 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `"1"`                    | `"1"`                    |
 
+#### MTP (Multi-Token Prediction) models
+
+llama.cpp ≥ 2026-05-16 supports Multi-Token Prediction speculative decoding for models like [`unsloth/Qwen3.6-27B-MTP-GGUF`](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF), giving ~1.5–2× faster inference at no accuracy cost. CCL detects MTP variants automatically (GGUF metadata probe, then `*mtp*` filename match) and adds the required `--spec-type draft-mtp --spec-draft-n-max 5` flags to the auto-started `llama-server`. Override via env:
+
+| Env var                       | Effect                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `LLAMACPP_MTP_ENABLED`        | `0` forces MTP off; `1` forces it on. Unset → auto-detect from GGUF / filename.        |
+| `LLAMACPP_SPEC_DRAFT_N_MAX`   | Override `--spec-draft-n-max` (default `5`; valid 1–16; Unsloth recommends 3–6).      |
+
+MTP is auto-disabled (with a warning) when paired with llama.cpp options that don't yet support it: `--mmproj`, or `-np` / `--parallel` > 1.
+
 ### Codex CLI → Ollama
 
 ```bash
