@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.13.1 — 2026-05-19
+
+### Features
+
+- **`ccl status` command** (#98, #101): new top-level subcommand that prints the current ccl setup and shortcut availability at a glance. Lists all 9 shortcuts (3 harnesses × 3 engine types) with their aliases, selected model, engine name and live status, and an availability column (`available` / `unavailable` / `unconfigured`); follows with an overall setup summary (engines detected, engines running, default harness, default engine, selected model). Engine health is checked via each adapter's healthcheck.
+
+### Bug Fixes
+
+- **`ccl status` internal consistency**: each shortcut row now reflects its own helper script independently instead of projecting one harness's engine across the others, and the availability column is honest about whether the alias would actually run today.
+  - Per-harness inference: `cc` / `cx` / `cp` read from their own script (or matching wizard state), so `cx` no longer inherits llamacpp from `cc`.
+  - Local availability requires the helper script to exist **and** the engine to be installed; a llamacpp helper with no `llama-server` is now `unavailable` instead of a misleading `available`.
+  - Router shortcuts (`cc9` / `cx9` / `cp9`, `cco` / `cxo` / `cpo`) require the helper script to exist before claiming `available`; bare API-key detection without a wired-up alias now reports `unconfigured`.
+  - `Default harness/engine/model` only show wizard-state values; we no longer fabricate them from a single detected script, which contradicted `Engines detected` when the inferred engine wasn't installed.
+  - Replace the buggy `fence_tag.replace("9","").replace("o","")` (which turned `codex` into `cdex`) with explicit lookup tables; fix `_infer_engine_from_script`'s return annotation to admit `None`.
+
+### Tests
+
+- Add 18 unit tests across `TestRunStatus`, `TestInferEngineFromScript`, and `TestDetectExistingShortcuts` pinning each cross-row / cross-summary inconsistency and the helper-inference regexes (llamacpp via `--model` / `ANTHROPIC_CUSTOM_MODEL_OPTION`, ollama via `pi --provider ccl-ollama`).
+
+### Chore
+
+- Ignore `.gstack/` workspace directory.
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.13.0...v0.13.1
+
 ## v0.13.0 — 2026-05-19
 
 ### Features

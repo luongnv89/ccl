@@ -67,7 +67,7 @@
         <div class="tb-page-stats reveal">
           <div class="stat">
             <div class="stat-label">Latest</div>
-            <div class="stat-value"><span class="dot"></span>v0.13.0</div>
+            <div class="stat-value"><span class="dot"></span>v0.13.1</div>
           </div>
           <div class="stat">
             <div class="stat-label">Released</div>
@@ -92,12 +92,46 @@
 
         <div class="tb-changelog">
 
+          <!-- v0.13.1 -->
+          <div class="tb-clog-entry reveal">
+            <div class="tb-clog-side">
+              <div class="ver">v0.13.1</div>
+              <div class="date">2026-05-19</div>
+              <div class="latest">Latest</div>
+            </div>
+            <div class="tb-clog-body">
+              <div class="tb-clog-group added">
+                <div class="tb-clog-group-head">Added</div>
+                <ul class="tb-clog-list">
+                  <li><strong><code>ccl status</code> command</strong> (#98, #101): new top-level subcommand that prints the current ccl setup and shortcut availability. Lists all 9 shortcuts (3 harnesses × 3 engine types) with aliases, selected model, engine name and live status, and an availability column (<code>available</code> / <code>unavailable</code> / <code>unconfigured</code>); follows with an overall setup summary. Engine health is checked via each adapter's healthcheck.</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group fixed">
+                <div class="tb-clog-group-head">Fixed</div>
+                <ul class="tb-clog-list">
+                  <li><strong><code>ccl status</code> consistency:</strong> per-harness inference so <code>cx</code> no longer inherits <code>cc</code>'s engine; local availability requires both helper script and installed engine; router shortcuts (<code>cc9</code> / <code>cx9</code> / <code>cp9</code>, <code>cco</code> / <code>cxo</code> / <code>cpo</code>) need a wired-up alias before claiming <code>available</code>.</li>
+                  <li><code>Default harness/engine/model</code> only show wizard-state values; no longer fabricated from a single detected script.</li>
+                  <li>Replace the buggy <code>fence_tag.replace("9","").replace("o","")</code> (which turned <code>codex</code> into <code>cdex</code>) with explicit lookup tables; fix <code>_infer_engine_from_script</code>'s return annotation to admit <code>None</code>.</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group changed">
+                <div class="tb-clog-group-head">Tests · Chore</div>
+                <ul class="tb-clog-list">
+                  <li>Add 18 unit tests pinning each cross-row / cross-summary inconsistency and the helper-inference regexes (llamacpp via <code>--model</code> / <code>ANTHROPIC_CUSTOM_MODEL_OPTION</code>, ollama via <code>pi --provider ccl-ollama</code>).</li>
+                  <li>Ignore <code>.gstack/</code> workspace directory.</li>
+                </ul>
+              </div>
+              <a href="https://github.com/luongnv89/ccl/compare/v0.13.0...v0.13.1" target="_blank" rel="noopener" class="tb-clog-link">
+                Full compare diff →
+              </a>
+            </div>
+          </div>
+
           <!-- v0.13.0 -->
           <div class="tb-clog-entry reveal">
             <div class="tb-clog-side">
               <div class="ver">v0.13.0</div>
               <div class="date">2026-05-19</div>
-              <div class="latest">Latest</div>
             </div>
             <div class="tb-clog-body">
               <div class="tb-clog-group added">
@@ -392,7 +426,7 @@
             <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
-          <strong>claude-codex-local</strong> · v0.13.0
+          <strong>claude-codex-local</strong> · v0.13.1
         </div>
         <ul class="footer-links">
           <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
