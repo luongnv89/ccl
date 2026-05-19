@@ -1,0 +1,12 @@
+{
+  "issue": 98,
+  "title": "Add `ccl status` command to show setup, shortcuts, and engine availability",
+  "type": "feature",
+  "priority": "medium",
+  "effort": "S",
+  "status": "completed",
+  "branch": "feat/98-ccl-status-command",
+  "started_at": "2026-05-19T00:00:00Z",
+  "completed_at": "2026-05-19T09:50:00Z",
+  "pr": 101
+}
