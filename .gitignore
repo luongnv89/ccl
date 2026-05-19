@@ -11,3 +11,4 @@ coverage.xml
 .claude/worktrees/
 .test-model-cache/
 *.egg-info/
+.gstack/
