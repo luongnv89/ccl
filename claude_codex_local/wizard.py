@@ -36,6 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from typing import List
+from typing import Optional
 
 import questionary
 from rich.console import Console
@@ -4356,6 +4357,125 @@ def _get_engine_health(engine: str, profile: dict[str, Any]) -> dict[str, Any]:
     return adapters[engine].healthcheck()
 
 
+# Fence tag -> (harness, engine-kind) so we never have to slice strings (which
+# bites on "codex" because plain .replace("o","") strips the o in the harness
+# name itself).
+_FENCE_TAG_TO_HARNESS_ENGINE: dict[str, tuple[str, str]] = {
+    "claude": ("claude", "local"),
+    "codex": ("codex", "local"),
+    "pi": ("pi", "local"),
+    "claude9": ("claude", "9router"),
+    "codex9": ("codex", "9router"),
+    "pi9": ("pi", "9router"),
+    "claudeo": ("claude", "openrouter"),
+    "codexo": ("codex", "openrouter"),
+    "pio": ("pi", "openrouter"),
+}
+
+# Basenames the wizard installs in STATE_DIR/bin. The long aliases
+# (claude-local, codex-local, pi-local) are shell aliases that point at the
+# short-form helper script, not separate files, so we only track the short
+# basenames here.
+_BASENAME_TO_FENCE_TAG: dict[str, str] = {
+    "cc": "claude",
+    "cx": "codex",
+    "cp": "pi",
+    "cc9": "claude9",
+    "cx9": "codex9",
+    "cp9": "pi9",
+    "cco": "claudeo",
+    "cxo": "codexo",
+    "cpo": "pio",
+}
+
+
+def _detect_existing_shortcuts() -> dict[str, dict[str, Any]]:
+    """
+    Detect existing helper scripts in STATE_DIR/bin.
+
+    Returns a dict mapping helper-script basename -> {path, fence_tag, harness,
+    engine_kind}. `engine_kind` is one of "local", "9router", "openrouter".
+    The concrete engine (ollama/llamacpp/...) for local helpers is inferred
+    separately by :func:`_infer_engine_from_script`.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    bin_dir = STATE_DIR / "bin"
+    if not bin_dir.exists():
+        return result
+
+    for script_path in bin_dir.iterdir():
+        if not script_path.is_file() or not os.access(script_path, os.X_OK):
+            continue
+        basename = script_path.name
+        fence_tag = _BASENAME_TO_FENCE_TAG.get(basename)
+        if not fence_tag:
+            continue
+        harness, engine_kind = _FENCE_TAG_TO_HARNESS_ENGINE[fence_tag]
+        result[basename] = {
+            "path": str(script_path),
+            "fence_tag": fence_tag,
+            "harness": harness,
+            "engine_kind": engine_kind,
+        }
+    return result
+
+
+def _infer_engine_from_script(
+    script_path: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Infer (engine, model_tag) from a local helper script's content.
+
+    Returns (None, None) when the script doesn't match a known shape.
+    Only called for helper scripts whose fence tag maps to engine_kind="local";
+    9router / openrouter helpers don't need parsing because the engine and
+    model live in router config, not in the script.
+    """
+    try:
+        content = Path(script_path).read_text()
+    except Exception:
+        return (None, None)
+
+    def _model_from(*patterns: str) -> Optional[str]:
+        for pattern in patterns:
+            m = re.search(pattern, content)
+            if m:
+                return m.group(1).strip("'\"")
+        return None
+
+    # llamacpp: served on port 8001 with ANTHROPIC_BASE_URL pointing at it.
+    if ":8001" in content and "ANTHROPIC_BASE_URL" in content:
+        model = _model_from(
+            r"--model\s+(\S+)",
+            r"ANTHROPIC_CUSTOM_MODEL_OPTION=(\S+)",
+        )
+        return ("llamacpp", model or "(unknown)")
+
+    # ollama: invoked directly or via the ccl-ollama pi provider.
+    if "ccl-ollama" in content or re.search(r"\bollama\b", content):
+        model = _model_from(
+            r"--provider\s+ccl-ollama\s+--model\s+(\S+)",
+            r"--model\s+(\S+)",
+            r"MODEL=(\S+)",
+        )
+        return ("ollama", model or "(unknown)")
+
+    # lmstudio: served on port 1234.
+    if ":1234" in content:
+        model = _model_from(
+            r"--model\s+(\S+)",
+            r"ANTHROPIC_CUSTOM_MODEL_OPTION=(\S+)",
+        )
+        return ("lmstudio", model or "(unknown)")
+
+    # vllm: default port 8000 (or the configured VLLM_BASE_URL).
+    if ":8000" in content or pb.VLLM_BASE_URL in content:
+        model = _model_from(r"--model\s+(\S+)")
+        return ("vllm", model or "(unknown)")
+
+    return (None, None)
+
+
 def run_status() -> int:
     """Exposed as `ccl status`. Display current setup and shortcut availability."""
     header("status — current ccl setup and shortcut availability")
@@ -4368,33 +4488,72 @@ def run_status() -> int:
 
     state = WizardState.load()
 
-    # Get engine presence and status
     profile = pb.machine_profile()
     presence = profile.get("presence", {})
     installed_engines = presence.get("engines", []) or []
 
-    # Build a table of all shortcuts and their availability
-    all_shortcuts = []
+    # Helper scripts are the source of truth for what `cc` / `cx` / `cp`
+    # (and the 9/o variants) actually run today. The wizard state captures
+    # the user's most recent setup choices but the user may have rerun the
+    # wizard for one harness without touching another, so we inspect each
+    # harness's helper script independently rather than projecting a single
+    # "default engine" across all rows.
+    existing_shortcuts = _detect_existing_shortcuts()
+
+    local_script_configs: dict[str, dict[str, str]] = {}
+    for basename, info in existing_shortcuts.items():
+        if info["engine_kind"] != "local":
+            continue
+        engine, model = _infer_engine_from_script(info["path"])
+        if engine:
+            local_script_configs[basename] = {"engine": engine, "model": model or "(unknown)"}
+
+    all_shortcuts: List[dict[str, Any]] = []
 
     for harness in ["claude", "codex", "pi"]:
-        # Primary engine variant (long alias: claude-local, codex-local, pi-local)
-        primary_fence_tag = _fence_tag_for(harness, state.primary_engine)
+        # ---- Primary (local engine) variant: cc / cx / cp + long alias ----
+        local_basename = _helper_script_basename(harness)
+        has_local_script = local_basename in existing_shortcuts
+        script_cfg = local_script_configs.get(local_basename)
+
+        if script_cfg:
+            primary_engine_name = script_cfg["engine"]
+            primary_model_tag = script_cfg["model"]
+        elif state.primary_harness == harness and state.primary_engine in (
+            "ollama",
+            "llamacpp",
+            "lmstudio",
+            "vllm",
+        ):
+            # No script for this harness yet, but the wizard state records the
+            # user's intended config — show that so the row reflects what
+            # `ccl setup` would wire up.
+            primary_engine_name = state.primary_engine
+            primary_model_tag = state.engine_model_tag or state.model_name or "(not set)"
+        else:
+            primary_engine_name = "(unset)"
+            primary_model_tag = "(not set)"
+
+        primary_fence_tag = _fence_tag_for(
+            harness, primary_engine_name if primary_engine_name != "(unset)" else None
+        )
         primary_aliases = _alias_names_for(primary_fence_tag)
 
-        # Determine model and engine info for primary variant
-        primary_model_tag = state.engine_model_tag or "(not set)"
-        primary_engine_name = state.primary_engine or "(unset)"
+        primary_engine_installed = primary_engine_name in installed_engines
         primary_engine_status = (
-            "[green]on[/green]" if primary_engine_name in installed_engines else "[red]off[/red]"
+            "[green]on[/green]" if primary_engine_installed else "[red]off[/red]"
         )
 
-        # Determine availability for primary variant
-        has_primary_model = bool(primary_model_tag and primary_model_tag != "(not set)")
-        primary_engine_active = "on" in primary_engine_status
+        has_primary_model = primary_model_tag not in ("(not set)", "(unknown)")
 
-        if has_primary_model and primary_engine_active:
+        # Availability rules (in priority order):
+        #   available     — helper script exists, engine installed, model set
+        #   unavailable   — helper script exists but engine binary missing or
+        #                   model not parseable; running the alias would fail
+        #   unconfigured  — no helper script for this harness yet
+        if has_local_script and primary_engine_installed and has_primary_model:
             primary_availability = "[green]available[/green]"
-        elif has_primary_model and not primary_engine_active:
+        elif has_local_script:
             primary_availability = "[red]unavailable[/red]"
         else:
             primary_availability = "[yellow]unconfigured[/yellow]"
@@ -4409,63 +4568,36 @@ def run_status() -> int:
             }
         )
 
-        # 9router variant (short alias: cc9, cx9, cp9)
-        fence_tag9 = f"{harness}9"
-        aliases9 = _alias_names_for(fence_tag9)
-        model9 = "(API key only)"
-        engine9 = "9router"
-        engine_status9 = "[green]on[/green]" if "9router" in installed_engines else "[red]off[/red]"
+        # ---- Router-backed variants: 9router (cc9/cx9/cp9), openrouter (cco/cxo/cpo) ----
+        for fence_suffix, router_engine in (("9", "9router"), ("o", "openrouter")):
+            fence_tag = f"{harness}{fence_suffix}"
+            aliases = _alias_names_for(fence_tag)
+            basename = _helper_script_basename(fence_tag)
+            has_script = basename in existing_shortcuts
+            engine_installed = router_engine in installed_engines
+            engine_status = (
+                "[green]on[/green]" if engine_installed else "[red]off[/red]"
+            )
 
-        # 9router availability: has API key configured (check if 9router is installed)
-        has_9router_key = True  # If 9router is in installed_engines, assume key is configured
-        engine9_active = "on" in engine_status9
+            # For router-backed shortcuts, "configured" means the helper
+            # script is wired up; "available" further requires the API key
+            # to be detected (presence.engines includes the router).
+            if has_script and engine_installed:
+                availability = "[green]available[/green]"
+            elif has_script:
+                availability = "[red]unavailable[/red]"
+            else:
+                availability = "[yellow]unconfigured[/yellow]"
 
-        if has_9router_key and engine9_active:
-            availability9 = "[green]available[/green]"
-        elif has_9router_key and not engine9_active:
-            availability9 = "[red]unavailable[/red]"
-        else:
-            availability9 = "[yellow]unconfigured[/yellow]"
-
-        all_shortcuts.append(
-            {
-                "aliases": aliases9,
-                "model": model9,
-                "engine": engine9,
-                "engine_status": engine_status9,
-                "availability": availability9,
-            }
-        )
-
-        # OpenRouter variant (short alias: cco, cxo, cpo)
-        fence_tago = f"{harness}o"
-        aliaseso = _alias_names_for(fence_tago)
-        modelo = "(API key only)"
-        engineo = "openrouter"
-        engine_statuso = (
-            "[green]on[/green]" if "openrouter" in installed_engines else "[red]off[/red]"
-        )
-
-        # OpenRouter availability: has API key configured (check if openrouter is installed)
-        has_openrouter_key = True  # If openrouter is in installed_engines, assume key is configured
-        engineo_active = "on" in engine_statuso
-
-        if has_openrouter_key and engineo_active:
-            availabilityo = "[green]available[/green]"
-        elif has_openrouter_key and not engineo_active:
-            availabilityo = "[red]unavailable[/red]"
-        else:
-            availabilityo = "[yellow]unconfigured[/yellow]"
-
-        all_shortcuts.append(
-            {
-                "aliases": aliaseso,
-                "model": modelo,
-                "engine": engineo,
-                "engine_status": engine_statuso,
-                "availability": availabilityo,
-            }
-        )
+            all_shortcuts.append(
+                {
+                    "aliases": aliases,
+                    "model": "(API key only)",
+                    "engine": router_engine,
+                    "engine_status": engine_status,
+                    "availability": availability,
+                }
+            )
 
     # Display shortcuts table
     table = Table(title="Configured shortcuts", show_header=True)
@@ -4513,6 +4645,11 @@ def run_status() -> int:
         "Engines running", ", ".join(running_engines) if running_engines else "(none)"
     )
 
+    # "Default …" rows reflect what `ccl setup` recorded — not what's wired
+    # up on disk. The shortcuts table above already tells the user what each
+    # cc/cx/cp script actually runs, so we don't try to back-fill these rows
+    # from helper-script inference (different harnesses can use different
+    # engines, and picking one to call "the default" misleads the user).
     if state.primary_harness:
         summary_table.add_row("Default harness", state.primary_harness)
     if state.primary_engine:
