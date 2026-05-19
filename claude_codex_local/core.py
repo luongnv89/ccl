@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -2152,10 +2153,10 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
 
     Returns ``{"is_mtp": bool, "reason": str}``. On any IO / parse / truncation
     error, returns ``is_mtp=False`` with a descriptive reason so the caller can
-    decide whether to fall back to a filename heuristic.
+    decide whether to fall back to a filename heuristic. If the file's kv_count
+    exceeds ``MAX_KV_COUNT`` and no indicator was found in the scanned prefix,
+    the reason is ``scanned-no-mtp-truncated`` rather than ``scanned-no-mtp``.
     """
-    import struct as _struct
-
     GGUF_MAGIC = b"GGUF"
     # GGUF value types (per gguf-py/gguf/constants.py).
     T_STRING = 8
@@ -2193,20 +2194,22 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
             head = fh.read(4 + 8 + 8)  # version, tensor_count, kv_count
             if len(head) < 20:
                 return {"is_mtp": False, "reason": "truncated-header"}
-            _version, _tensor_count, kv_count = _struct.unpack("<IQQ", head)
+            _version, _tensor_count, kv_count = struct.unpack("<IQQ", head)
             # GGUFv1 packed counts as uint32; reading them as uint64 would
             # silently consume tensor data and misalign the entire KV walk.
             # All in-the-wild MTP GGUFs are v3+; reject older versions
             # explicitly rather than parse them incorrectly.
             if _version < 2:
                 return {"is_mtp": False, "reason": f"unsupported-gguf-version:{_version}"}
-            kv_count = min(int(kv_count), MAX_KV_COUNT)
+            raw_kv_count = int(kv_count)
+            kv_count = min(raw_kv_count, MAX_KV_COUNT)
+            truncated = raw_kv_count > MAX_KV_COUNT
 
             def read_string(limit: int) -> str:
                 hdr = fh.read(8)
                 if len(hdr) < 8:
                     raise ValueError("truncated string length")
-                (slen,) = _struct.unpack("<Q", hdr)
+                (slen,) = struct.unpack("<Q", hdr)
                 if slen > limit:
                     # Skip oversized strings without allocating.
                     fh.seek(int(slen), os.SEEK_CUR)
@@ -2216,12 +2219,11 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
                     raise ValueError("truncated string body")
                 return data.decode("utf-8", errors="replace")
 
-            def skip_value(vtype: int, *, depth: int = 0) -> None:
-                # GGUF disallows nested arrays; refuse them to keep recursion
-                # bounded against malicious headers that might claim
-                # element_type=ARRAY repeatedly.
-                if depth > 1:
-                    raise ValueError("nested-array exceeds gguf spec")
+            def skip_value(vtype: int) -> None:
+                # GGUF disallows nested arrays. The array branch below raises
+                # before recursing if `elem_type == T_ARRAY`, so this function
+                # never recurses beyond one level — a separate depth guard is
+                # redundant.
                 size = SCALAR_SIZE.get(vtype)
                 if size is not None:
                     fh.seek(size, os.SEEK_CUR)
@@ -2230,19 +2232,19 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
                     hdr = fh.read(8)
                     if len(hdr) < 8:
                         raise ValueError("truncated string skip")
-                    (slen,) = _struct.unpack("<Q", hdr)
+                    (slen,) = struct.unpack("<Q", hdr)
                     fh.seek(int(slen), os.SEEK_CUR)
                     return
                 if vtype == T_ARRAY:
                     arr_hdr = fh.read(12)
                     if len(arr_hdr) < 12:
                         raise ValueError("truncated array header")
-                    elem_type, arr_len = _struct.unpack("<IQ", arr_hdr)
+                    elem_type, arr_len = struct.unpack("<IQ", arr_hdr)
                     if int(elem_type) == T_ARRAY:
                         raise ValueError("nested-array forbidden by gguf spec")
                     arr_len = min(int(arr_len), MAX_ARRAY_LEN)
                     for _ in range(arr_len):
-                        skip_value(int(elem_type), depth=depth + 1)
+                        skip_value(int(elem_type))
                     return
                 raise ValueError(f"unknown gguf value type: {vtype}")
 
@@ -2251,7 +2253,7 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
                 vtype_buf = fh.read(4)
                 if len(vtype_buf) < 4:
                     return {"is_mtp": False, "reason": "truncated-value-type"}
-                (vtype,) = _struct.unpack("<I", vtype_buf)
+                (vtype,) = struct.unpack("<I", vtype_buf)
                 key_lc = key.lower()
                 if ".mtp." in key_lc or key_lc.startswith("mtp."):
                     return {"is_mtp": True, "reason": f"metadata-key:{key}"}
@@ -2261,8 +2263,11 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
                         return {"is_mtp": True, "reason": f"{key}={val}"}
                 else:
                     skip_value(int(vtype))
-            return {"is_mtp": False, "reason": "scanned-no-mtp"}
-    except (ValueError, OSError, _struct.error) as exc:
+            return {
+                "is_mtp": False,
+                "reason": "scanned-no-mtp-truncated" if truncated else "scanned-no-mtp",
+            }
+    except (ValueError, OSError, struct.error) as exc:
         return {"is_mtp": False, "reason": f"probe-failed: {exc}"}
 
 

@@ -2062,6 +2062,29 @@ class TestProbeGgufIsMtp:
         assert out["is_mtp"] is False
         assert "nested-array" in out["reason"] or out["reason"].startswith("probe-failed")
 
+    def test_signals_truncation_when_kv_count_exceeds_cap(self, tmp_path):
+        # Header claims more KV pairs than MAX_KV_COUNT (8192) and the file
+        # actually packs enough valid pairs that the scan reaches the cap
+        # without hitting an MTP indicator. The probe should clamp to the
+        # cap, walk that many pairs cleanly, and signal truncation in the
+        # reason so callers can tell the scan was incomplete.
+        import struct as _struct
+
+        T_UINT8 = 0
+        p = tmp_path / "huge.gguf"
+        # Each pair: 8-byte key length, 1 key byte, 4-byte vtype, 1-byte value.
+        pair = _struct.pack("<Q", 1) + b"k" + _struct.pack("<I", T_UINT8) + b"\x00"
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))  # version
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 20000))  # kv_count claim (> 8192 cap)
+            # Pack 8193 valid pairs so the capped scan completes cleanly.
+            fh.write(pair * 8193)
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert out["reason"] == "scanned-no-mtp-truncated"
+
 
 class TestDetectLlamaCppMtp:
     def test_env_override_off_short_circuits(self, monkeypatch, tmp_path):
