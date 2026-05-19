@@ -4328,6 +4328,181 @@ def run_serve() -> int:
     return 0
 
 
+def _get_engine_health(engine: str, profile: dict[str, Any]) -> dict[str, Any]:
+    """Get health status for a given engine."""
+    adapters = {
+        "ollama": pb.OllamaAdapter(),
+        "lmstudio": pb.LMStudioAdapter(),
+        "llamacpp": pb.LlamaCppAdapter(),
+        "vllm": pb.VLLMAdapter(),
+        "9router": pb.Router9Adapter(),
+        "openrouter": pb.OpenRouterAdapter(),
+    }
+    
+    if engine not in adapters:
+        return {"ok": False, "detail": f"Unknown engine: {engine}"}
+    
+    return adapters[engine].healthcheck()
+
+
+def run_status() -> int:
+    """Exposed as `ccl status`. Display current setup and shortcut availability."""
+    header("status — current ccl setup and shortcut availability")
+
+    if not STATE_FILE.exists():
+        warn(f"No wizard state found at {STATE_FILE}.")
+        console.print("\nRun [bold]ccl setup[/bold] to configure your ccl setup.")
+        console.print("\n[italic]No shortcuts are available until setup is complete.[/italic]")
+        return 1
+
+    state = WizardState.load()
+
+    # Get engine presence and status
+    profile = pb.machine_profile()
+    presence = profile.get("presence", {})
+    installed_engines = presence.get("engines", []) or []
+
+    # Build a table of all shortcuts and their availability
+    all_shortcuts = []
+    
+    for harness in ["claude", "codex", "pi"]:
+        # Primary engine variant (long alias: claude-local, codex-local, pi-local)
+        primary_fence_tag = _fence_tag_for(harness, state.primary_engine)
+        primary_aliases = _alias_names_for(primary_fence_tag)
+        
+        # Determine model and engine info for primary variant
+        primary_model_tag = state.engine_model_tag or "(not set)"
+        primary_engine_name = state.primary_engine or "(unset)"
+        primary_engine_status = "[green]on[/green]" if primary_engine_name in installed_engines else "[red]off[/red]"
+        
+        # Determine availability for primary variant
+        has_primary_model = bool(primary_model_tag and primary_model_tag != "(not set)")
+        primary_engine_active = "on" in primary_engine_status
+        
+        if has_primary_model and primary_engine_active:
+            primary_availability = "[green]available[/green]"
+        elif has_primary_model and not primary_engine_active:
+            primary_availability = "[red]unavailable[/red]"
+        else:
+            primary_availability = "[yellow]unconfigured[/yellow]"
+        
+        all_shortcuts.append({
+            "aliases": primary_aliases,
+            "model": primary_model_tag,
+            "engine": primary_engine_name,
+            "engine_status": primary_engine_status,
+            "availability": primary_availability,
+        })
+        
+        # 9router variant (short alias: cc9, cx9, cp9)
+        fence_tag9 = f"{harness}9"
+        aliases9 = _alias_names_for(fence_tag9)
+        model9 = "(API key only)"
+        engine9 = "9router"
+        engine_status9 = "[green]on[/green]" if "9router" in installed_engines else "[red]off[/red]"
+        
+        # 9router availability: has API key configured (check if 9router is installed)
+        has_9router_key = True  # If 9router is in installed_engines, assume key is configured
+        engine9_active = "on" in engine_status9
+        
+        if has_9router_key and engine9_active:
+            availability9 = "[green]available[/green]"
+        elif has_9router_key and not engine9_active:
+            availability9 = "[red]unavailable[/red]"
+        else:
+            availability9 = "[yellow]unconfigured[/yellow]"
+        
+        all_shortcuts.append({
+            "aliases": aliases9,
+            "model": model9,
+            "engine": engine9,
+            "engine_status": engine_status9,
+            "availability": availability9,
+        })
+        
+        # OpenRouter variant (short alias: cco, cxo, cpo)
+        fence_tago = f"{harness}o"
+        aliaseso = _alias_names_for(fence_tago)
+        modelo = "(API key only)"
+        engineo = "openrouter"
+        engine_statuso = "[green]on[/green]" if "openrouter" in installed_engines else "[red]off[/red]"
+        
+        # OpenRouter availability: has API key configured (check if openrouter is installed)
+        has_openrouter_key = True  # If openrouter is in installed_engines, assume key is configured
+        engineo_active = "on" in engine_statuso
+        
+        if has_openrouter_key and engineo_active:
+            availabilityo = "[green]available[/green]"
+        elif has_openrouter_key and not engineo_active:
+            availabilityo = "[red]unavailable[/red]"
+        else:
+            availabilityo = "[yellow]unconfigured[/yellow]"
+        
+        all_shortcuts.append({
+            "aliases": aliaseso,
+            "model": modelo,
+            "engine": engineo,
+            "engine_status": engine_statuso,
+            "availability": availabilityo,
+        })
+
+    # Display shortcuts table
+    table = Table(title="Configured shortcuts", show_header=True)
+    table.add_column("Shortcut", style="bold")
+    table.add_column("Model", style="cyan")
+    table.add_column("Engine", style="magenta")
+    table.add_column("Engine Status", style="yellow")
+    table.add_column("Availability", style="green")
+    
+    for shortcut in all_shortcuts:
+        # Format aliases
+        aliases_str = ", ".join(shortcut["aliases"])
+        table.add_row(
+            aliases_str,
+            shortcut["model"],
+            shortcut["engine"],
+            shortcut["engine_status"],
+            shortcut["availability"],
+        )
+    
+    console.print(table)
+    console.print()
+
+    # Overall setup summary
+    console.print("[bold]Overall Setup Summary[/bold]")
+    
+    summary_table = Table(show_header=False, box=None)
+    summary_table.add_column("key", style="bold")
+    summary_table.add_column("value")
+    
+    summary_table.add_row("Engines detected", ", ".join(installed_engines) if installed_engines else "(none)")
+    
+    running_engines = []
+    for engine in installed_engines:
+        engine_health = _get_engine_health(engine, profile)
+        if "ok" in engine_health and engine_health["ok"]:
+            running_engines.append(engine)
+    
+    summary_table.add_row("Engines running", ", ".join(running_engines) if running_engines else "(none)")
+    
+    if state.primary_harness:
+        summary_table.add_row("Default harness", state.primary_harness)
+    if state.primary_engine:
+        summary_table.add_row("Default engine", state.primary_engine)
+    if state.model_name:
+        summary_table.add_row("Selected model", state.model_name)
+    
+    console.print(summary_table)
+    console.print()
+
+    # Hint for unconfigured setup
+    has_any_configured = any("[green]available[/green]" in s["availability"] for s in all_shortcuts)
+    if not has_any_configured:
+        console.print("[info]No shortcuts are configured yet. Run [bold]ccl setup[/bold] to get started.[/info]")
+
+    return 0
+
+
 def run_find_model_standalone() -> int:
     """Exposed as `ccl find-model` — no setup, just a recommendation."""
     header("find-model — llmfit coding-model recommendation")
@@ -4362,6 +4537,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  ccl                              Run the interactive first-run wizard\n"
             "  ccl --resume                     Resume an interrupted wizard\n"
             "  ccl --non-interactive            Scripted install with defaults\n"
+            "  ccl status                       Show current setup and shortcut availability\n"
             "  ccl doctor                       Triage the current install\n"
             "  ccl find-model                   Show a recommended coding model\n"
             "  ccl run                          Launch the configured session interactively\n"
@@ -4470,6 +4646,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "auto-start it (with a model-load banner) when it is down. "
             "Idempotent and silent on the hot path. Used internally by the "
             "cc/cx helper scripts."
+        ),
+    )
+    sub.add_parser(
+        "status",
+        help="Show current ccl setup and shortcut availability",
+        description=(
+            "Display the current ccl configuration, including which shortcuts "
+            "are available and whether their engines are running."
         ),
     )
 
@@ -4584,6 +4768,8 @@ def main() -> int:
         return run_find_model_standalone()
     if cmd == "doctor":
         return run_doctor()
+    if cmd == "status":
+        return run_status()
     if cmd == "session":
         from claude_codex_local import session as sess
         from claude_codex_local.core import print_payload
