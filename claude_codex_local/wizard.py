@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from typing import List
 
 import questionary
 from rich.console import Console
@@ -4330,13 +4331,23 @@ def run_serve() -> int:
 
 def _get_engine_health(engine: str, profile: dict[str, Any]) -> dict[str, Any]:
     """Get health status for a given engine."""
-    adapters = {
-        "ollama": pb.OllamaAdapter(),
-        "lmstudio": pb.LMStudioAdapter(),
-        "llamacpp": pb.LlamaCppAdapter(),
-        "vllm": pb.VLLMAdapter(),
-        "9router": pb.Router9Adapter(),
-        "openrouter": pb.OpenRouterAdapter(),
+    from claude_codex_local.core import (
+        LlamaCppAdapter,
+        LMStudioAdapter,
+        OllamaAdapter,
+        OpenRouterAdapter,
+        Router9Adapter,
+        RuntimeAdapter,
+        VLLMAdapter,
+    )
+
+    adapters: dict[str, RuntimeAdapter] = {
+        "ollama": OllamaAdapter(),
+        "lmstudio": LMStudioAdapter(),
+        "llamacpp": LlamaCppAdapter(),
+        "vllm": VLLMAdapter(),
+        "9router": Router9Adapter(),
+        "openrouter": OpenRouterAdapter(),
     }
 
     if engine not in adapters:
@@ -4467,13 +4478,16 @@ def run_status() -> int:
     for shortcut in all_shortcuts:
         # Format aliases
         aliases_str = ", ".join(shortcut["aliases"])
-        table.add_row(
+        # Rich's add_row() accepts str, but mypy type stubs are overly strict
+        # https://github.com/Textualize/rich/issues/3320
+        row_values: List[str] = [
             aliases_str,
-            shortcut["model"],
-            shortcut["engine"],
-            shortcut["engine_status"],
-            shortcut["availability"],
-        )
+            shortcut["model"],  # type: ignore[list-item]
+            shortcut["engine"],  # type: ignore[list-item]
+            shortcut["engine_status"],  # type: ignore[list-item]
+            shortcut["availability"],  # type: ignore[list-item]
+        ]
+        table.add_row(*row_values)
 
     console.print(table)
     console.print()
