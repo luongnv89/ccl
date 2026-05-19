@@ -2144,10 +2144,14 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
 
     GGUF stores model metadata as a typed key/value table immediately after a
     short fixed header (magic + version + tensor_count + kv_count). We walk
-    the kv pairs looking for three MTP indicators:
+    the kv pairs looking for any of these MTP indicators:
 
-      - Any metadata key with an ``.mtp.`` segment or starting with ``mtp.``
+      - A metadata key with an ``.mtp.`` segment or starting with ``mtp.``
         (architecture-specific MTP block — strongest signal).
+      - A metadata key ending in ``.nextn_predict_layers`` (the cross-arch
+        convention used by Qwen, GLM, and DeepSeek MTP releases — the file
+        name advertises ``MTP`` but the metadata key is architecture-prefixed
+        like ``qwen35.nextn_predict_layers``).
       - ``general.architecture`` value containing ``mtp`` (case-insensitive).
       - ``general.name`` value containing ``mtp`` (case-insensitive).
 
@@ -2240,12 +2244,31 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
                     if len(arr_hdr) < 12:
                         raise ValueError("truncated array header")
                     elem_type, arr_len = struct.unpack("<IQ", arr_hdr)
-                    if int(elem_type) == T_ARRAY:
+                    elem_type = int(elem_type)
+                    arr_len = int(arr_len)
+                    if elem_type == T_ARRAY:
                         raise ValueError("nested-array forbidden by gguf spec")
-                    arr_len = min(int(arr_len), MAX_ARRAY_LEN)
-                    for _ in range(arr_len):
-                        skip_value(int(elem_type))
-                    return
+                    # Scalar arrays have a deterministic byte size, so we can
+                    # advance the file pointer in one seek regardless of
+                    # length. Skipping past the array's actual end is the
+                    # only correct behaviour — capping the iteration count
+                    # would leave the cursor mid-array and corrupt the rest
+                    # of the KV walk.
+                    elem_size = SCALAR_SIZE.get(elem_type)
+                    if elem_size is not None:
+                        fh.seek(elem_size * arr_len, os.SEEK_CUR)
+                        return
+                    if elem_type == T_STRING:
+                        # String arrays must be walked element-by-element to
+                        # learn each entry's byte length. Refuse pathological
+                        # sizes rather than scan past the rest of the
+                        # metadata block.
+                        if arr_len > MAX_ARRAY_LEN:
+                            raise ValueError(f"oversized-string-array: {arr_len} > {MAX_ARRAY_LEN}")
+                        for _ in range(arr_len):
+                            skip_value(T_STRING)
+                        return
+                    raise ValueError(f"unknown array element type: {elem_type}")
                 raise ValueError(f"unknown gguf value type: {vtype}")
 
             for _ in range(kv_count):
@@ -2257,6 +2280,8 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
                 key_lc = key.lower()
                 if ".mtp." in key_lc or key_lc.startswith("mtp."):
                     return {"is_mtp": True, "reason": f"metadata-key:{key}"}
+                if key_lc.endswith(".nextn_predict_layers"):
+                    return {"is_mtp": True, "reason": f"nextn-key:{key}"}
                 if vtype == T_STRING and key_lc in {"general.architecture", "general.name"}:
                     val = read_string(MAX_STR_LEN)
                     if "mtp" in val.lower():

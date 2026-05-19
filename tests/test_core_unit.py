@@ -2085,6 +2085,95 @@ class TestProbeGgufIsMtp:
         assert out["is_mtp"] is False
         assert out["reason"] == "scanned-no-mtp-truncated"
 
+    def test_detects_mtp_via_nextn_predict_layers_key(self, tmp_path):
+        # Real Unsloth Qwen3.6-MTP-GGUF files advertise MTP in the file name
+        # but the metadata uses an architecture-prefixed key like
+        # `qwen35.nextn_predict_layers` instead of `.mtp.` / `mtp.`.
+        # The probe must recognize that family.
+        p = tmp_path / "qwen-mtp.gguf"
+        _write_minimal_gguf(
+            p,
+            arch="qwen35",
+            name="Qwen3.6-27B",
+            extra_keys=[("qwen35.nextn_predict_layers", "1")],
+        )
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is True
+        assert "nextn_predict_layers" in out["reason"]
+
+    def test_oversized_scalar_array_does_not_desync_walk(self, tmp_path):
+        # A large scalar array (e.g. tokenizer.ggml.token_type, a UINT32
+        # array with ~250k entries) must be skipped in one seek so the
+        # subsequent KV walk stays aligned. Place an MTP indicator *after*
+        # the array to verify the walk continues correctly.
+        import struct as _struct
+
+        T_STRING = 8
+        T_ARRAY = 9
+        T_UINT32 = 4
+
+        p = tmp_path / "tokenized-mtp.gguf"
+        arr_len = 250000
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))  # version
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 3))  # kv_count = 3
+
+            # KV[0]: general.architecture = "qwen35"
+            arch_key = b"general.architecture"
+            arch_val = b"qwen35"
+            fh.write(_struct.pack("<Q", len(arch_key)) + arch_key)
+            fh.write(_struct.pack("<I", T_STRING))
+            fh.write(_struct.pack("<Q", len(arch_val)) + arch_val)
+
+            # KV[1]: an oversized scalar array of UINT32s.
+            big_key = b"tokenizer.ggml.token_type"
+            fh.write(_struct.pack("<Q", len(big_key)) + big_key)
+            fh.write(_struct.pack("<I", T_ARRAY))
+            fh.write(_struct.pack("<I", T_UINT32))
+            fh.write(_struct.pack("<Q", arr_len))
+            fh.write(b"\x00\x00\x00\x00" * arr_len)
+
+            # KV[2]: the MTP signal — must still be found after the array.
+            mtp_key = b"qwen35.nextn_predict_layers"
+            fh.write(_struct.pack("<Q", len(mtp_key)) + mtp_key)
+            fh.write(_struct.pack("<I", T_UINT32))
+            fh.write(b"\x01\x00\x00\x00")
+
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is True
+        assert "nextn_predict_layers" in out["reason"]
+
+    def test_oversized_string_array_bails_cleanly(self, tmp_path):
+        # T_STRING arrays can't be seeked past in one step (each entry's
+        # length is variable), so an `arr_len` above MAX_ARRAY_LEN must
+        # raise rather than scan a truncated prefix and corrupt the cursor.
+        import struct as _struct
+
+        T_STRING = 8
+        T_ARRAY = 9
+
+        p = tmp_path / "huge-string-array.gguf"
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))
+            fh.write(_struct.pack("<Q", 0))
+            fh.write(_struct.pack("<Q", 1))  # kv_count = 1
+
+            # KV[0]: a T_STRING array claiming 1M entries.
+            key = b"tokenizer.ggml.tokens"
+            fh.write(_struct.pack("<Q", len(key)) + key)
+            fh.write(_struct.pack("<I", T_ARRAY))
+            fh.write(_struct.pack("<I", T_STRING))
+            fh.write(_struct.pack("<Q", 1_000_000))
+            # Truncated body — we never reach it because the probe bails
+            # on the size header.
+
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert "oversized-string-array" in out["reason"]
+
 
 class TestDetectLlamaCppMtp:
     def test_env_override_off_short_circuits(self, monkeypatch, tmp_path):

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Features
 
 - **MTP (Multi-Token Prediction) support for llama.cpp** (#102): `llama-server` is now auto-launched with `--spec-type draft-mtp --spec-draft-n-max 5` whenever the chosen model is an MTP variant. Detection runs in two passes:
-  1. **GGUF metadata probe** — read the file's header KV table for an architecture-specific `*.mtp.*` key or `MTP` in `general.name` / `general.architecture`.
+  1. **GGUF metadata probe** — read the file's header KV table for an architecture-specific `*.mtp.*` key, a key ending in `.nextn_predict_layers` (the cross-arch convention used by Qwen, GLM, and DeepSeek MTP releases), or `MTP` in `general.name` / `general.architecture`. Large scalar arrays (tokenizer vocabularies, token-type tables) are skipped with a single seek so the KV walk stays aligned past them.
   2. **Filename fallback** — match `*mtp*` (word-bounded, case-insensitive) on the basename when the probe is inconclusive.
   Two env vars override the decision: `LLAMACPP_MTP_ENABLED=0/1` forces off/on, and `LLAMACPP_SPEC_DRAFT_N_MAX=N` overrides the default 5 (valid range 1–16). The detector also recognizes flag combinations that llama.cpp does not yet pair with `--spec-type draft-mtp` (`--mmproj`, `-np`/`--parallel > 1`) and disables MTP with a warning when those flags are supplied; CCL's auto-started `llama-server` does not pass those flags today, so this guard fires only if a future caller threads extra args through. Reference: <https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF>.
 
