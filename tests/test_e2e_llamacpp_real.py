@@ -244,9 +244,9 @@ class TestRealSmokeTest:
         model_id = info.get("model") or "smollm2"
 
         result = core.smoke_test_llamacpp_model(model_id)
-        assert result.get("ok") is True, (
-            f"smoke_test failed: {result.get('error') or result.get('response')}"
-        )
+        assert (
+            result.get("ok") is True
+        ), f"smoke_test failed: {result.get('error') or result.get('response')}"
         assert isinstance(result.get("response"), str)
         assert len(result["response"]) > 0
 
