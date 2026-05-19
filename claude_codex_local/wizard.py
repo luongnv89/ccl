@@ -35,8 +35,6 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-from typing import List
-from typing import Optional
 
 import questionary
 from rich.console import Console
@@ -4422,7 +4420,7 @@ def _detect_existing_shortcuts() -> dict[str, dict[str, Any]]:
 
 def _infer_engine_from_script(
     script_path: str,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """
     Infer (engine, model_tag) from a local helper script's content.
 
@@ -4436,7 +4434,7 @@ def _infer_engine_from_script(
     except Exception:
         return (None, None)
 
-    def _model_from(*patterns: str) -> Optional[str]:
+    def _model_from(*patterns: str) -> str | None:
         for pattern in patterns:
             m = re.search(pattern, content)
             if m:
@@ -4490,7 +4488,7 @@ def run_status() -> int:
 
     profile = pb.machine_profile()
     presence = profile.get("presence", {})
-    installed_engines = presence.get("engines", []) or []
+    installed_engines: list[str] = presence.get("engines", []) or []
 
     # Helper scripts are the source of truth for what `cc` / `cx` / `cp`
     # (and the 9/o variants) actually run today. The wizard state captures
@@ -4508,7 +4506,7 @@ def run_status() -> int:
         if engine:
             local_script_configs[basename] = {"engine": engine, "model": model or "(unknown)"}
 
-    all_shortcuts: List[dict[str, Any]] = []
+    all_shortcuts: list[dict[str, Any]] = []
 
     for harness in ["claude", "codex", "pi"]:
         # ---- Primary (local engine) variant: cc / cx / cp + long alias ----
@@ -4534,9 +4532,7 @@ def run_status() -> int:
             primary_engine_name = "(unset)"
             primary_model_tag = "(not set)"
 
-        primary_fence_tag = _fence_tag_for(
-            harness, primary_engine_name if primary_engine_name != "(unset)" else None
-        )
+        primary_fence_tag = _fence_tag_for(harness, primary_engine_name)
         primary_aliases = _alias_names_for(primary_fence_tag)
 
         primary_engine_installed = primary_engine_name in installed_engines
@@ -4575,9 +4571,7 @@ def run_status() -> int:
             basename = _helper_script_basename(fence_tag)
             has_script = basename in existing_shortcuts
             engine_installed = router_engine in installed_engines
-            engine_status = (
-                "[green]on[/green]" if engine_installed else "[red]off[/red]"
-            )
+            engine_status = "[green]on[/green]" if engine_installed else "[red]off[/red]"
 
             # For router-backed shortcuts, "configured" means the helper
             # script is wired up; "available" further requires the API key
@@ -4610,14 +4604,12 @@ def run_status() -> int:
     for shortcut in all_shortcuts:
         # Format aliases
         aliases_str = ", ".join(shortcut["aliases"])
-        # Rich's add_row() accepts str, but mypy type stubs are overly strict
-        # https://github.com/Textualize/rich/issues/3320
-        row_values: List[str] = [
+        row_values: list[str] = [
             aliases_str,
-            shortcut["model"],  # type: ignore[list-item]
-            shortcut["engine"],  # type: ignore[list-item]
-            shortcut["engine_status"],  # type: ignore[list-item]
-            shortcut["availability"],  # type: ignore[list-item]
+            shortcut["model"],
+            shortcut["engine"],
+            shortcut["engine_status"],
+            shortcut["availability"],
         ]
         table.add_row(*row_values)
 

@@ -1504,9 +1504,9 @@ class TestStep24PickerIntegration:
         for _mode, rec in recs.items():
             if rec is None:
                 continue
-            assert (
-                ":" not in rec["engine_tag"]
-            ), f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            assert ":" not in rec["engine_tag"], (
+                f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            )
 
         wiz.step_2_4_pick_model(state, non_interactive=False)
 
@@ -4468,7 +4468,9 @@ class TestRunStatus:
         script.chmod(0o755)
 
     def _run_status(self, wiz, pb, monkeypatch, installed_engines: list[str]) -> tuple[int, str]:
-        monkeypatch.setattr(pb, "machine_profile", lambda **_: self._make_profile(installed_engines))
+        monkeypatch.setattr(
+            pb, "machine_profile", lambda **_: self._make_profile(installed_engines)
+        )
         # Avoid real network probes inside _get_engine_health.
         monkeypatch.setattr(wiz, "_get_engine_health", lambda engine, profile: {"ok": False})
         wiz.console.width = 200
@@ -4486,9 +4488,7 @@ class TestRunStatus:
         assert "No wizard state found" in out
         assert "ccl setup" in out
 
-    def test_empty_state_no_scripts_marks_all_rows_unconfigured(
-        self, isolated_state, monkeypatch
-    ):
+    def test_empty_state_no_scripts_marks_all_rows_unconfigured(self, isolated_state, monkeypatch):
         pb, wiz, state_dir = isolated_state
         wiz.WizardState().save()
 
@@ -4501,9 +4501,7 @@ class TestRunStatus:
         assert "Default engine" not in out
         assert "Selected model" not in out
 
-    def test_local_script_with_engine_installed_is_available(
-        self, isolated_state, monkeypatch
-    ):
+    def test_local_script_with_engine_installed_is_available(self, isolated_state, monkeypatch):
         pb, wiz, state_dir = isolated_state
         wiz.WizardState().save()
         self._write_helper(
@@ -4594,9 +4592,7 @@ class TestRunStatus:
             assert "unconfigured" in line, f"{short!r}: {line!r}"
             assert "available" not in line, f"{short!r}: {line!r}"
 
-    def test_router_helper_script_plus_api_key_is_available(
-        self, isolated_state, monkeypatch
-    ):
+    def test_router_helper_script_plus_api_key_is_available(self, isolated_state, monkeypatch):
         pb, wiz, state_dir = isolated_state
         wiz.WizardState().save()
         self._write_helper(state_dir, "cco", 'exec claude "$@"')
@@ -4608,9 +4604,7 @@ class TestRunStatus:
         assert "available" in cco_line
         assert "unavailable" not in cco_line
 
-    def test_summary_shows_only_wizard_state_not_inferred(
-        self, isolated_state, monkeypatch
-    ):
+    def test_summary_shows_only_wizard_state_not_inferred(self, isolated_state, monkeypatch):
         """
         Regression: when wizard state was empty but a `cc` script existed,
         the summary fabricated "Default harness=claude" / "Default
@@ -4652,9 +4646,7 @@ class TestRunStatus:
         assert "Selected model" in out
         assert "qwen3-coder-next" in out
 
-    def test_codex_harness_not_corrupted_by_letter_o(
-        self, isolated_state, monkeypatch
-    ):
+    def test_codex_harness_not_corrupted_by_letter_o(self, isolated_state, monkeypatch):
         """
         Regression for the buggy fence_tag.replace("o","") that turned
         "codex" into "cdex". With the lookup table, a cx local helper must
