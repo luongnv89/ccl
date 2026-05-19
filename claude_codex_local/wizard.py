@@ -212,6 +212,15 @@ def step_2_1_discover(
     llmfit_skipped = pb._is_llmfit_skipped(llmfit_sys)
     disk = profile.get("disk", {})
 
+    # Issue #95: when the cached scan was deferred, try llmfit opportunistically.
+    # On success, render real values; on failure (missing/error/timeout), keep
+    # the "(scan deferred)" rendering below intact.
+    if llmfit_skipped:
+        fallback = _try_llmfit_fallback(profile)
+        if fallback is not None:
+            llmfit_sys = fallback
+            llmfit_skipped = False
+
     console.print("[bold]Machine Specifications[/bold]")
     spec_table = Table(show_header=True, header_style="bold blue")
     spec_table.add_column("Specification", style="cyan")
@@ -636,6 +645,34 @@ def _refresh_llmfit_for_profile(profile: dict[str, Any]) -> bool:
     _sync_presence_from_tools(profile)
     _persist_targeted_profile_update(profile)
     return bool(llmfit_sys)
+
+
+def _try_llmfit_fallback(profile: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Opportunistic llmfit invocation when the cached scan was deferred (#95).
+
+    Returns the llmfit system dict on success, or None when llmfit is not
+    installed, errors, or times out — preserving the deferred-scan rendering.
+
+    `pb.llmfit_system()` already returns None when llmfit is absent or any
+    subprocess / JSON-parse error occurs, so AC2 and AC3 are covered by the
+    inner contract. The outer try/except is defense-in-depth.
+    """
+    try:
+        result = pb.llmfit_system()
+    except Exception:
+        return None
+    if not result:
+        return None
+    profile["llmfit_system"] = result
+    profile.setdefault("tools", {})["llmfit"] = pb.command_version("llmfit")
+    try:
+        _sync_presence_from_tools(profile)
+        _persist_targeted_profile_update(profile)
+    except Exception:
+        # Cache-write side effects must never block the wizard.
+        pass
+    return result
 
 
 def _refresh_selected_harness(profile: dict[str, Any], harness: str) -> bool:

@@ -3551,6 +3551,138 @@ class TestStep1LazyLlmfit:
         assert llmfit_calls == [1]
         assert state.profile["llmfit_system"] == {"system": {"available_ram_gb": 64}}
 
+    # ---- Issue #95: fallback to llmfit when auto-detect deferred ---------
+
+    def _deferred_profile(self, pb_mod) -> dict:
+        """Build a profile dict whose llmfit_system carries the skip sentinel."""
+        return {
+            "tools": {
+                "ollama": {"present": True, "version": "0.1"},
+                "lmstudio": {"present": False},
+                "llamacpp": {"present": False},
+                "vllm": {"present": False},
+                "9router": {"present": False},
+                "huggingface_cli": {"present": False},
+                "claude": {"present": True, "version": "claude 1"},
+                "codex": {"present": False},
+                "llmfit": {"present": True, "version": "llmfit 1.2.3"},
+            },
+            "presence": {
+                "harnesses": ["claude"],
+                "engines": ["ollama"],
+                "llmfit": True,
+                "has_minimum": True,
+            },
+            "llmfit_system": pb_mod.LLMFIT_SKIPPED_SENTINEL,
+            "disk": {"free_gib": 100.0, "total_gib": 500.0},
+        }
+
+    def test_step1_runs_llmfit_when_skipped_and_available(self, isolated_state, monkeypatch):
+        """AC1: deferred scan + llmfit available → wizard runs it and shows real values."""
+        pb, wiz, _ = isolated_state
+
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda run_llmfit=True: self._deferred_profile(pb),
+        )
+
+        fallback_sys = {
+            "system": {
+                "cpu_name": "TestCPU",
+                "cpu_cores": 4,
+                "total_ram_gb": 16,
+                "available_ram_gb": 8,
+                "has_gpu": False,
+            }
+        }
+        monkeypatch.setattr(pb, "llmfit_system", lambda: fallback_sys)
+        monkeypatch.setattr(
+            pb,
+            "command_version",
+            lambda name: (
+                {"present": True, "version": "llmfit 1.2.3"}
+                if name == "llmfit"
+                else {"present": False, "version": ""}
+            ),
+        )
+        # Keep persistence a no-op so the test doesn't depend on cache write internals.
+        monkeypatch.setattr(wiz, "_persist_targeted_profile_update", lambda profile: None)
+
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            assert wiz.step_2_1_discover(state, non_interactive=True) is True
+
+        output = cap.get()
+        assert "(scan deferred)" not in output
+        assert "TestCPU" in output
+        # Sentinel was replaced with the live llmfit dict.
+        assert state.profile["llmfit_system"] == fallback_sys
+        assert not pb._is_llmfit_skipped(state.profile["llmfit_system"])
+
+    def test_step1_keeps_deferred_when_llmfit_not_installed(self, isolated_state, monkeypatch):
+        """AC2: deferred scan + llmfit absent → wizard keeps "(scan deferred)"."""
+        pb, wiz, _ = isolated_state
+
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda run_llmfit=True: self._deferred_profile(pb),
+        )
+        # pb.llmfit_system() returns None when llmfit isn't on PATH.
+        monkeypatch.setattr(pb, "llmfit_system", lambda: None)
+        monkeypatch.setattr(
+            pb,
+            "command_version",
+            lambda name: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(wiz, "_persist_targeted_profile_update", lambda profile: None)
+
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            assert wiz.step_2_1_discover(state, non_interactive=True) is True
+
+        output = cap.get()
+        assert "(scan deferred)" in output
+        # Sentinel remains since the fallback returned nothing.
+        assert pb._is_llmfit_skipped(state.profile["llmfit_system"])
+
+    def test_step1_falls_back_to_deferred_on_llmfit_error(self, isolated_state, monkeypatch):
+        """AC3: deferred scan + llmfit raises → wizard renders "(scan deferred)" without crashing."""
+        pb, wiz, _ = isolated_state
+
+        monkeypatch.setattr(
+            pb,
+            "machine_profile",
+            lambda run_llmfit=True: self._deferred_profile(pb),
+        )
+
+        def boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(pb, "llmfit_system", boom)
+        monkeypatch.setattr(
+            pb,
+            "command_version",
+            lambda name: (
+                {"present": True, "version": "llmfit 1.2.3"}
+                if name == "llmfit"
+                else {"present": False, "version": ""}
+            ),
+        )
+        monkeypatch.setattr(wiz, "_persist_targeted_profile_update", lambda profile: None)
+
+        state = wiz.WizardState()
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            # Must not crash even though llmfit_system raised.
+            assert wiz.step_2_1_discover(state, non_interactive=True) is True
+
+        output = cap.get()
+        assert "(scan deferred)" in output
+
 
 class TestEnsureToolCacheInvalidation:
     """Issue #79: _ensure_tool must invalidate the in-proc profile cache after a real install."""
