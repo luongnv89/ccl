@@ -12,3 +12,4 @@ coverage.xml
 .test-model-cache/
 *.egg-info/
 .gstack/
+.asm-improver/

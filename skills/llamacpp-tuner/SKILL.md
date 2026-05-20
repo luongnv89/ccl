@@ -1,9 +1,9 @@
 ---
 name: llamacpp-tuner
-description: "Profile a running llama.cpp server, propose a coding-agent-tuned config (ctx, prompt cache, MTP), run before/after benchmarks, report deltas. Use to tune llama-server for local coding agents. Don't use for vLLM, ollama, or non-llama.cpp backends."
+description: "Analyze and tune a running llama.cpp server for local coding agents: propose config (ctx, prompt cache, MTP), benchmark before/after, report deltas. Use to optimize llama-server for Claude Code or Aider. Don't use for vLLM, ollama, or non-llama.cpp."
 effort: high
 metadata:
-  version: 1.0.0
+  version: 1.2.0
   author: "Luong NGUYEN <luongnv89@gmail.com>"
 ---
 
@@ -190,11 +190,60 @@ After each numbered step, emit:
 
 `PASS` lets the workflow continue. `FAIL` stops it — never apply a config or run a benchmark from a failed discovery state.
 
+## Acceptance Criteria
+
+A run is complete when **all** of the following hold:
+
+- [ ] Step Completion Report emitted for each of the 9 workflow steps; none ended `FAIL`.
+- [ ] `/tmp/bench-before.json` and `/tmp/bench-after.json` exist and cover the same five prompt sizes (256 / 2k / 8k / 32k / 64k), both cold and warm.
+- [ ] The final report contains: machine+model paragraph, before→after flag diff table, benchmark table with cold/warm/delta columns, verdict line, caveats, optional next experiments.
+- [ ] User approval was captured at Step 5 before any destructive action (server restart).
+- [ ] If the new server failed `/health`, the previous command line was restored and the run aborted — no half-applied state.
+- [ ] Warm TTFT delta is reported as a multiplier (e.g. `19×`), not just a percent — agents feel the multiplier, not the percent.
+- [ ] Any recommendation that depends on a workload assumption (KV q4_0, MTP draft n) is labelled as an *experiment*, not a default.
+
+If a criterion cannot be satisfied (e.g. server refuses to restart), the report must include a `## Blockers` section naming the criterion and the reason.
+
+## Expected output
+
+A passing final report follows `references/report-format.md`. A trimmed example of the verdict-bearing section:
+
+```
+◆ Final report — llamacpp-tuner
+··································································
+Machine:  NVIDIA GB10 unified-memory, 128 GB, aarch64 perf cores 0-9
+Model:    Qwen3-Coder-30B-A3B UD-Q4_K_XL, n_ctx_train=262144, MTP=on
+
+Flag diff (8 changes):
+  --parallel              4        → 1        single-agent profile
+  --cache-ram             0        → 32768    prompt cache reuse
+  --flash-attn            auto     → on       force FA path
+  --cache-type-k          f16      → q8_0     halve KV mem
+  --cache-type-v          f16      → q8_0     halve KV mem
+  --ctx-size              32768    → 131072   agent loops up to 100k
+  --ubatch-size           512      → 2048     prefill throughput
+  --spec-draft-n-max      —        → 5        MTP for code
+
+Benchmarks (cold | warm, prompt_tok/s • decode_tok/s):
+  size    BEFORE              AFTER               Δ warm TTFT
+  256     412 • 38   480 • 41 | 451 • 39   1820 • 42   19×
+  2048    398 • 36   460 • 38 | 442 • 37   1740 • 40   18×
+  8192    361 • 34   420 • 36 | 410 • 35   1600 • 38   16×
+  32768   240 • 28   285 • 29 | 290 • 30   1100 • 31   13×
+  65536   142 • 22   170 • 23 |  175 • 24    640 • 25    9×
+
+Verdict:    warm TTFT ↓ 13-19× across all sizes; long-ctx decode ↑ 7-9%.
+Caveats:    Prompt cache only pays back when the agent re-sends overlapping context.
+Next:       Sweep --spec-draft-n-max ∈ {3,5,8} during a real coding session.
+```
+
+The exact numbers will differ per machine and model; the *shape* (flag diff → benchmark table → verdict → caveats → next) is the testable contract.
+
 ## Resources
 
 - `scripts/bench_agent.py` — coding-agent shaped benchmark. Sends five prompt sizes, both cold and warm, parses the server's `timings` field, writes machine-readable JSON.
 - `references/agent-tuning-knobs.md` — every flag this skill might recommend, why, and what it costs.
-- `references/report-format.md` — the final-report template.
+- `references/report-format.md` — the final-report template (full version).
 
 ## Notes & gotchas
 
