@@ -2504,16 +2504,20 @@ def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
                 f"re-run wizard step 4 to capture the file path"
             ),
         }
+    tuning = state.profile.get("llamacpp_tuning") or {}
+    host = str(tuning.get("host") or pb.LLAMACPP_SERVER_HOST)
     info(
         f"Restarting llama-server on "
-        f"{pb.LLAMACPP_SERVER_HOST}:{pb.LLAMACPP_SERVER_PORT} "
+        f"{host}:{pb.LLAMACPP_SERVER_PORT} "
         f"with model {Path(model_path).name}..."
     )
     start_result = pb.llamacpp_start_server(
         model_path=model_path,
         profile=state.profile,
         port=pb.LLAMACPP_SERVER_PORT,
-        host=pb.LLAMACPP_SERVER_HOST,
+        host=host,
+        ctx_size=int(tuning.get("ctx_size") or pb.LLAMACPP_CTX_SIZE),
+        extra_argv=list(tuning.get("extra_argv") or []),
     )
     if not start_result.get("ok"):
         return {

@@ -2433,6 +2433,9 @@ def build_llamacpp_server_args(
     additional flags; the MTP conflict guard in :func:`detect_llamacpp_mtp`
     is expected to have already inspected the same argv.
     """
+    extras = list(extra_argv) if extra_argv else []
+    has_threads = "--threads" in extras
+    has_spec_n = "--spec-draft-n-max" in extras
     argv = [
         binary,
         "--model",
@@ -2445,14 +2448,16 @@ def build_llamacpp_server_args(
         str(ctx_size),
         "--n-gpu-layers",
         str(n_gpu_layers),
-        "--threads",
-        str(threads),
     ]
+    if not has_threads:
+        argv += ["--threads", str(threads)]
     if mtp and mtp.get("enabled"):
         spec_n = int(mtp.get("spec_draft_n_max", LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX))
-        argv += ["--spec-type", "draft-mtp", "--spec-draft-n-max", str(spec_n)]
-    if extra_argv:
-        argv += list(extra_argv)
+        argv += ["--spec-type", "draft-mtp"]
+        if not has_spec_n:
+            argv += ["--spec-draft-n-max", str(spec_n)]
+    if extras:
+        argv += extras
     return argv
 
 
