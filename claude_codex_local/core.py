@@ -2312,22 +2312,33 @@ def detect_llamacpp_mtp(
 
     When MTP would be enabled, ``extra_argv`` is inspected for
     llama.cpp-incompatible flags (``-np`` / ``--parallel`` with N>1,
-    ``--mmproj``). On conflict, MTP is forced off and a warning is set so
-    the caller can surface it.
+    ``--mmproj``). On conflict, MTP is forced off, ``spec_draft_n_max`` is
+    cleared to ``None``, and ``warning`` is set so the caller can surface it.
 
-    Returns ``{"enabled": bool, "spec_draft_n_max": int, "source": str,
-    "warning": str | None}``. ``source`` is one of ``"env-override"``,
-    ``"gguf-metadata"``, ``"filename"``, ``"disabled"``, ``"conflict"``.
+    Returns ``{"enabled": bool, "spec_draft_n_max": int | None, "source": str,
+    "warning": str | None, "notes": list[str]}``. ``source`` is one of
+    ``"env-override"``, ``"gguf-metadata"``, ``"filename"``, ``"disabled"``,
+    ``"conflict"``. ``notes`` carries advisory diagnostics (e.g. a rejected
+    ``LLAMACPP_SPEC_DRAFT_N_MAX`` env value) that the caller may surface.
     """
     raw = LLAMACPP_SPEC_DRAFT_N_MAX
     spec_n = LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+    notes: list[str] = []
     if raw is not None:
         try:
             candidate = int(raw)
             if 1 <= candidate <= 16:
                 spec_n = candidate
+            else:
+                notes.append(
+                    f"LLAMACPP_SPEC_DRAFT_N_MAX={raw!r} out of range 1-16; "
+                    f"using default {LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX}"
+                )
         except (TypeError, ValueError):
-            pass
+            notes.append(
+                f"LLAMACPP_SPEC_DRAFT_N_MAX={raw!r} is not an integer; "
+                f"using default {LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX}"
+            )
 
     decided_source: str | None = None
     decided_enabled: bool | None = None
@@ -2341,6 +2352,7 @@ def detect_llamacpp_mtp(
                 "spec_draft_n_max": spec_n,
                 "source": "env-override",
                 "warning": None,
+                "notes": notes,
             }
         if token in {"1", "true", "on", "yes"}:
             decided_enabled = True
@@ -2358,7 +2370,13 @@ def detect_llamacpp_mtp(
                 decided_source = "filename"
 
     if not decided_enabled:
-        return {"enabled": False, "spec_draft_n_max": spec_n, "source": "disabled", "warning": None}
+        return {
+            "enabled": False,
+            "spec_draft_n_max": spec_n,
+            "source": "disabled",
+            "warning": None,
+            "notes": notes,
+        }
 
     if extra_argv:
         argv = list(extra_argv)
@@ -2366,9 +2384,10 @@ def detect_llamacpp_mtp(
             if tok == "--mmproj":
                 return {
                     "enabled": False,
-                    "spec_draft_n_max": spec_n,
+                    "spec_draft_n_max": None,
                     "source": "conflict",
                     "warning": "MTP disabled: --mmproj is not yet supported with --spec-type draft-mtp",
+                    "notes": notes,
                 }
             if tok in ("-np", "--parallel") and i + 1 < len(argv):
                 try:
@@ -2378,13 +2397,20 @@ def detect_llamacpp_mtp(
                 if n_par > 1:
                     return {
                         "enabled": False,
-                        "spec_draft_n_max": spec_n,
+                        "spec_draft_n_max": None,
                         "source": "conflict",
                         "warning": f"MTP disabled: -np {n_par} (>1) is not yet supported with --spec-type draft-mtp",
+                        "notes": notes,
                     }
 
     assert decided_source is not None  # set on every branch that enabled MTP
-    return {"enabled": True, "spec_draft_n_max": spec_n, "source": decided_source, "warning": None}
+    return {
+        "enabled": True,
+        "spec_draft_n_max": spec_n,
+        "source": decided_source,
+        "warning": None,
+        "notes": notes,
+    }
 
 
 def build_llamacpp_server_args(
@@ -2397,11 +2423,15 @@ def build_llamacpp_server_args(
     n_gpu_layers: int = 0,
     threads: int = 4,
     mtp: dict[str, Any] | None = None,
+    extra_argv: list[str] | None = None,
 ) -> list[str]:
     """Compose the argv list for llama-server with the wizard's defaults.
 
     When ``mtp`` is supplied and ``mtp["enabled"]`` is true, append the MTP
     spec-decoding flags (``--spec-type draft-mtp --spec-draft-n-max N``).
+    ``extra_argv`` (when supplied) is appended last so callers can layer in
+    additional flags; the MTP conflict guard in :func:`detect_llamacpp_mtp`
+    is expected to have already inspected the same argv.
     """
     argv = [
         binary,
@@ -2421,6 +2451,8 @@ def build_llamacpp_server_args(
     if mtp and mtp.get("enabled"):
         spec_n = int(mtp.get("spec_draft_n_max", LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX))
         argv += ["--spec-type", "draft-mtp", "--spec-draft-n-max", str(spec_n)]
+    if extra_argv:
+        argv += list(extra_argv)
     return argv
 
 
@@ -2537,6 +2569,7 @@ def llamacpp_start_server(
     host: str = LLAMACPP_SERVER_HOST,
     ctx_size: int = LLAMACPP_CTX_SIZE,
     timeout: float = 120.0,
+    extra_argv: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Spawn ``llama-server`` with the just-downloaded model and the wizard's
@@ -2571,7 +2604,7 @@ def llamacpp_start_server(
 
     gpu = detect_llamacpp_gpu_offload(profile)
     threads = detect_llamacpp_threads(profile)
-    mtp = detect_llamacpp_mtp(model_path)
+    mtp = detect_llamacpp_mtp(model_path, extra_argv=extra_argv)
     argv = build_llamacpp_server_args(
         binary=binary,
         model_path=model_path,
@@ -2581,6 +2614,7 @@ def llamacpp_start_server(
         n_gpu_layers=int(gpu["n_gpu_layers"]),
         threads=threads,
         mtp=mtp,
+        extra_argv=extra_argv,
     )
 
     LLAMACPP_LOG_DIR.mkdir(parents=True, exist_ok=True)

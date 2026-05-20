@@ -2457,6 +2457,8 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
         )
     elif mtp.get("warning"):
         warn(mtp["warning"])
+    for note in mtp.get("notes") or []:
+        warn(note)
     info(f"Server log: {handle.log_path}")
 
     smoke = pb.smoke_test_llamacpp_model(tag)
@@ -2530,6 +2532,8 @@ def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
         )
     elif mtp.get("warning"):
         warn(mtp["warning"])
+    for note in mtp.get("notes") or []:
+        warn(note)
     return {"ok": True, "reused": False}
 
 

@@ -1934,6 +1934,30 @@ class TestLlamaCppArgBuilders:
         )
         assert argv[argv.index("--spec-draft-n-max") + 1] == "6"
 
+    def test_build_argv_appends_extra_argv(self):
+        # ``extra_argv`` should land at the tail so callers can layer extra
+        # flags (e.g. tracing, alternate samplers) without losing the
+        # wizard's defaults.
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            extra_argv=["--log-prefix", "foo", "--no-warmup"],
+        )
+        assert argv[-3:] == ["--log-prefix", "foo", "--no-warmup"]
+
+    def test_build_argv_extra_argv_after_mtp_flags(self):
+        # When both MTP and extra_argv are present, MTP flags come first so
+        # extra_argv can be a clear override layer at the tail.
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            mtp={"enabled": True, "spec_draft_n_max": 5, "source": "filename", "warning": None},
+            extra_argv=["--no-warmup"],
+        )
+        mtp_idx = argv.index("--spec-type")
+        extra_idx = argv.index("--no-warmup")
+        assert mtp_idx < extra_idx
+
 
 # ---------------------------------------------------------------------------
 # MTP detection — env override, filename heuristic, GGUF probe, conflict.
@@ -2280,6 +2304,54 @@ class TestDetectLlamaCppMtp:
         assert out["enabled"] is False
         assert out["source"] == "conflict"
 
+    def test_conflict_clears_spec_draft_n_max(self, monkeypatch, tmp_path):
+        # On conflict, ``spec_draft_n_max`` should be ``None`` so the disabled
+        # state is unambiguous to downstream consumers.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        out = pb.detect_llamacpp_mtp(
+            tmp_path / "x.gguf",
+            extra_argv=["--mmproj", "/tmp/proj.gguf"],
+        )
+        assert out["enabled"] is False
+        assert out["source"] == "conflict"
+        assert out["spec_draft_n_max"] is None
+
+    def test_bad_spec_env_value_emits_note_out_of_range(self, monkeypatch, tmp_path):
+        # Out-of-range integer should fall back to default AND surface a note.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+        assert any("out of range" in n for n in out["notes"])
+        assert any("'99'" in n or "99" in n for n in out["notes"])
+
+    def test_bad_spec_env_value_emits_note_garbage(self, monkeypatch, tmp_path):
+        # Non-integer value should fall back to default AND surface a note.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "fast-and-loose")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+        assert any("not an integer" in n for n in out["notes"])
+
+    def test_good_spec_env_value_emits_no_note(self, monkeypatch, tmp_path):
+        # Valid in-range value should not produce any note.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == 6
+        assert out["notes"] == []
+
+    def test_notes_preserved_through_env_override_off(self, monkeypatch, tmp_path):
+        # Env-override-off short-circuits early but still surfaces any spec
+        # env diagnostics the operator should see.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "0")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["enabled"] is False
+        assert out["source"] == "env-override"
+        assert any("out of range" in n for n in out["notes"])
+
 
 class TestLlamaCppGpuOffload:
     def test_env_override_wins_over_profile(self, monkeypatch):
@@ -2518,6 +2590,84 @@ class TestLlamaCppStartServer:
         assert out["ok"] is False
         assert "did not become ready" in out["error"]
         assert len(stop_calls) == 1
+
+    def test_extra_argv_threads_through_to_argv(self, monkeypatch, isolated_state, tmp_path):
+        # ``extra_argv`` passed to llamacpp_start_server must reach the spawned
+        # argv so callers can layer in additional flags without losing the
+        # wizard's defaults.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "plain.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 17171
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+
+        out = pb_mod.llamacpp_start_server(
+            model_path=str(model_file),
+            port=18007,
+            extra_argv=["--no-warmup", "--log-prefix", "ccl"],
+        )
+        assert out["ok"] is True
+        assert out["handle"].argv[-3:] == ["--no-warmup", "--log-prefix", "ccl"]
+
+    def test_extra_argv_conflict_disables_mtp_at_runtime(
+        self, monkeypatch, isolated_state, tmp_path
+    ):
+        # End-to-end: an MTP-named model + an extra_argv containing --mmproj
+        # must trigger the conflict guard inside the production launch path
+        # (not just in detect_llamacpp_mtp unit tests). MTP flags must NOT
+        # land in the spawned argv.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(pb_mod, "LLAMACPP_MTP_ENABLED", None)
+        monkeypatch.setattr(pb_mod, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "Qwen3.6-27B-MTP.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 27171
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+
+        out = pb_mod.llamacpp_start_server(
+            model_path=str(model_file),
+            port=18008,
+            extra_argv=["--mmproj", "/tmp/proj.gguf"],
+        )
+        assert out["ok"] is True
+        # MTP flags must be absent — the runtime conflict guard fired.
+        assert "--spec-type" not in out["handle"].argv
+        assert "draft-mtp" not in out["handle"].argv
+        # The conflict warning surfaces via the mtp dict the caller returns.
+        mtp = out["mtp"] or {}
+        assert mtp.get("enabled") is False
+        assert mtp.get("source") == "conflict"
+        assert "mmproj" in (mtp.get("warning") or "")
 
     def test_post_readiness_exit_cleans_up_pid_file(self, monkeypatch, isolated_state, tmp_path):
         pb_mod, _wiz, _ = isolated_state
