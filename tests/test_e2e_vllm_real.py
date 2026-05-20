@@ -197,7 +197,12 @@ def core(live_server):
     """
     Reload core with VLLM_BASE_URL pointing at our test server, so the
     adapter and helper functions hit the live process — no mocks.
+
+    Restores env on teardown so we don't leak the test server's URL into
+    other test modules sharing the same pytest process (was breaking
+    tests/test_vllm_unit.py::TestVLLMAdapterInit::test_default_values).
     """
+    saved = {k: os.environ.get(k) for k in ("VLLM_BASE_URL", "VLLM_TIMEOUT", "VLLM_MAX_TOKENS")}
     base_url = f"http://{REAL_TEST_HOST}:{live_server}"
     os.environ["VLLM_BASE_URL"] = base_url
     # Generous timeout: the first /chat/completions warms the kernel.
@@ -207,9 +212,17 @@ def core(live_server):
     import claude_codex_local.core as pb
 
     pb = importlib.reload(pb)
-    yield pb
-
-    # Don't unset — other tests may want them, and the process is exiting.
+    try:
+        yield pb
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        # core.py captures VLLM_BASE_URL at module-load time (line ~67),
+        # so reload once more after restoring env to refresh that constant.
+        importlib.reload(pb)
 
 
 # ---------------------------------------------------------------------------
