@@ -12,6 +12,7 @@ Usage:
     python3 bench_agent.py [--base URL] [--runs N] [--out PATH]
                            [--max-prompt-tokens N]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,11 +25,11 @@ import urllib.request
 
 DEFAULT_CASES = [
     # (label, approx prompt tokens, n_predict)
-    ("256 / 128",   256,   128),
-    ("2k / 256",    2048,  256),
-    ("8k / 256",    8192,  256),
-    ("32k / 256",   32768, 256),
-    ("64k / 256",   65536, 256),
+    ("256 / 128", 256, 128),
+    ("2k / 256", 2048, 256),
+    ("8k / 256", 8192, 256),
+    ("32k / 256", 32768, 256),
+    ("64k / 256", 65536, 256),
 ]
 
 CODE_FILLER = (
@@ -158,7 +159,9 @@ def render(rows: list[dict]) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--base", default="http://127.0.0.1:8001", help="llama-server base URL")
     ap.add_argument("--runs", type=int, default=3, help="runs per case (cold + warm)")
     ap.add_argument("--out", help="write JSON result here")
@@ -172,9 +175,12 @@ def main() -> None:
 
     healthcheck(args.base)
 
-    cases = [(l, p, n) for (l, p, n) in DEFAULT_CASES if p <= args.max_prompt_tokens]
+    cases = [(label, p, n) for (label, p, n) in DEFAULT_CASES if p <= args.max_prompt_tokens]
     if not cases:
-        print(f"error: no cases fit under --max-prompt-tokens={args.max_prompt_tokens}", file=sys.stderr)
+        print(
+            f"error: no cases fit under --max-prompt-tokens={args.max_prompt_tokens}",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     print(f"Benchmarking {args.base} (coding-agent profile, runs={args.runs})")
