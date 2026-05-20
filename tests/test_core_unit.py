@@ -1897,6 +1897,461 @@ class TestLlamaCppArgBuilders:
         assert "--n-gpu-layers" in argv and argv[argv.index("--n-gpu-layers") + 1] == "-1"
         assert "--threads" in argv and argv[argv.index("--threads") + 1] == "8"
 
+    def test_build_argv_omits_mtp_when_disabled(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/model.gguf",
+            mtp={"enabled": False, "spec_draft_n_max": 5, "source": "disabled", "warning": None},
+        )
+        assert "--spec-type" not in argv
+        assert "--spec-draft-n-max" not in argv
+
+    def test_build_argv_omits_mtp_when_none(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/model.gguf",
+            mtp=None,
+        )
+        assert "--spec-type" not in argv
+        assert "--spec-draft-n-max" not in argv
+
+    def test_build_argv_appends_mtp_when_enabled(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/Qwen3.6-27B-MTP.gguf",
+            mtp={"enabled": True, "spec_draft_n_max": 5, "source": "filename", "warning": None},
+        )
+        assert "--spec-type" in argv
+        assert argv[argv.index("--spec-type") + 1] == "draft-mtp"
+        assert "--spec-draft-n-max" in argv
+        assert argv[argv.index("--spec-draft-n-max") + 1] == "5"
+
+    def test_build_argv_uses_custom_spec_draft_n_max(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            mtp={"enabled": True, "spec_draft_n_max": 6, "source": "env-override", "warning": None},
+        )
+        assert argv[argv.index("--spec-draft-n-max") + 1] == "6"
+
+    def test_build_argv_appends_extra_argv(self):
+        # ``extra_argv`` should land at the tail so callers can layer extra
+        # flags (e.g. tracing, alternate samplers) without losing the
+        # wizard's defaults.
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            extra_argv=["--log-prefix", "foo", "--no-warmup"],
+        )
+        assert argv[-3:] == ["--log-prefix", "foo", "--no-warmup"]
+
+    def test_build_argv_extra_argv_after_mtp_flags(self):
+        # When both MTP and extra_argv are present, MTP flags come first so
+        # extra_argv can be a clear override layer at the tail.
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            mtp={"enabled": True, "spec_draft_n_max": 5, "source": "filename", "warning": None},
+            extra_argv=["--no-warmup"],
+        )
+        mtp_idx = argv.index("--spec-type")
+        extra_idx = argv.index("--no-warmup")
+        assert mtp_idx < extra_idx
+
+
+# ---------------------------------------------------------------------------
+# MTP detection — env override, filename heuristic, GGUF probe, conflict.
+# ---------------------------------------------------------------------------
+
+
+def _write_minimal_gguf(
+    path,
+    *,
+    arch: str = "qwen3",
+    name: str = "test-model",
+    extra_keys: list[tuple[str, str]] | None = None,
+) -> None:
+    """Write a minimal GGUF file with a couple of string metadata KV pairs.
+
+    Only what ``probe_gguf_is_mtp`` reads is populated; tensor data is omitted
+    (the probe only walks the header KV section, so this is enough).
+    """
+    import struct as _struct
+
+    T_STRING = 8
+    extra_keys = extra_keys or []
+    kv_pairs: list[tuple[str, int, str]] = [
+        ("general.architecture", T_STRING, arch),
+        ("general.name", T_STRING, name),
+    ]
+    for k, v in extra_keys:
+        kv_pairs.append((k, T_STRING, v))
+
+    with open(path, "wb") as fh:
+        fh.write(b"GGUF")
+        fh.write(_struct.pack("<I", 3))  # version
+        fh.write(_struct.pack("<Q", 0))  # tensor_count
+        fh.write(_struct.pack("<Q", len(kv_pairs)))  # kv_count
+        for key, vtype, val in kv_pairs:
+            key_b = key.encode("utf-8")
+            fh.write(_struct.pack("<Q", len(key_b)))
+            fh.write(key_b)
+            fh.write(_struct.pack("<I", vtype))
+            val_b = val.encode("utf-8")
+            fh.write(_struct.pack("<Q", len(val_b)))
+            fh.write(val_b)
+
+
+class TestProbeGgufIsMtp:
+    def test_returns_file_not_found(self, tmp_path):
+        out = pb.probe_gguf_is_mtp(tmp_path / "missing.gguf")
+        assert out["is_mtp"] is False
+        assert out["reason"] == "file-not-found"
+
+    def test_returns_not_gguf_for_random_file(self, tmp_path):
+        p = tmp_path / "junk.bin"
+        p.write_bytes(b"PK\x03\x04not-a-gguf-just-some-zip-magic-and-bytes" * 4)
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert out["reason"] == "not-gguf"
+
+    def test_returns_false_for_regular_gguf(self, tmp_path):
+        p = tmp_path / "regular.gguf"
+        _write_minimal_gguf(p, arch="qwen3", name="Qwen3-Coder-7B")
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert out["reason"] == "scanned-no-mtp"
+
+    def test_detects_mtp_in_general_name(self, tmp_path):
+        p = tmp_path / "mtp.gguf"
+        _write_minimal_gguf(p, arch="qwen3", name="Qwen3.6-27B-MTP")
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is True
+        assert "general.name" in out["reason"]
+
+    def test_detects_mtp_via_metadata_key(self, tmp_path):
+        p = tmp_path / "mtp-key.gguf"
+        _write_minimal_gguf(
+            p,
+            arch="qwen3moe",
+            name="quiet",
+            extra_keys=[("qwen3moe.mtp.layers", "8")],
+        )
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is True
+        assert "metadata-key" in out["reason"]
+
+    def test_handles_truncated_header(self, tmp_path):
+        p = tmp_path / "trunc.gguf"
+        p.write_bytes(b"GGUF\x03\x00\x00")  # magic + 3 of 4 version bytes
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert out["reason"].startswith("truncated") or out["reason"].startswith("probe-failed")
+
+    def test_rejects_gguf_v1(self, tmp_path):
+        # GGUFv1 used uint32 counts; parsing it as v3 would silently
+        # misalign the KV walk and read tensor data as kv pairs.
+        import struct as _struct
+
+        p = tmp_path / "v1.gguf"
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 1))  # version 1
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 0))  # kv_count
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert "unsupported-gguf-version" in out["reason"]
+
+    def test_rejects_nested_array(self, tmp_path):
+        # A malicious header claiming element_type=ARRAY would normally drive
+        # unbounded recursion; the probe must refuse it.
+        import struct as _struct
+
+        T_ARRAY = 9
+        T_UINT8 = 0
+        p = tmp_path / "nested.gguf"
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 1))  # kv_count = 1
+            key = b"bad.key"
+            fh.write(_struct.pack("<Q", len(key)))
+            fh.write(key)
+            fh.write(_struct.pack("<I", T_ARRAY))  # outer is array
+            fh.write(_struct.pack("<IQ", T_ARRAY, 1))  # of arrays, len 1
+            fh.write(_struct.pack("<IQ", T_UINT8, 0))  # inner array
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert "nested-array" in out["reason"] or out["reason"].startswith("probe-failed")
+
+    def test_signals_truncation_when_kv_count_exceeds_cap(self, tmp_path):
+        # Header claims more KV pairs than MAX_KV_COUNT (8192) and the file
+        # actually packs enough valid pairs that the scan reaches the cap
+        # without hitting an MTP indicator. The probe should clamp to the
+        # cap, walk that many pairs cleanly, and signal truncation in the
+        # reason so callers can tell the scan was incomplete.
+        import struct as _struct
+
+        T_UINT8 = 0
+        p = tmp_path / "huge.gguf"
+        # Each pair: 8-byte key length, 1 key byte, 4-byte vtype, 1-byte value.
+        pair = _struct.pack("<Q", 1) + b"k" + _struct.pack("<I", T_UINT8) + b"\x00"
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))  # version
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 20000))  # kv_count claim (> 8192 cap)
+            # Pack 8193 valid pairs so the capped scan completes cleanly.
+            fh.write(pair * 8193)
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert out["reason"] == "scanned-no-mtp-truncated"
+
+    def test_detects_mtp_via_nextn_predict_layers_key(self, tmp_path):
+        # Real Unsloth Qwen3.6-MTP-GGUF files advertise MTP in the file name
+        # but the metadata uses an architecture-prefixed key like
+        # `qwen35.nextn_predict_layers` instead of `.mtp.` / `mtp.`.
+        # The probe must recognize that family.
+        p = tmp_path / "qwen-mtp.gguf"
+        _write_minimal_gguf(
+            p,
+            arch="qwen35",
+            name="Qwen3.6-27B",
+            extra_keys=[("qwen35.nextn_predict_layers", "1")],
+        )
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is True
+        assert "nextn_predict_layers" in out["reason"]
+
+    def test_oversized_scalar_array_does_not_desync_walk(self, tmp_path):
+        # A large scalar array (e.g. tokenizer.ggml.token_type, a UINT32
+        # array with ~250k entries) must be skipped in one seek so the
+        # subsequent KV walk stays aligned. Place an MTP indicator *after*
+        # the array to verify the walk continues correctly.
+        import struct as _struct
+
+        T_STRING = 8
+        T_ARRAY = 9
+        T_UINT32 = 4
+
+        p = tmp_path / "tokenized-mtp.gguf"
+        arr_len = 250000
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))  # version
+            fh.write(_struct.pack("<Q", 0))  # tensor_count
+            fh.write(_struct.pack("<Q", 3))  # kv_count = 3
+
+            # KV[0]: general.architecture = "qwen35"
+            arch_key = b"general.architecture"
+            arch_val = b"qwen35"
+            fh.write(_struct.pack("<Q", len(arch_key)) + arch_key)
+            fh.write(_struct.pack("<I", T_STRING))
+            fh.write(_struct.pack("<Q", len(arch_val)) + arch_val)
+
+            # KV[1]: an oversized scalar array of UINT32s.
+            big_key = b"tokenizer.ggml.token_type"
+            fh.write(_struct.pack("<Q", len(big_key)) + big_key)
+            fh.write(_struct.pack("<I", T_ARRAY))
+            fh.write(_struct.pack("<I", T_UINT32))
+            fh.write(_struct.pack("<Q", arr_len))
+            fh.write(b"\x00\x00\x00\x00" * arr_len)
+
+            # KV[2]: the MTP signal — must still be found after the array.
+            mtp_key = b"qwen35.nextn_predict_layers"
+            fh.write(_struct.pack("<Q", len(mtp_key)) + mtp_key)
+            fh.write(_struct.pack("<I", T_UINT32))
+            fh.write(b"\x01\x00\x00\x00")
+
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is True
+        assert "nextn_predict_layers" in out["reason"]
+
+    def test_oversized_string_array_bails_cleanly(self, tmp_path):
+        # T_STRING arrays can't be seeked past in one step (each entry's
+        # length is variable), so an `arr_len` above MAX_ARRAY_LEN must
+        # raise rather than scan a truncated prefix and corrupt the cursor.
+        import struct as _struct
+
+        T_STRING = 8
+        T_ARRAY = 9
+
+        p = tmp_path / "huge-string-array.gguf"
+        with open(p, "wb") as fh:
+            fh.write(b"GGUF")
+            fh.write(_struct.pack("<I", 3))
+            fh.write(_struct.pack("<Q", 0))
+            fh.write(_struct.pack("<Q", 1))  # kv_count = 1
+
+            # KV[0]: a T_STRING array claiming 1M entries.
+            key = b"tokenizer.ggml.tokens"
+            fh.write(_struct.pack("<Q", len(key)) + key)
+            fh.write(_struct.pack("<I", T_ARRAY))
+            fh.write(_struct.pack("<I", T_STRING))
+            fh.write(_struct.pack("<Q", 1_000_000))
+            # Truncated body — we never reach it because the probe bails
+            # on the size header.
+
+        out = pb.probe_gguf_is_mtp(p)
+        assert out["is_mtp"] is False
+        assert "oversized-string-array" in out["reason"]
+
+
+class TestDetectLlamaCppMtp:
+    def test_env_override_off_short_circuits(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "0")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        p = tmp_path / "Qwen3.6-27B-MTP.gguf"
+        _write_minimal_gguf(p, name="Qwen3.6-27B-MTP")
+        out = pb.detect_llamacpp_mtp(p)
+        assert out["enabled"] is False
+        assert out["source"] == "env-override"
+
+    def test_env_override_on_forces_enabled(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        # File does not exist — env override still wins.
+        out = pb.detect_llamacpp_mtp(tmp_path / "anything.gguf")
+        assert out["enabled"] is True
+        assert out["source"] == "env-override"
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+
+    def test_filename_heuristic_triggers_when_probe_inconclusive(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", None)
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        # No actual file → probe returns file-not-found; filename pattern wins.
+        out = pb.detect_llamacpp_mtp(tmp_path / "Qwen3.6-27B-MTP-Q4_K_M.gguf")
+        assert out["enabled"] is True
+        assert out["source"] == "filename"
+
+    def test_no_false_positive_on_unrelated_name(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", None)
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        # "promtp" must not match — boundary-anchored regex.
+        out = pb.detect_llamacpp_mtp(tmp_path / "some-promtp-model.gguf")
+        assert out["enabled"] is False
+        assert out["source"] == "disabled"
+
+    def test_gguf_probe_overrides_filename_when_present(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", None)
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        # Plain filename, but the GGUF metadata declares MTP.
+        p = tmp_path / "plain-name.gguf"
+        _write_minimal_gguf(p, name="Qwen3.6-27B-MTP-Q4")
+        out = pb.detect_llamacpp_mtp(p)
+        assert out["enabled"] is True
+        assert out["source"] == "gguf-metadata"
+
+    def test_spec_draft_n_max_env_override(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == 6
+
+    def test_spec_draft_n_max_ignores_garbage(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "fast-and-loose")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+
+    def test_spec_draft_n_max_clamps_out_of_range(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+
+    def test_conflict_with_mmproj_disables_and_warns(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        out = pb.detect_llamacpp_mtp(
+            tmp_path / "x.gguf",
+            extra_argv=["--mmproj", "/tmp/proj.gguf"],
+        )
+        assert out["enabled"] is False
+        assert out["source"] == "conflict"
+        assert "mmproj" in (out["warning"] or "")
+
+    def test_conflict_with_np_gt_1_disables_and_warns(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        out = pb.detect_llamacpp_mtp(
+            tmp_path / "x.gguf",
+            extra_argv=["-np", "4"],
+        )
+        assert out["enabled"] is False
+        assert out["source"] == "conflict"
+        assert "-np 4" in (out["warning"] or "")
+
+    def test_np_equal_1_does_not_conflict(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        out = pb.detect_llamacpp_mtp(
+            tmp_path / "x.gguf",
+            extra_argv=["-np", "1"],
+        )
+        assert out["enabled"] is True
+
+    def test_parallel_long_form_also_conflicts(self, monkeypatch, tmp_path):
+        # `--parallel 4` should behave the same as `-np 4`.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        out = pb.detect_llamacpp_mtp(
+            tmp_path / "x.gguf",
+            extra_argv=["--parallel", "4"],
+        )
+        assert out["enabled"] is False
+        assert out["source"] == "conflict"
+
+    def test_conflict_clears_spec_draft_n_max(self, monkeypatch, tmp_path):
+        # On conflict, ``spec_draft_n_max`` should be ``None`` so the disabled
+        # state is unambiguous to downstream consumers.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        out = pb.detect_llamacpp_mtp(
+            tmp_path / "x.gguf",
+            extra_argv=["--mmproj", "/tmp/proj.gguf"],
+        )
+        assert out["enabled"] is False
+        assert out["source"] == "conflict"
+        assert out["spec_draft_n_max"] is None
+
+    def test_bad_spec_env_value_emits_note_out_of_range(self, monkeypatch, tmp_path):
+        # Out-of-range integer should fall back to default AND surface a note.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+        assert any("out of range" in n for n in out["notes"])
+        assert any("'99'" in n or "99" in n for n in out["notes"])
+
+    def test_bad_spec_env_value_emits_note_garbage(self, monkeypatch, tmp_path):
+        # Non-integer value should fall back to default AND surface a note.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "fast-and-loose")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
+        assert any("not an integer" in n for n in out["notes"])
+
+    def test_good_spec_env_value_emits_no_note(self, monkeypatch, tmp_path):
+        # Valid in-range value should not produce any note.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["spec_draft_n_max"] == 6
+        assert out["notes"] == []
+
+    def test_notes_preserved_through_env_override_off(self, monkeypatch, tmp_path):
+        # Env-override-off short-circuits early but still surfaces any spec
+        # env diagnostics the operator should see.
+        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "0")
+        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
+        assert out["enabled"] is False
+        assert out["source"] == "env-override"
+        assert any("out of range" in n for n in out["notes"])
+
 
 class TestLlamaCppGpuOffload:
     def test_env_override_wins_over_profile(self, monkeypatch):
@@ -2135,6 +2590,84 @@ class TestLlamaCppStartServer:
         assert out["ok"] is False
         assert "did not become ready" in out["error"]
         assert len(stop_calls) == 1
+
+    def test_extra_argv_threads_through_to_argv(self, monkeypatch, isolated_state, tmp_path):
+        # ``extra_argv`` passed to llamacpp_start_server must reach the spawned
+        # argv so callers can layer in additional flags without losing the
+        # wizard's defaults.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "plain.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 17171
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+
+        out = pb_mod.llamacpp_start_server(
+            model_path=str(model_file),
+            port=18007,
+            extra_argv=["--no-warmup", "--log-prefix", "ccl"],
+        )
+        assert out["ok"] is True
+        assert out["handle"].argv[-3:] == ["--no-warmup", "--log-prefix", "ccl"]
+
+    def test_extra_argv_conflict_disables_mtp_at_runtime(
+        self, monkeypatch, isolated_state, tmp_path
+    ):
+        # End-to-end: an MTP-named model + an extra_argv containing --mmproj
+        # must trigger the conflict guard inside the production launch path
+        # (not just in detect_llamacpp_mtp unit tests). MTP flags must NOT
+        # land in the spawned argv.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(pb_mod, "LLAMACPP_MTP_ENABLED", None)
+        monkeypatch.setattr(pb_mod, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        monkeypatch.setattr(
+            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "Qwen3.6-27B-MTP.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 27171
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+
+        out = pb_mod.llamacpp_start_server(
+            model_path=str(model_file),
+            port=18008,
+            extra_argv=["--mmproj", "/tmp/proj.gguf"],
+        )
+        assert out["ok"] is True
+        # MTP flags must be absent — the runtime conflict guard fired.
+        assert "--spec-type" not in out["handle"].argv
+        assert "draft-mtp" not in out["handle"].argv
+        # The conflict warning surfaces via the mtp dict the caller returns.
+        mtp = out["mtp"] or {}
+        assert mtp.get("enabled") is False
+        assert mtp.get("source") == "conflict"
+        assert "mmproj" in (mtp.get("warning") or "")
 
     def test_post_readiness_exit_cleans_up_pid_file(self, monkeypatch, isolated_state, tmp_path):
         pb_mod, _wiz, _ = isolated_state
