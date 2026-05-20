@@ -78,7 +78,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/
 Override defaults with env vars:
 
 ```bash
-CCL_REF=v0.13.1 CCL_INSTALL_DIR=~/tools/claude-codex-local \
+CCL_REF=v0.14.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
   bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
 ```
 

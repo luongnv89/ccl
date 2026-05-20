@@ -7,12 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## v0.14.0 — 2026-05-20
+
 ### Features
 
-- **MTP (Multi-Token Prediction) support for llama.cpp** (#102): `llama-server` is now auto-launched with `--spec-type draft-mtp --spec-draft-n-max 5` whenever the chosen model is an MTP variant. Detection runs in two passes:
+- **MTP (Multi-Token Prediction) support for llama.cpp** (#102, #103): `llama-server` is now auto-launched with `--spec-type draft-mtp --spec-draft-n-max 5` whenever the chosen model is an MTP variant. Detection runs in two passes:
   1. **GGUF metadata probe** — read the file's header KV table for an architecture-specific `*.mtp.*` key, a key ending in `.nextn_predict_layers` (the cross-arch convention used by Qwen, GLM, and DeepSeek MTP releases), or `MTP` in `general.name` / `general.architecture`. Large scalar arrays (tokenizer vocabularies, token-type tables) are skipped with a single seek so the KV walk stays aligned past them.
   2. **Filename fallback** — match `*mtp*` (word-bounded, case-insensitive) on the basename when the probe is inconclusive.
   Two env vars override the decision: `LLAMACPP_MTP_ENABLED=0/1` forces off/on, and `LLAMACPP_SPEC_DRAFT_N_MAX=N` overrides the default 5 (valid range 1–16). The detector also recognizes flag combinations that llama.cpp does not yet pair with `--spec-type draft-mtp` (`--mmproj`, `-np`/`--parallel > 1`) and disables MTP with a warning when those flags are supplied. `llamacpp_start_server()` and `build_llamacpp_server_args()` now accept an `extra_argv` kwarg that flows into the conflict guard *and* lands at the tail of the spawned argv, so any caller layering in additional `llama-server` flags exercises the guard at runtime. An out-of-range or non-integer `LLAMACPP_SPEC_DRAFT_N_MAX` is surfaced as a `notes` entry on the MTP result (and as a wizard warning) instead of silently reverting to the default. Reference: <https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF>.
+- **`llamacpp-tuner` skill** for coding-agent performance tuning: new Claude Code skill that helps optimize llama.cpp server configuration for coding-agent workloads. Includes benchmark agent and configuration profiles.
+
+### Bug Fixes
+
+- Resolve mypy and ruff failures from v0.13.1 CI.
+- Apply ruff format and rename ambiguous `l` identifier in `bench_agent.py`.
+
+### Chore
+
+- Level up `llamacpp-tuner` skill to A grade.
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.13.1...v0.14.0
 
 ## v0.13.1 — 2026-05-19
 

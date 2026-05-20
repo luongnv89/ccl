@@ -67,15 +67,15 @@
         <div class="tb-page-stats reveal">
           <div class="stat">
             <div class="stat-label">Latest</div>
-            <div class="stat-value"><span class="dot"></span>v0.13.1</div>
+            <div class="stat-value"><span class="dot"></span>v0.14.0</div>
           </div>
           <div class="stat">
             <div class="stat-label">Released</div>
-            <div class="stat-value">2026-05-19</div>
+            <div class="stat-value">2026-05-20</div>
           </div>
           <div class="stat">
             <div class="stat-label">Releases shown</div>
-            <div class="stat-value">8</div>
+            <div class="stat-value">9</div>
           </div>
         </div>
       </div>
@@ -92,12 +92,45 @@
 
         <div class="tb-changelog">
 
+          <!-- v0.14.0 -->
+          <div class="tb-clog-entry reveal">
+            <div class="tb-clog-side">
+              <div class="ver">v0.14.0</div>
+              <div class="date">2026-05-20</div>
+              <div class="latest">Latest</div>
+            </div>
+            <div class="tb-clog-body">
+              <div class="tb-clog-group added">
+                <div class="tb-clog-group-head">Added</div>
+                <ul class="tb-clog-list">
+                  <li><strong>MTP (Multi-Token Prediction) support for llama.cpp</strong> (#102, #103): <code>llama-server</code> auto-launches with <code>--spec-type draft-mtp --spec-draft-n-max 5</code> for MTP variants. Detection runs two passes: a GGUF metadata probe (architecture-specific <code>*.mtp.*</code> keys, <code>*.nextn_predict_layers</code> cross-arch convention, or <code>MTP</code> in <code>general.name</code>/<code>general.architecture</code>) and a filename fallback (<code>*mtp*</code>, word-bounded, case-insensitive). Env vars <code>LLAMACPP_MTP_ENABLED=0/1</code> and <code>LLAMACPP_SPEC_DRAFT_N_MAX=N</code> (range 1–16) override. Conflict guard recognizes <code>--mmproj</code> and <code>-np</code>/<code>--parallel &gt; 1</code> and disables MTP with a warning; out-of-range values surface as <code>notes</code> entries on the MTP result.</li>
+                  <li><strong><code>llamacpp-tuner</code> skill</strong>: new Claude Code skill that helps optimize llama.cpp server configuration for coding-agent workloads. Includes a benchmark agent and configuration profiles.</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group fixed">
+                <div class="tb-clog-group-head">Fixed</div>
+                <ul class="tb-clog-list">
+                  <li>Resolve mypy and ruff failures from v0.13.1 CI.</li>
+                  <li>Apply ruff format and rename ambiguous <code>l</code> identifier in <code>bench_agent.py</code>.</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group changed">
+                <div class="tb-clog-group-head">Chore</div>
+                <ul class="tb-clog-list">
+                  <li>Level up <code>llamacpp-tuner</code> skill to A grade.</li>
+                </ul>
+              </div>
+              <a href="https://github.com/luongnv89/ccl/compare/v0.13.1...v0.14.0" target="_blank" rel="noopener" class="tb-clog-link">
+                Full compare diff →
+              </a>
+            </div>
+          </div>
+
           <!-- v0.13.1 -->
           <div class="tb-clog-entry reveal">
             <div class="tb-clog-side">
               <div class="ver">v0.13.1</div>
               <div class="date">2026-05-19</div>
-              <div class="latest">Latest</div>
             </div>
             <div class="tb-clog-body">
               <div class="tb-clog-group added">
@@ -426,7 +459,7 @@
             <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
-          <strong>claude-codex-local</strong> · v0.13.1
+          <strong>claude-codex-local</strong> · v0.14.0
         </div>
         <ul class="footer-links">
           <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>
