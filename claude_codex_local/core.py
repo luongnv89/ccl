@@ -16,13 +16,35 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 ORIG_HOME = Path(os.environ.get("HOME", str(Path.home())))
 STATE_DIR = Path(os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", ORIG_HOME / ".claude-codex-local"))
 
 LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
+
+
+def _normalize_base_url(value: str, *, default_scheme: str = "http") -> str:
+    """Return a client base URL with scheme and no trailing slash."""
+    base = value.strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        base = f"{default_scheme}://{base}"
+    return base
+
+
+def _is_local_base_url(base_url: str) -> bool:
+    host = (urlparse(base_url).hostname or "").lower()
+    return host in {"", "localhost", "127.0.0.1", "::1"}
+
+
+OLLAMA_BASE_URL = _normalize_base_url(os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "")
 LLAMACPP_SERVER_PORT = int(os.environ.get("LLAMACPP_SERVER_PORT", "8001"))
 LLAMACPP_SERVER_HOST = os.environ.get("LLAMACPP_SERVER_HOST", "127.0.0.1")
+LLAMACPP_BASE_URL = _normalize_base_url(
+    os.environ.get("LLAMACPP_BASE_URL", f"http://localhost:{LLAMACPP_SERVER_PORT}")
+)
+LLAMACPP_API_KEY = os.environ.get("LLAMACPP_API_KEY", "")
 # 131072 (128k) is the minimum that survives a real coding session: Claude
 # Code's system prompt is ~26k, but a single tool turn that reads a diff or
 # a few source files routinely pushes the request past 40k. We saw real
@@ -64,7 +86,7 @@ OPENROUTER_KEY_FILE = STATE_DIR / "openrouter-api-key"
 # does not start the server (vllm needs a Python venv with CUDA/ROCm wheels);
 # we only probe reachability. The optional API key sits in a chmod-600 file
 # next to the 9router one — same security boundary.
-VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://localhost:8000")
+VLLM_BASE_URL = _normalize_base_url(os.environ.get("VLLM_BASE_URL", "http://localhost:8000"))
 VLLM_KEY_FILE = STATE_DIR / "vllm-api-key"
 
 # Machine profile cache: persist the full scan so subsequent setup runs
@@ -191,12 +213,22 @@ class OllamaAdapter:
     name: str = "ollama"
 
     def detect(self) -> dict[str, Any]:
+        info = ollama_info()
+        if info.get("present"):
+            return info
         return command_version("ollama")
 
     def healthcheck(self) -> dict[str, Any]:
-        info = command_version("ollama")
-        if not info.get("present"):
-            return {"ok": False, "detail": "ollama not found in PATH"}
+        info = ollama_info()
+        if info.get("server_reachable"):
+            models = info.get("models", [])
+            return {
+                "ok": True,
+                "detail": f"Ollama server up at {info['base_url']}, {len(models)} model(s) available",
+            }
+        cli = command_version("ollama")
+        if not cli.get("present"):
+            return {"ok": False, "detail": f"Ollama server not reachable at {ollama_base_url()}"}
         models = parse_ollama_list()
         return {"ok": True, "detail": f"{len(models)} model(s) installed"}
 
@@ -263,18 +295,19 @@ class LlamaCppAdapter:
 
     def healthcheck(self) -> dict[str, Any]:
         info = llamacpp_info()
+        base_url = info.get("base_url", llamacpp_base_url())
+        if info.get("server_running"):
+            return {
+                "ok": True,
+                "detail": f"server up at {base_url}",
+            }
         if not info.get("present"):
             return {"ok": False, "detail": "llama-server binary not found in PATH"}
-        if not info.get("server_running"):
-            return {
-                "ok": False,
-                "detail": f"llama.cpp server not running on port {info['server_port']}. "
-                f"The wizard's Step 5 will auto-start it after a model download; "
-                f"run `ccl --resume` to continue.",
-            }
         return {
-            "ok": True,
-            "detail": f"server up on port {info['server_port']}",
+            "ok": False,
+            "detail": f"llama.cpp server not running at {base_url}. "
+            f"The wizard's Step 5 will auto-start it after a model download; "
+            f"run `ccl --resume` to continue.",
         }
 
     def list_models(self) -> list[dict[str, Any]]:
@@ -317,7 +350,7 @@ class VLLMAdapter:
     def __post_init__(self):
         """Initialize configuration from environment variables."""
         base = os.environ.get("VLLM_BASE_URL", "http://localhost:8000")
-        self._base_url = base.rstrip("/") if isinstance(base, str) else base
+        self._base_url = _normalize_base_url(base) if isinstance(base, str) else base
         self._api_key = os.environ.get("VLLM_API_KEY", "")
         self._timeout = int(os.environ.get("VLLM_TIMEOUT", "60"))
         self._max_tokens = int(os.environ.get("VLLM_MAX_TOKENS", "2048"))
@@ -330,10 +363,7 @@ class VLLMAdapter:
 
     def _build_headers(self) -> dict[str, str]:
         """Build HTTP headers for API requests."""
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        return headers
+        return _auth_headers(self._api_key)
 
     def detect(self) -> dict[str, Any]:
         """Check if vLLM server is accessible.
@@ -402,7 +432,14 @@ class VLLMAdapter:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = json.loads(resp.read())
                 models = body.get("data", [])
-                return [{"name": m["id"], "format": "unknown", "local": True} for m in models]
+                return [
+                    {
+                        "name": m["id"],
+                        "format": "unknown",
+                        "local": _is_local_base_url(self._base_url or ""),
+                    }
+                    for m in models
+                ]
         except Exception:
             return []
 
@@ -628,12 +665,70 @@ def run_shell(
     return run(["bash", "-lc", command], env=env)
 
 
+def ollama_base_url() -> str:
+    return OLLAMA_BASE_URL
+
+
+def ollama_openai_base_url() -> str:
+    return f"{ollama_base_url()}/v1"
+
+
+def llamacpp_base_url() -> str:
+    return LLAMACPP_BASE_URL
+
+
+def _auth_headers(api_key: str | None) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
 # ---------------------------------------------------------------------------
 # Ollama helpers
 # ---------------------------------------------------------------------------
 
 
-def parse_ollama_list() -> list[dict[str, Any]]:
+def _ollama_http_models(timeout: int = 5) -> list[dict[str, Any]] | None:
+    if "OLLAMA_HOST" not in os.environ:
+        return None
+    import urllib.error
+    import urllib.request
+
+    url = f"{ollama_base_url()}/api/tags"
+    req = urllib.request.Request(url, headers=_auth_headers(OLLAMA_API_KEY), method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read())
+    except (urllib.error.URLError, OSError):
+        return None
+    except Exception:
+        return None
+
+    models = body.get("models", []) if isinstance(body, dict) else []
+    if not isinstance(models, list):
+        return []
+    is_local = _is_local_base_url(ollama_base_url())
+    result: list[dict[str, Any]] = []
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        name = str(model.get("name") or model.get("model") or "")
+        if not name:
+            continue
+        result.append(
+            {
+                "name": name,
+                "id": str(model.get("digest") or model.get("id") or ""),
+                "size": model.get("size", ""),
+                "modified": str(model.get("modified_at") or model.get("modified") or ""),
+                "local": is_local,
+            }
+        )
+    return result
+
+
+def _parse_ollama_list_cli() -> list[dict[str, Any]]:
     try:
         cp = run(["ollama", "list"])
     except Exception:
@@ -651,6 +746,32 @@ def parse_ollama_list() -> list[dict[str, Any]]:
             {"name": name, "id": model_id, "size": size, "modified": modified, "local": size != "-"}
         )
     return models
+
+
+def parse_ollama_list() -> list[dict[str, Any]]:
+    models = _ollama_http_models()
+    if models is not None:
+        return models
+    return _parse_ollama_list_cli()
+
+
+def ollama_info() -> dict[str, Any]:
+    cli_info = command_version("ollama")
+    models = _ollama_http_models()
+    server_reachable = models is not None
+    if models is None and cli_info.get("present"):
+        models = parse_ollama_list()
+    return {
+        "present": server_reachable or bool(cli_info.get("present")),
+        "version": cli_info.get("version", ""),
+        "base_url": ollama_base_url(),
+        "models": models or [],
+        "server_reachable": server_reachable,
+        "remote": not _is_local_base_url(ollama_base_url()),
+        "error": None
+        if server_reachable
+        else f"Ollama server not reachable at {ollama_base_url()}",
+    }
 
 
 def hf_name_to_ollama_tag(hf_name: str) -> str | None:
@@ -681,10 +802,7 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
     import urllib.error
     import urllib.request
 
-    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-    if not ollama_host.startswith(("http://", "https://")):
-        ollama_host = "http://" + ollama_host
-    url = f"{ollama_host}/api/generate"
+    url = f"{ollama_base_url()}/api/generate"
     payload = json.dumps(
         {
             "model": model,
@@ -692,7 +810,7 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
             "stream": False,
         }
     ).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=payload, headers=_auth_headers(OLLAMA_API_KEY))
     start = time.time()
     try:
         with urllib.request.urlopen(req, timeout=180) as resp:
@@ -1208,38 +1326,22 @@ def vllm_info() -> dict[str, Any]:
             "server_reachable": bool,  # /v1/models returned 200 (optional)
         }
     """
-    # First check if vllm CLI is installed
     cli_info = command_version("vllm")
-    base_url = VLLM_BASE_URL
-
-    # Initialize info with CLI status
-    info: dict[str, Any] = {
-        "present": False,  # Will be set to True only if both CLI and server are OK
-        "base_url": base_url,
-        "version": cli_info.get("version", ""),
-        "models": [],
-        "server_reachable": False,
-    }
-
-    if not cli_info.get("present", False):
-        info["error"] = "vllm CLI not installed"
-        return info
-
-    # If CLI is installed, also check if server is reachable
     adapter = VLLMAdapter()
+    base_url = adapter._base_url or VLLM_BASE_URL
     detect = adapter.detect()
+    server_reachable = bool(detect.get("present"))
 
-    info["server_reachable"] = bool(detect.get("present"))
-    if detect.get("version"):
-        info["version"] = detect.get("version", "")
-
-    # present=True only when BOTH CLI is installed AND server is reachable
-    if info["server_reachable"]:
-        info["present"] = True
-        info["models"] = adapter.list_models()
-    else:
+    info: dict[str, Any] = {
+        "present": server_reachable,
+        "base_url": base_url,
+        "version": detect.get("version") or cli_info.get("version", ""),
+        "models": adapter.list_models() if server_reachable else [],
+        "server_reachable": server_reachable,
+        "remote": not _is_local_base_url(base_url),
+    }
+    if not server_reachable:
         info["error"] = f"vLLM server not reachable at {base_url}"
-
     return info
 
 
@@ -2002,37 +2104,40 @@ def llamacpp_info() -> dict[str, Any]:
     import urllib.request
 
     detect = llamacpp_detect()
+    base_url = llamacpp_base_url()
     base: dict[str, Any] = {
         "present": detect.get("present", False),
         "binary": detect.get("binary", ""),
         "server_running": False,
         "server_port": LLAMACPP_SERVER_PORT,
+        "base_url": base_url,
         "model": None,
+        "remote": not _is_local_base_url(base_url),
     }
-    if not base["present"]:
-        return base
 
     # Liveness via /health — returns 200 *or* 503 ("loading model") as long
-    # as the server process is alive and bound to the port. Using
-    # /v1/models for liveness was wrong: large models (35B+) can take 30s+
-    # to load before /v1/models responds, during which a second probe would
-    # mistakenly think the server was down and try to spawn a duplicate
-    # (which then crashes on the bound port).
-    health_url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/health"
+    # as the server process is alive and bound to the port. Remote endpoints
+    # are probed even when the local llama-server binary is absent.
+    health_url = f"{base_url}/health"
+    req = urllib.request.Request(health_url, headers=_auth_headers(LLAMACPP_API_KEY), method="GET")
     try:
-        with urllib.request.urlopen(health_url, timeout=2) as resp:
+        with urllib.request.urlopen(req, timeout=2) as resp:
             base["server_running"] = resp.status in (200, 503)
     except (urllib.error.URLError, OSError):
         return base
     except Exception:
         return base
 
+    if base["server_running"]:
+        base["present"] = True
+
     # Read the served model name from /v1/models — only meaningful once the
     # model is loaded; missing during the loading window is expected and not
     # an error.
-    models_url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/v1/models"
+    models_url = f"{base_url}/v1/models"
+    req = urllib.request.Request(models_url, headers=_auth_headers(LLAMACPP_API_KEY), method="GET")
     try:
-        with urllib.request.urlopen(models_url, timeout=2) as resp:
+        with urllib.request.urlopen(req, timeout=2) as resp:
             body = json.loads(resp.read())
             models = body.get("data", [])
             base["model"] = models[0]["id"] if models else None
@@ -2862,7 +2967,7 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
     import urllib.error
     import urllib.request
 
-    url = f"http://{LLAMACPP_SERVER_HOST}:{LLAMACPP_SERVER_PORT}/v1/chat/completions"
+    url = f"{llamacpp_base_url()}/v1/chat/completions"
     payload = json.dumps(
         {
             "model": model,
@@ -2879,7 +2984,7 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
             "chat_template_kwargs": {"enable_thinking": False},
         }
     ).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=payload, headers=_auth_headers(LLAMACPP_API_KEY))
     start = time.time()
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
@@ -3024,6 +3129,38 @@ def _is_llmfit_skipped(value: Any) -> bool:
     return isinstance(value, dict) and value.get("_skipped") is True
 
 
+def _endpoint_config_signature() -> dict[str, Any]:
+    """Cache key material for endpoint env vars that change engine discovery."""
+    return {
+        "ollama_base_url": ollama_base_url(),
+        "ollama_api_key_set": bool(OLLAMA_API_KEY),
+        "llamacpp_base_url": llamacpp_base_url(),
+        "llamacpp_api_key_set": bool(LLAMACPP_API_KEY),
+        "vllm_base_url": VLLM_BASE_URL,
+        "vllm_api_key_set": bool(os.environ.get("VLLM_API_KEY", "")),
+    }
+
+
+def _default_endpoint_config_signature() -> dict[str, Any]:
+    return {
+        "ollama_base_url": "http://localhost:11434",
+        "ollama_api_key_set": False,
+        "llamacpp_base_url": "http://localhost:8001",
+        "llamacpp_api_key_set": False,
+        "vllm_base_url": "http://localhost:8000",
+        "vllm_api_key_set": False,
+    }
+
+
+def _endpoint_config_matches(cache: dict[str, Any], current: dict[str, Any]) -> bool:
+    cached = cache.get("_endpoint_config")
+    if cached is None:
+        # Backward compatibility for pre-endpoint-signature caches: accept
+        # only when the user is still on default localhost endpoints.
+        return current == _default_endpoint_config_signature()
+    return cached == current
+
+
 def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     """
     Build (or fetch from cache) the machine profile.
@@ -3034,9 +3171,11 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     call with `run_llmfit=True` AND llmfit available will re-run the scan and
     refresh the cache in place.
     """
+    endpoint_signature = _endpoint_config_signature()
+
     # Check in-process cache first
     cached = _machine_profile_in_process_cache()
-    if cached is not None:
+    if cached is not None and _endpoint_config_matches(cached, endpoint_signature):
         # If caller insists on llmfit and the in-proc cache lacks it, fall
         # through to the disk-cache / scan path so we can refresh.
         if run_llmfit and _is_llmfit_skipped(cached.get("llmfit_system")):
@@ -3046,7 +3185,7 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
 
     # Check file-based cache
     file_cache = _load_machine_profile_cache()
-    if file_cache is not None:
+    if file_cache is not None and _endpoint_config_matches(file_cache, endpoint_signature):
         cached_llmfit = file_cache.get("llmfit_system")
         # When the caller explicitly asked for llmfit and the cache holds the
         # skip sentinel, run llmfit now and merge it in (refreshing both
@@ -3067,11 +3206,11 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     # Full scan — build profile
     llmfit_sys = llmfit_system() if run_llmfit else None
     lms = lms_info()
-    llamacpp = llamacpp_detect()
+    llamacpp = llamacpp_info()
     hf_cli = huggingface_cli_detect()
     vllm = vllm_info()
 
-    ollama_info = command_version("ollama")
+    ollama = ollama_info()
     claude_info = command_version("claude")
     codex_info = command_version("codex")
     pi_info = command_version("pi")
@@ -3084,7 +3223,7 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
         if info.get("present")
     ]
     engines_present = []
-    if ollama_info.get("present"):
+    if ollama.get("present"):
         engines_present.append("ollama")
     if lms.get("present"):
         engines_present.append("lmstudio")
@@ -3123,7 +3262,12 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
             "machine": platform.machine(),
         },
         "tools": {
-            "ollama": ollama_info,
+            "ollama": {
+                "present": bool(ollama.get("present")),
+                "version": ollama.get("version", ""),
+                "base_url": ollama.get("base_url", ollama_base_url()),
+                "error": ollama.get("error", ""),
+            },
             "lmstudio": {
                 "present": lms["present"],
                 "version": command_version("lms")["version"] if lms["present"] else "",
@@ -3156,7 +3300,7 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
             "llmfit": llmfit_info.get("present", False),
             "has_minimum": bool(harnesses_present) and bool(engines_present),
         },
-        "ollama": {"models": parse_ollama_list()},
+        "ollama": ollama,
         "lmstudio": lms,
         "llamacpp": llamacpp,
         "vllm": vllm,
@@ -3185,6 +3329,7 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     # Persist to file cache for future runs
     fingerprint = _compute_machine_fingerprint(profile)
     profile["_fingerprint"] = fingerprint
+    profile["_endpoint_config"] = endpoint_signature
     _save_machine_profile_cache(profile, fingerprint)
     _set_machine_profile_in_process_cache(profile)
 
