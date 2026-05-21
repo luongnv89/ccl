@@ -66,14 +66,14 @@ Each harness (claude / codex / pi, plus 9router variants) has its own fenced
 block, so you can remove just one harness without touching any other you may
 have set up.
 
-To wipe only the claude harness:
+To wipe only one harness:
 
-1. Delete the fenced block from `~/.zshrc` (between the
+1. Delete the fenced block from `~/.zshrc` (for example, between the
    `# >>> claude-codex-local:claude >>>` and
    `# <<< claude-codex-local:claude <<<` markers).
 2. `rm -f <REPO_ROOT>/.claude-codex-local/bin/cc`
 3. `rm -f <REPO_ROOT>/guide.md`
-4. For Pi installs, optionally remove this harness's `ccl-*` provider from
+4. For Pi harnesses, optionally remove that harness's `ccl-*` provider from
    Pi's normal `models.json`.
 
 To wipe the local bridge entirely:
