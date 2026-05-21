@@ -39,12 +39,22 @@ def _is_local_base_url(base_url: str) -> bool:
 
 OLLAMA_BASE_URL = _normalize_base_url(os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
 OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "")
+# When OLLAMA_API_KEY is set, the wizard materializes it into this chmod-600
+# file at wire time so the generated helper script reads the secret at exec
+# time via $(cat …) rather than inlining it. Same security boundary as the
+# 9router/openrouter/vllm key files below.
+OLLAMA_KEY_FILE = STATE_DIR / "ollama-api-key"
 LLAMACPP_SERVER_PORT = int(os.environ.get("LLAMACPP_SERVER_PORT", "8001"))
 LLAMACPP_SERVER_HOST = os.environ.get("LLAMACPP_SERVER_HOST", "127.0.0.1")
 LLAMACPP_BASE_URL = _normalize_base_url(
     os.environ.get("LLAMACPP_BASE_URL", f"http://localhost:{LLAMACPP_SERVER_PORT}")
 )
 LLAMACPP_API_KEY = os.environ.get("LLAMACPP_API_KEY", "")
+# When LLAMACPP_API_KEY is set, the wizard materializes it into this chmod-600
+# file at wire time so the generated helper script reads the secret at exec
+# time via $(cat …) rather than inlining it. Same security boundary as the
+# 9router/openrouter/vllm key files below.
+LLAMACPP_KEY_FILE = STATE_DIR / "llamacpp-api-key"
 # 131072 (128k) is the minimum that survives a real coding session: Claude
 # Code's system prompt is ~26k, but a single tool turn that reads a diff or
 # a few source files routinely pushes the request past 40k. We saw real

@@ -181,7 +181,7 @@ def test_refresh_selected_engine_accepts_remote_without_local_binary(monkeypatch
     assert profile["llamacpp"]["model"] == "remote-gguf"
 
 
-def test_vllm_env_api_key_is_used_for_generated_wiring(monkeypatch, tmp_path):
+def test_vllm_env_api_key_is_materialized_to_keyfile(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box.local:8000")
     monkeypatch.setenv("VLLM_API_KEY", "vllm-env-key")
@@ -190,14 +190,144 @@ def test_vllm_env_api_key_is_used_for_generated_wiring(monkeypatch, tmp_path):
 
     claude = wz._wire_claude("vllm", "remote-vllm")
     assert claude is not None
-    assert claude.env["ANTHROPIC_API_KEY"] == "vllm-env-key"
-    assert claude.env["ANTHROPIC_AUTH_TOKEN"] == "vllm-env-key"
+    # Key now lives on disk, never inline in env.
+    assert "ANTHROPIC_API_KEY" not in claude.env
+    assert "ANTHROPIC_AUTH_TOKEN" not in claude.env
+    assert wz.pb.VLLM_KEY_FILE.exists()
+    assert wz.pb.VLLM_KEY_FILE.read_text().strip() == "vllm-env-key"
+    assert wz.pb.VLLM_KEY_FILE.stat().st_mode & 0o777 == 0o600
+    expected_expr = f'"$(cat {wz.pb.VLLM_KEY_FILE!s})"'
+    assert claude.raw_env["ANTHROPIC_API_KEY"] == expected_expr
+    assert claude.raw_env["ANTHROPIC_AUTH_TOKEN"] == expected_expr
 
     codex = wz._wire_codex("vllm", "remote-vllm")
     assert codex is not None
-    assert codex.env["OPENAI_API_KEY"] == "vllm-env-key"
+    assert "OPENAI_API_KEY" not in codex.env
+    assert codex.raw_env["OPENAI_API_KEY"] == expected_expr
 
-    assert wz._pi_api_key_for_engine("vllm") == "vllm-env-key"
+    assert wz._pi_api_key_for_engine("vllm") == f"!cat {wz.pb.VLLM_KEY_FILE!s}"
+
+
+def test_ollama_env_api_key_is_materialized_to_keyfile(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("OLLAMA_HOST", "http://gpu-box.local:11434")
+    monkeypatch.setenv("OLLAMA_API_KEY", "ollama-env-key")
+    _, wz = reload_modules()
+    assert not wz.pb.OLLAMA_KEY_FILE.exists()
+
+    claude = wz._wire_claude("ollama", "qwen:7b")
+    assert claude is not None
+    assert "ANTHROPIC_API_KEY" not in claude.env
+    assert "ANTHROPIC_AUTH_TOKEN" not in claude.env
+    assert wz.pb.OLLAMA_KEY_FILE.exists()
+    assert wz.pb.OLLAMA_KEY_FILE.read_text().strip() == "ollama-env-key"
+    assert wz.pb.OLLAMA_KEY_FILE.stat().st_mode & 0o777 == 0o600
+    expected_expr = f'"$(cat {wz.pb.OLLAMA_KEY_FILE!s})"'
+    assert claude.raw_env["ANTHROPIC_API_KEY"] == expected_expr
+    assert claude.raw_env["ANTHROPIC_AUTH_TOKEN"] == expected_expr
+
+    codex = wz._wire_codex("ollama", "qwen:7b")
+    assert codex is not None
+    assert "OPENAI_API_KEY" not in codex.env
+    assert codex.raw_env["OPENAI_API_KEY"] == expected_expr
+
+    assert wz._pi_api_key_for_engine("ollama") == f"!cat {wz.pb.OLLAMA_KEY_FILE!s}"
+
+
+def test_ollama_without_api_key_keeps_placeholder_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("OLLAMA_HOST", "http://gpu-box.local:11434")
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    _, wz = reload_modules()
+
+    claude = wz._wire_claude("ollama", "qwen:7b")
+    assert claude is not None
+    assert claude.env["ANTHROPIC_API_KEY"] == "ollama"
+    assert not wz.pb.OLLAMA_KEY_FILE.exists()
+    assert claude.raw_env == {}
+
+    codex = wz._wire_codex("ollama", "qwen:7b")
+    assert codex is not None
+    assert codex.env["OPENAI_API_KEY"] == "ollama"
+    assert codex.raw_env == {}
+
+    assert wz._pi_api_key_for_engine("ollama") == "ollama"
+
+
+def test_llamacpp_env_api_key_is_materialized_to_keyfile(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://llama-box.local:8001")
+    monkeypatch.setenv("LLAMACPP_API_KEY", "llamacpp-env-key")
+    _, wz = reload_modules()
+    assert not wz.pb.LLAMACPP_KEY_FILE.exists()
+
+    claude = wz._wire_claude("llamacpp", "remote-gguf")
+    assert claude is not None
+    assert "ANTHROPIC_API_KEY" not in claude.env
+    assert "ANTHROPIC_AUTH_TOKEN" not in claude.env
+    assert wz.pb.LLAMACPP_KEY_FILE.exists()
+    assert wz.pb.LLAMACPP_KEY_FILE.read_text().strip() == "llamacpp-env-key"
+    assert wz.pb.LLAMACPP_KEY_FILE.stat().st_mode & 0o777 == 0o600
+    expected_expr = f'"$(cat {wz.pb.LLAMACPP_KEY_FILE!s})"'
+    assert claude.raw_env["ANTHROPIC_API_KEY"] == expected_expr
+    assert claude.raw_env["ANTHROPIC_AUTH_TOKEN"] == expected_expr
+
+    codex = wz._wire_codex("llamacpp", "remote-gguf")
+    assert codex is not None
+    assert "OPENAI_API_KEY" not in codex.env
+    assert codex.raw_env["OPENAI_API_KEY"] == expected_expr
+
+    assert wz._pi_api_key_for_engine("llamacpp") == f"!cat {wz.pb.LLAMACPP_KEY_FILE!s}"
+
+
+def test_vllm_keyfile_wins_over_env_when_both_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box.local:8000")
+    monkeypatch.setenv("VLLM_API_KEY", "env-key-should-be-ignored")
+    _, wz = reload_modules()
+    # Simulate a pre-existing user-managed VLLM_KEY_FILE.
+    wz.pb.VLLM_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    wz.pb.VLLM_KEY_FILE.write_text("user-managed-key\n")
+    wz.pb.VLLM_KEY_FILE.chmod(0o600)
+
+    wz._wire_claude("vllm", "remote-vllm")
+    # File contents must not be overwritten by env-driven materialization.
+    assert wz.pb.VLLM_KEY_FILE.read_text().strip() == "user-managed-key"
+
+
+def test_emitted_helper_script_does_not_contain_literal_key(monkeypatch, tmp_path):
+    # End-to-end shell-script emission must not leak the literal key bytes.
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("OLLAMA_HOST", "http://gpu-box.local:11434")
+    monkeypatch.setenv("OLLAMA_API_KEY", "sensitive-ollama-key-do-not-leak")
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://llama-box.local:8001")
+    monkeypatch.setenv("LLAMACPP_API_KEY", "sensitive-llamacpp-key-do-not-leak")
+    monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box.local:8000")
+    monkeypatch.setenv("VLLM_API_KEY", "sensitive-vllm-key-do-not-leak")
+    _, wz = reload_modules()
+    for engine in ("ollama", "llamacpp", "vllm"):
+        for wire_fn, harness in ((wz._wire_claude, "claude"), (wz._wire_codex, "codex")):
+            result = wire_fn(engine, "model-tag")
+            assert result is not None
+            path = wz._write_helper_script(harness, result, engine=engine)
+            body = path.read_text()
+            assert "sensitive-ollama-key-do-not-leak" not in body
+            assert "sensitive-llamacpp-key-do-not-leak" not in body
+            assert "sensitive-vllm-key-do-not-leak" not in body
+
+
+def test_verify_materializes_remote_keyfile_raw_env(monkeypatch, tmp_path):
+    # The Step 7 verify path must still be able to resolve $(cat …)
+    # raw_env entries produced by the new ollama/llamacpp materializations.
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("OLLAMA_HOST", "http://gpu-box.local:11434")
+    monkeypatch.setenv("OLLAMA_API_KEY", "ollama-env-key")
+    _, wz = reload_modules()
+    claude = wz._wire_claude("ollama", "qwen:7b")
+    assert claude is not None
+    resolved = wz._materialize_raw_env(dict(claude.raw_env))
+    assert resolved["ANTHROPIC_API_KEY"] == "ollama-env-key"
+    assert resolved["ANTHROPIC_AUTH_TOKEN"] == "ollama-env-key"
 
 
 def test_machine_profile_discovers_remote_engines_without_local_binaries(monkeypatch, tmp_path):

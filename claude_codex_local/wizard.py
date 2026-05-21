@@ -2790,6 +2790,20 @@ def _model_known_incompatible_with_claude_code(tag: str) -> bool:
     return "qwen3" in t
 
 
+def _materialize_remote_api_key(key_file: Path, key_value: str) -> str:
+    # Write the env-supplied API key to a chmod-600 file under STATE_DIR and
+    # return the shell expression the helper script substitutes at exec time.
+    # Mirrors the 9router/openrouter/vllm keyfile pattern so the literal
+    # secret never lives in the generated cc*/cx*/cp* scripts. The file is
+    # re-written on each wizard run so env-as-source-of-truth wins; user-
+    # managed key files (e.g. pre-existing VLLM_KEY_FILE) are handled by
+    # caller precedence and not overwritten here.
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text(key_value + "\n")
+    key_file.chmod(0o600)
+    return f'"$(cat {shlex.quote(str(key_file))})"'
+
+
 def _wire_claude(engine: str, tag: str) -> WireResult | None:
     """
     Build a WireResult for the Claude harness against the chosen engine.
@@ -2810,8 +2824,6 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
             base_url = pb.ollama_openai_base_url()
             env = {
                 "ANTHROPIC_BASE_URL": base_url,
-                "ANTHROPIC_API_KEY": pb.OLLAMA_API_KEY or "ollama",  # pragma: allowlist secret
-                "ANTHROPIC_AUTH_TOKEN": pb.OLLAMA_API_KEY or "ollama",  # pragma: allowlist secret
                 "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
                 "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Remote Ollama {tag}",
                 "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
@@ -2820,7 +2832,17 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             }
-            return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
+            raw_env: dict[str, str] = {}
+            if pb.OLLAMA_API_KEY:
+                key_expr = _materialize_remote_api_key(pb.OLLAMA_KEY_FILE, pb.OLLAMA_API_KEY)
+                raw_env["ANTHROPIC_API_KEY"] = key_expr
+                raw_env["ANTHROPIC_AUTH_TOKEN"] = key_expr
+            else:
+                env["ANTHROPIC_API_KEY"] = "ollama"  # pragma: allowlist secret
+                env["ANTHROPIC_AUTH_TOKEN"] = "ollama"  # pragma: allowlist secret
+            return WireResult(
+                argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
+            )
         # Trailing "--" is important: the helper script appends "$@" after
         # this argv, and `ollama launch` would otherwise eat any user flag
         # (e.g. `cc -p "hi"` -> `ollama launch` rejects `-p`). The `--`
@@ -2848,8 +2870,6 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         base_url = pb.llamacpp_base_url()
         env = {
             "ANTHROPIC_BASE_URL": base_url,
-            "ANTHROPIC_API_KEY": pb.LLAMACPP_API_KEY or "sk-local",  # pragma: allowlist secret
-            "ANTHROPIC_AUTH_TOKEN": pb.LLAMACPP_API_KEY or "sk-local",  # pragma: allowlist secret
             "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
             "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Local (llamacpp) {tag}",
             "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
@@ -2858,7 +2878,17 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
             "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
-        return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
+        raw_env = {}
+        if pb.LLAMACPP_API_KEY:
+            key_expr = _materialize_remote_api_key(pb.LLAMACPP_KEY_FILE, pb.LLAMACPP_API_KEY)
+            raw_env["ANTHROPIC_API_KEY"] = key_expr
+            raw_env["ANTHROPIC_AUTH_TOKEN"] = key_expr
+        else:
+            env["ANTHROPIC_API_KEY"] = "sk-local"  # pragma: allowlist secret
+            env["ANTHROPIC_AUTH_TOKEN"] = "sk-local"  # pragma: allowlist secret
+        return WireResult(
+            argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
+        )
     if engine == "vllm":
         # vLLM exposes an OpenAI-compatible API. Auth is off by default but
         # vllm supports `--api-key`; if a key was written to VLLM_KEY_FILE
@@ -2875,15 +2905,23 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
             "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
-        raw_env: dict[str, str] = {}
+        raw_env = {}
+        # If the user pre-populated VLLM_KEY_FILE (user-managed path), prefer
+        # it; otherwise, when VLLM_API_KEY is set in the env, materialize it
+        # into the same chmod-600 file so the helper script reads via
+        # $(cat …) and the secret never lands inline.
+        env_key = os.environ.get("VLLM_API_KEY", "")
         if pb.VLLM_KEY_FILE.exists():
             key_expr = f'"$(cat {shlex.quote(str(pb.VLLM_KEY_FILE))})"'
             raw_env["ANTHROPIC_AUTH_TOKEN"] = key_expr
             raw_env["ANTHROPIC_API_KEY"] = key_expr
+        elif env_key:
+            key_expr = _materialize_remote_api_key(pb.VLLM_KEY_FILE, env_key)
+            raw_env["ANTHROPIC_AUTH_TOKEN"] = key_expr
+            raw_env["ANTHROPIC_API_KEY"] = key_expr
         else:
-            env_key = os.environ.get("VLLM_API_KEY", "")
-            env["ANTHROPIC_API_KEY"] = env_key or "sk-local"  # pragma: allowlist secret
-            env["ANTHROPIC_AUTH_TOKEN"] = env_key or "sk-local"  # pragma: allowlist secret
+            env["ANTHROPIC_API_KEY"] = "sk-local"  # pragma: allowlist secret
+            env["ANTHROPIC_AUTH_TOKEN"] = "sk-local"  # pragma: allowlist secret
         return WireResult(
             argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
         )
@@ -2953,11 +2991,16 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
 def _wire_codex(engine: str, tag: str) -> WireResult | None:
     if engine == "ollama":
         if not pb._is_local_base_url(pb.ollama_base_url()):
-            env = {
-                "OPENAI_BASE_URL": pb.ollama_openai_base_url(),
-                "OPENAI_API_KEY": pb.OLLAMA_API_KEY or "ollama",  # pragma: allowlist secret
-            }
-            return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
+            env = {"OPENAI_BASE_URL": pb.ollama_openai_base_url()}
+            raw_env: dict[str, str] = {}
+            if pb.OLLAMA_API_KEY:
+                key_expr = _materialize_remote_api_key(pb.OLLAMA_KEY_FILE, pb.OLLAMA_API_KEY)
+                raw_env["OPENAI_API_KEY"] = key_expr
+            else:
+                env["OPENAI_API_KEY"] = "ollama"  # pragma: allowlist secret
+            return WireResult(
+                argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env
+            )
         # Known limitation: `--oss --local-provider=ollama` are codex
         # subcommand options, not top-level options. They work in
         # interactive mode (no subcommand), which is the common case.
@@ -2988,25 +3031,30 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
         }
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
     if engine == "llamacpp":
-        env = {
-            "OPENAI_BASE_URL": f"{pb.llamacpp_base_url()}/v1",
-            "OPENAI_API_KEY": pb.LLAMACPP_API_KEY or "sk-local",  # pragma: allowlist secret
-        }
-        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
+        env = {"OPENAI_BASE_URL": f"{pb.llamacpp_base_url()}/v1"}
+        raw_env = {}
+        if pb.LLAMACPP_API_KEY:
+            key_expr = _materialize_remote_api_key(pb.LLAMACPP_KEY_FILE, pb.LLAMACPP_API_KEY)
+            raw_env["OPENAI_API_KEY"] = key_expr
+        else:
+            env["OPENAI_API_KEY"] = "sk-local"  # pragma: allowlist secret
+        return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
     if engine == "vllm":
         # Same pattern as _wire_claude(engine="vllm"): if the user wrote a
         # key file we read it at exec-time; otherwise a placeholder is fine
         # (vLLM doesn't validate keys unless `--api-key` was passed).
         base_url = pb.VLLM_BASE_URL.rstrip("/")
         env = {"OPENAI_BASE_URL": f"{base_url}/v1"}
-        raw_env: dict[str, str] = {}
+        raw_env = {}
+        env_key = os.environ.get("VLLM_API_KEY", "")
         if pb.VLLM_KEY_FILE.exists():
             key_expr = f'"$(cat {shlex.quote(str(pb.VLLM_KEY_FILE))})"'
             raw_env["OPENAI_API_KEY"] = key_expr
+        elif env_key:
+            key_expr = _materialize_remote_api_key(pb.VLLM_KEY_FILE, env_key)
+            raw_env["OPENAI_API_KEY"] = key_expr
         else:
-            env["OPENAI_API_KEY"] = (
-                os.environ.get("VLLM_API_KEY", "") or "sk-local"
-            )  # pragma: allowlist secret
+            env["OPENAI_API_KEY"] = "sk-local"  # pragma: allowlist secret
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
     if engine == "9router":
         # See _wire_claude(engine="9router") for the rationale: the API
@@ -3073,17 +3121,24 @@ def _pi_base_url_for_engine(engine: str) -> str | None:
 
 
 def _pi_api_key_for_engine(engine: str) -> str:
+    # Pi reads provider keys from models.json. For engines where the wizard
+    # has materialized the env-supplied key to a chmod-600 file, emit a
+    # `!cat <file>` reference so the literal secret never lands in
+    # models.json — matching the 9router/openrouter/vLLM-keyfile pattern.
+    # Materialization is done by the caller (_wire_pi) before this fires.
     if engine == "ollama":
-        return pb.OLLAMA_API_KEY or "ollama"
+        if pb.OLLAMA_KEY_FILE.exists():
+            return f"!cat {shlex.quote(str(pb.OLLAMA_KEY_FILE))}"
+        return "ollama"
     if engine == "lmstudio":
         return "lmstudio"
-    if engine in {"llamacpp", "vllm"}:
-        if engine == "llamacpp" and pb.LLAMACPP_API_KEY:
-            return pb.LLAMACPP_API_KEY
-        if engine == "vllm" and pb.VLLM_KEY_FILE.exists():
+    if engine == "llamacpp":
+        if pb.LLAMACPP_KEY_FILE.exists():
+            return f"!cat {shlex.quote(str(pb.LLAMACPP_KEY_FILE))}"
+        return "sk-local"  # pragma: allowlist secret
+    if engine == "vllm":
+        if pb.VLLM_KEY_FILE.exists():
             return f"!cat {shlex.quote(str(pb.VLLM_KEY_FILE))}"
-        if engine == "vllm" and os.environ.get("VLLM_API_KEY"):
-            return os.environ["VLLM_API_KEY"]
         return "sk-local"  # pragma: allowlist secret
     if engine == "9router":
         return f"!cat {shlex.quote(str(pb.ROUTER9_KEY_FILE))}"
@@ -3145,6 +3200,17 @@ def _write_pi_models_config(engine: str, tag: str) -> Path:
 
 def _wire_pi(engine: str, tag: str) -> WireResult | None:
     """Build a WireResult for Pi against a CCL-supported local/provider engine."""
+    # Materialize env-supplied API keys to chmod-600 files before the
+    # models.json write so `_pi_api_key_for_engine` can emit `!cat <file>`.
+    # vLLM intentionally honors a pre-existing user-managed VLLM_KEY_FILE.
+    if engine == "ollama" and pb.OLLAMA_API_KEY:
+        _materialize_remote_api_key(pb.OLLAMA_KEY_FILE, pb.OLLAMA_API_KEY)
+    elif engine == "llamacpp" and pb.LLAMACPP_API_KEY:
+        _materialize_remote_api_key(pb.LLAMACPP_KEY_FILE, pb.LLAMACPP_API_KEY)
+    elif engine == "vllm" and not pb.VLLM_KEY_FILE.exists():
+        env_key = os.environ.get("VLLM_API_KEY", "")
+        if env_key:
+            _materialize_remote_api_key(pb.VLLM_KEY_FILE, env_key)
     try:
         _write_pi_models_config(engine, tag)
     except ValueError:
