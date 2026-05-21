@@ -677,8 +677,8 @@ class TestVLLMAdapterEdgeCases:
         """Test handling of base URL without http:// prefix."""
         monkeypatch.setenv("VLLM_BASE_URL", "localhost:8000")
         adapter = pb.VLLMAdapter()
-        # _base_url is stored as-is, full_url will concatenate
-        assert adapter._base_url == "localhost:8000"
+        # Host:port values are normalized into usable HTTP URLs.
+        assert adapter._base_url == "http://localhost:8000"
 
     def test_empty_model_name(self, monkeypatch):
         """Test smoke test with empty model name."""

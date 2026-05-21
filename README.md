@@ -278,6 +278,32 @@ entirely.
 
 ---
 
+## Remote engine endpoints
+
+`ccl` can consume Ollama, llama.cpp, and vLLM servers running on another
+machine. Configure the client URL before running `ccl setup`; the wizard probes
+the endpoint over HTTP and does not require the remote engine binary to be
+installed locally.
+
+```bash
+# Ollama native API and OpenAI-compatible /v1 endpoint
+export OLLAMA_HOST=http://gpu-box.local:11434
+
+# llama.cpp server (OpenAI-compatible API under /v1)
+export LLAMACPP_BASE_URL=http://gpu-box.local:8001
+# Optional if your reverse proxy / server requires bearer auth:
+export LLAMACPP_API_KEY=...
+
+# vLLM OpenAI-compatible server
+export VLLM_BASE_URL=http://gpu-box.local:8000
+export VLLM_API_KEY=...   # optional; vLLM only checks this if configured
+```
+
+Local and remote engines can coexist: unset the relevant env var to go back to
+the localhost default, or choose a different engine in the wizard.
+
+---
+
 ## 9router quick-start
 
 [9router](https://github.com/decolua/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude), `cx9` (Codex), or `cp9` (Pi) alias and leaves your existing `cc` / `cx` / `cp` aliases untouched.

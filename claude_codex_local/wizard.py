@@ -689,9 +689,14 @@ def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
     """Live-check only the selected engine and update the cached snapshot."""
     tools = profile.setdefault("tools", {})
     if engine == "ollama":
-        info = pb.command_version("ollama")
-        tools["ollama"] = info
-        profile["ollama"] = {"models": pb.parse_ollama_list() if info.get("present") else []}
+        info = pb.ollama_info()
+        tools["ollama"] = {
+            "present": bool(info.get("present")),
+            "version": info.get("version", ""),
+            "base_url": info.get("base_url", pb.ollama_base_url()),
+            "error": info.get("error", ""),
+        }
+        profile["ollama"] = {"models": info.get("models", []), **info}
     elif engine == "lmstudio":
         lms = pb.lms_info()
         profile["lmstudio"] = lms
@@ -701,8 +706,13 @@ def _refresh_selected_engine(profile: dict[str, Any], engine: str) -> bool:
             "error": lms.get("error", ""),
         }
     elif engine == "llamacpp":
-        info = pb.llamacpp_detect()
-        tools["llamacpp"] = info
+        info = pb.llamacpp_info()
+        tools["llamacpp"] = {
+            "present": bool(info.get("present")),
+            "version": info.get("version", ""),
+            "base_url": info.get("base_url", pb.llamacpp_base_url()),
+            "error": info.get("error", ""),
+        }
         profile["llamacpp"] = info
     elif engine == "vllm":
         vllm = pb.vllm_info()
@@ -2796,6 +2806,21 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         )
 
     if engine == "ollama":
+        if not pb._is_local_base_url(pb.ollama_base_url()):
+            base_url = pb.ollama_openai_base_url()
+            env = {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_API_KEY": pb.OLLAMA_API_KEY or "ollama",  # pragma: allowlist secret
+                "ANTHROPIC_AUTH_TOKEN": pb.OLLAMA_API_KEY or "ollama",  # pragma: allowlist secret
+                "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
+                "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Remote Ollama {tag}",
+                "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
+                    f"Remote model served by Ollama at {base_url}"
+                ),
+                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            }
+            return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
         # Trailing "--" is important: the helper script appends "$@" after
         # this argv, and `ollama launch` would otherwise eat any user flag
         # (e.g. `cc -p "hi"` -> `ollama launch` rejects `-p`). The `--`
@@ -2820,11 +2845,11 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
         }
         return WireResult(argv=["claude", "--model", tag], env=env, effective_tag=tag)
     if engine == "llamacpp":
-        base_url = f"http://localhost:{pb.LLAMACPP_SERVER_PORT}"
+        base_url = pb.llamacpp_base_url()
         env = {
             "ANTHROPIC_BASE_URL": base_url,
-            "ANTHROPIC_API_KEY": "sk-local",  # pragma: allowlist secret
-            "ANTHROPIC_AUTH_TOKEN": "sk-local",  # pragma: allowlist secret
+            "ANTHROPIC_API_KEY": pb.LLAMACPP_API_KEY or "sk-local",  # pragma: allowlist secret
+            "ANTHROPIC_AUTH_TOKEN": pb.LLAMACPP_API_KEY or "sk-local",  # pragma: allowlist secret
             "ANTHROPIC_CUSTOM_MODEL_OPTION": tag,
             "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": f"Local (llamacpp) {tag}",
             "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": (
@@ -2856,8 +2881,9 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
             raw_env["ANTHROPIC_AUTH_TOKEN"] = key_expr
             raw_env["ANTHROPIC_API_KEY"] = key_expr
         else:
-            env["ANTHROPIC_API_KEY"] = "sk-local"  # pragma: allowlist secret
-            env["ANTHROPIC_AUTH_TOKEN"] = "sk-local"  # pragma: allowlist secret
+            env_key = os.environ.get("VLLM_API_KEY", "")
+            env["ANTHROPIC_API_KEY"] = env_key or "sk-local"  # pragma: allowlist secret
+            env["ANTHROPIC_AUTH_TOKEN"] = env_key or "sk-local"  # pragma: allowlist secret
         return WireResult(
             argv=["claude", "--model", tag], env=env, effective_tag=tag, raw_env=raw_env
         )
@@ -2926,6 +2952,12 @@ def _wire_claude(engine: str, tag: str) -> WireResult | None:
 
 def _wire_codex(engine: str, tag: str) -> WireResult | None:
     if engine == "ollama":
+        if not pb._is_local_base_url(pb.ollama_base_url()):
+            env = {
+                "OPENAI_BASE_URL": pb.ollama_openai_base_url(),
+                "OPENAI_API_KEY": pb.OLLAMA_API_KEY or "ollama",  # pragma: allowlist secret
+            }
+            return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
         # Known limitation: `--oss --local-provider=ollama` are codex
         # subcommand options, not top-level options. They work in
         # interactive mode (no subcommand), which is the common case.
@@ -2957,8 +2989,8 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
     if engine == "llamacpp":
         env = {
-            "OPENAI_BASE_URL": f"http://localhost:{pb.LLAMACPP_SERVER_PORT}/v1",
-            "OPENAI_API_KEY": "sk-local",  # pragma: allowlist secret
+            "OPENAI_BASE_URL": f"{pb.llamacpp_base_url()}/v1",
+            "OPENAI_API_KEY": pb.LLAMACPP_API_KEY or "sk-local",  # pragma: allowlist secret
         }
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag)
     if engine == "vllm":
@@ -2972,7 +3004,9 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
             key_expr = f'"$(cat {shlex.quote(str(pb.VLLM_KEY_FILE))})"'
             raw_env["OPENAI_API_KEY"] = key_expr
         else:
-            env["OPENAI_API_KEY"] = "sk-local"  # pragma: allowlist secret
+            env["OPENAI_API_KEY"] = (
+                os.environ.get("VLLM_API_KEY", "") or "sk-local"
+            )  # pragma: allowlist secret
         return WireResult(argv=["codex", "-m", tag], env=env, effective_tag=tag, raw_env=raw_env)
     if engine == "9router":
         # See _wire_claude(engine="9router") for the rationale: the API
@@ -3024,11 +3058,11 @@ def _pi_provider_for_engine(engine: str) -> str:
 
 def _pi_base_url_for_engine(engine: str) -> str | None:
     if engine == "ollama":
-        return "http://localhost:11434/v1"
+        return pb.ollama_openai_base_url()
     if engine == "lmstudio":
         return f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
     if engine == "llamacpp":
-        return f"http://localhost:{pb.LLAMACPP_SERVER_PORT}/v1"
+        return f"{pb.llamacpp_base_url()}/v1"
     if engine == "vllm":
         return f"{pb.VLLM_BASE_URL.rstrip('/')}/v1"
     if engine == "9router":
@@ -3040,12 +3074,16 @@ def _pi_base_url_for_engine(engine: str) -> str | None:
 
 def _pi_api_key_for_engine(engine: str) -> str:
     if engine == "ollama":
-        return "ollama"
+        return pb.OLLAMA_API_KEY or "ollama"
     if engine == "lmstudio":
         return "lmstudio"
     if engine in {"llamacpp", "vllm"}:
+        if engine == "llamacpp" and pb.LLAMACPP_API_KEY:
+            return pb.LLAMACPP_API_KEY
         if engine == "vllm" and pb.VLLM_KEY_FILE.exists():
             return f"!cat {shlex.quote(str(pb.VLLM_KEY_FILE))}"
+        if engine == "vllm" and os.environ.get("VLLM_API_KEY"):
+            return os.environ["VLLM_API_KEY"]
         return "sk-local"  # pragma: allowlist secret
     if engine == "9router":
         return f"!cat {shlex.quote(str(pb.ROUTER9_KEY_FILE))}"
@@ -3425,6 +3463,26 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
 # ---------------------------------------------------------------------------
 
 
+def _materialize_raw_env(raw_env: dict[str, str]) -> dict[str, str]:
+    """Resolve trusted key-file raw env expressions for verify subprocesses."""
+    resolved: dict[str, str] = {}
+    for key, expr in raw_env.items():
+        match = re.fullmatch(r'"\$\(cat (.+)\)"', expr)
+        if not match:
+            continue
+        try:
+            parts = shlex.split(f"cat {match.group(1)}")
+        except ValueError:
+            continue
+        if len(parts) != 2 or parts[0] != "cat":
+            continue
+        try:
+            resolved[key] = Path(parts[1]).read_text().strip()
+        except OSError:
+            continue
+    return resolved
+
+
 def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 8 — Verify launch command end-to-end")
     harness = state.primary_harness
@@ -3477,6 +3535,7 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
         return True
 
     wire_env: dict[str, str] = dict(state.wire_result.get("env", {}))
+    wire_env.update(_materialize_raw_env(dict(state.wire_result.get("raw_env", {}))))
 
     # The verify command talks to llama-server over HTTP. If the server is
     # gone (OOM, killed, machine slept since Step 5), the harness errors with
@@ -3489,7 +3548,7 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
             return False
 
     if harness == "claude":
-        if engine == "ollama":
+        if engine == "ollama" and pb._is_local_base_url(pb.ollama_base_url()):
             cmd = [
                 "ollama",
                 "launch",
@@ -3505,7 +3564,7 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
         else:
             cmd = list(state.wire_result["argv"]) + ["-p", "Reply with exactly READY"]
     elif harness == "codex":
-        if engine == "ollama":
+        if engine == "ollama" and pb._is_local_base_url(pb.ollama_base_url()):
             cmd = [
                 "ollama",
                 "launch",
