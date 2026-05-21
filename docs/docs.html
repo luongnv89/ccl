@@ -249,7 +249,12 @@
               <div class="tb-cmd">
                 <div class="tb-cmd-name">ccl serve</div>
                 <div class="tb-cmd-desc">
-                  Start the llama.cpp server with automatic restart on crashes. Useful for long-running inference sessions.
+                  Start the <code>llama-server</code> with automatic restart on crashes. <strong>MTP auto-detect:</strong> Multi-Token Prediction variants (Qwen, GLM, DeepSeek) are detected via GGUF metadata probe + filename fallback, and <code>--spec-type draft-mtp --spec-draft-n-max 5</code> is added for faster decode. Conflict guard disables MTP when <code>--mmproj</code> or <code>--parallel &gt; 1</code> are present.
+                  <div class="tb-cmd-flags">
+                    <div class="tb-cmd-flags-title">Env overrides</div>
+                    <div><code>LLAMACPP_MTP_ENABLED=0/1</code> &nbsp;— force off/on</div>
+                    <div><code>LLAMACPP_SPEC_DRAFT_N_MAX=N</code> &nbsp;— override default 5 (range 1–16)</div>
+                  </div>
                 </div>
               </div>
 
@@ -379,6 +384,7 @@
               <span class="tb-tag ok"><span class="mark">✓</span> Claude Code + OpenRouter + claude-sonnet-4.6</span>
               <span class="tb-tag warn"><span class="mark">⚠</span> Claude Code + LM Studio + Qwen3</span>
               <span class="tb-tag ok"><span class="mark">✓</span> Any + llama.cpp + GGUF (Hugging Face)</span>
+              <span class="tb-tag ok"><span class="mark">✓</span> Any + llama.cpp + MTP variant (Qwen / GLM / DeepSeek)</span>
             </div>
           </section>
         </main>

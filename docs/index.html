@@ -454,6 +454,16 @@
             <h3>Hosted SaaS (OpenRouter)</h3>
             <p>Want a hosted alternative? OpenRouter forwards calls to dozens of cloud models. Use <code>cco</code>/<code>cxo</code>/<code>cpo</code> aliases; local <code>cc</code>/<code>cx</code>/<code>cp</code> untouched.</p>
           </div>
+          <div class="tb-card">
+            <div class="tb-card-ord">08 · MTP</div>
+            <h3>llama.cpp MTP auto-detect <span style="font-family: var(--mono); font-size: 10px; color: var(--tb-accent); margin-left: 6px; letter-spacing: 0.08em;">NEW</span></h3>
+            <p>Drop in a Multi-Token Prediction GGUF (Qwen, GLM, DeepSeek MTP variants) and <code>llama-server</code> auto-launches with <code>--spec-type draft-mtp</code> for free decode speedups. GGUF metadata probe + filename fallback; <code>LLAMACPP_MTP_ENABLED</code> and <code>LLAMACPP_SPEC_DRAFT_N_MAX</code> let you override.</p>
+          </div>
+          <div class="tb-card">
+            <div class="tb-card-ord">09 · TUNER</div>
+            <h3>llamacpp-tuner skill <span style="font-family: var(--mono); font-size: 10px; color: var(--tb-accent); margin-left: 6px; letter-spacing: 0.08em;">NEW</span></h3>
+            <p>A Claude Code skill that benchmarks coding-agent workloads against your llama.cpp setup and recommends server flag profiles. Ship a faster local backend without hand-tuning.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -588,7 +598,7 @@
 
         <div class="reveal" style="margin-top: 36px;">
           <div class="tb-res-head" style="margin-bottom: 14px;">
-            Proven paths <span class="count">[6 combinations]</span>
+            Proven paths <span class="count">[7 combinations]</span>
           </div>
           <div class="tb-tags">
             <span class="tb-tag ok"><span class="mark">✓</span> Claude Code + Ollama + gemma4:26b</span>
@@ -597,6 +607,7 @@
             <span class="tb-tag ok"><span class="mark">✓</span> Claude Code + OpenRouter + claude-sonnet-4.6</span>
             <span class="tb-tag warn"><span class="mark">⚠</span> Claude Code + LM Studio + Qwen3</span>
             <span class="tb-tag ok"><span class="mark">✓</span> Any + llama.cpp + GGUF (Hugging Face)</span>
+            <span class="tb-tag ok"><span class="mark">✓</span> Any + llama.cpp + MTP variant (Qwen / GLM / DeepSeek)</span>
           </div>
         </div>
       </div>
@@ -638,7 +649,7 @@
             </button>
             <div class="tb-faq-a">
               <div class="tb-faq-a-inner">
-                <strong>Local engines:</strong> <strong>Ollama</strong> (primary, with native <code>ollama launch</code>), <strong>LM Studio</strong>, <strong>llama.cpp</strong>, <strong>vLLM</strong> — all auto-detected during setup. For llama.cpp, GGUF models download directly from <strong>Hugging Face</strong> via the built-in <code>huggingface-cli</code> integration.<br /><br />
+                <strong>Local engines:</strong> <strong>Ollama</strong> (primary, with native <code>ollama launch</code>), <strong>LM Studio</strong>, <strong>llama.cpp</strong> (with <strong>MTP auto-detect</strong> for Qwen/GLM/DeepSeek MTP variants — auto-applies <code>--spec-type draft-mtp</code> for faster decode), <strong>vLLM</strong> — all auto-detected during setup. For llama.cpp, GGUF models download directly from <strong>Hugging Face</strong> via the built-in <code>huggingface-cli</code> integration.<br /><br />
                 <strong>Cloud routing:</strong> <strong>9router</strong> — a local cloud-routing proxy for alternative providers (OpenAI, DeepSeek, etc.). The wizard wires <code>cc9</code>/<code>cx9</code> aliases alongside your existing local ones.<br /><br />
                 <strong>Hosted SaaS:</strong> <strong>OpenRouter</strong> — a hosted alternative with an OpenAI-compatible API at <code>openrouter.ai/api/v1</code>. No daemon, just an API key. Adds <code>cco</code>/<code>cxo</code>/<code>cpo</code> aliases.
               </div>
