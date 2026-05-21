@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import questionary
@@ -444,30 +445,33 @@ class TestWireCodex:
 
 
 # ---------------------------------------------------------------------------
-# _wire_pi — writes isolated Pi custom-provider config.
+# _wire_pi — augments the normal Pi config so cp keeps official pi resources.
 # ---------------------------------------------------------------------------
 
 
 class TestWirePi:
     def test_ollama_writes_models_json_and_argv(self, isolated_state):
         pb, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
         result = wiz._wire_pi("ollama", "qwen2.5-coder:7b")
         assert result.argv == ["pi", "--provider", "ccl-ollama", "--model", "qwen2.5-coder:7b"]
-        assert result.env["PI_CODING_AGENT_DIR"] == str(pb.STATE_DIR / "pi-agent")
+        assert result.env["PI_CODING_AGENT_DIR"] == str(pi_dir)
 
-        models = json.loads((pb.STATE_DIR / "pi-agent" / "models.json").read_text())
+        models = json.loads((pi_dir / "models.json").read_text())
         provider = models["providers"]["ccl-ollama"]
         assert provider["baseUrl"] == "http://localhost:11434/v1"
         assert provider["api"] == "openai-completions"
         assert provider["apiKey"] == "ollama"
         assert provider["compat"]["supportsDeveloperRole"] is False
         assert provider["models"][0]["id"] == "qwen2.5-coder:7b"
+        assert not (pb.STATE_DIR / "pi-agent").exists()
 
     def test_lmstudio_uses_openai_compatible_port(self, isolated_state):
         pb, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
         result = wiz._wire_pi("lmstudio", "qwen/qwen2.5-coder-7b")
         assert result.argv[:3] == ["pi", "--provider", "ccl-lmstudio"]
-        models = json.loads((pb.STATE_DIR / "pi-agent" / "models.json").read_text())
+        models = json.loads((pi_dir / "models.json").read_text())
         assert (
             models["providers"]["ccl-lmstudio"]["baseUrl"]
             == f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
@@ -476,11 +480,12 @@ class TestWirePi:
 
     def test_9router_uses_keyfile_command_not_literal_key(self, isolated_state):
         pb, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
         pb.ensure_state_dirs()
         pb.ROUTER9_KEY_FILE.write_text("router9-test-key\n")  # pragma: allowlist secret
         result = wiz._wire_pi("9router", "kr/claude-sonnet-4.5")
         assert result.argv == ["pi", "--provider", "ccl-9router", "--model", "kr/claude-sonnet-4.5"]
-        models_path = pb.STATE_DIR / "pi-agent" / "models.json"
+        models_path = pi_dir / "models.json"
         body = models_path.read_text()
         assert "router9-test-key" not in body  # pragma: allowlist secret
         models = json.loads(body)
@@ -491,6 +496,7 @@ class TestWirePi:
 
     def test_openrouter_uses_keyfile_command_not_literal_key(self, isolated_state):
         pb, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
         pb.ensure_state_dirs()
         pb.OPENROUTER_KEY_FILE.write_text("openrouter-test-key\n")  # pragma: allowlist secret
         result = wiz._wire_pi("openrouter", "anthropic/claude-sonnet-4.6")
@@ -501,7 +507,7 @@ class TestWirePi:
             "--model",
             "anthropic/claude-sonnet-4.6",
         ]
-        models_path = pb.STATE_DIR / "pi-agent" / "models.json"
+        models_path = pi_dir / "models.json"
         body = models_path.read_text()
         # Sentinel key value MUST NOT appear in the models.json — Pi reads
         # it at exec-time via the !cat directive.
@@ -511,6 +517,46 @@ class TestWirePi:
         assert provider["baseUrl"] == pb.OPENROUTER_BASE_URL
         assert provider["apiKey"].startswith("!cat ")
         assert str(pb.OPENROUTER_KEY_FILE) in provider["apiKey"]
+
+    def test_preserves_existing_pi_models_config(self, isolated_state):
+        _, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
+        pi_dir.mkdir(parents=True)
+        models_path = pi_dir / "models.json"
+        models_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "existing": {
+                            "baseUrl": "https://example.test/v1",
+                            "api": "openai-completions",
+                            "apiKey": "existing-key",
+                            "models": [{"id": "existing-model"}],
+                        }
+                    }
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+
+        result = wiz._wire_pi("ollama", "qwen2.5-coder:7b")
+        assert result.env["PI_CODING_AGENT_DIR"] == str(pi_dir)
+        models = json.loads(models_path.read_text())
+        assert "existing" in models["providers"]
+        assert "ccl-ollama" in models["providers"]
+
+    def test_respects_existing_pi_coding_agent_dir_override(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        _, wiz, _ = isolated_state
+        custom_pi_dir = tmp_path / "custom-pi-agent"
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(custom_pi_dir))
+
+        result = wiz._wire_pi("ollama", "qwen2.5-coder:7b")
+
+        assert result.env["PI_CODING_AGENT_DIR"] == str(custom_pi_dir)
+        assert (custom_pi_dir / "models.json").exists()
 
     def test_unknown_engine_returns_none(self, isolated_state):
         _, wiz, _ = isolated_state

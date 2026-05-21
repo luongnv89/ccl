@@ -30,11 +30,13 @@ cc
 That's it. The alias execs `<REPO_ROOT>/.claude-codex-local/bin/cc`. Claude
 and Codex helpers either run `ollama launch <harness>` (Ollama path) or set
 the right env vars (LM Studio / llama.cpp / vLLM). Pi helpers set
-`PI_CODING_AGENT_DIR` and launch `pi --provider ccl-<engine> --model <model>`.
+`PI_CODING_AGENT_DIR` to Pi's normal config directory and launch
+`pi --provider ccl-<engine> --model <model>`.
 
-Your real `~/.claude` and `~/.codex` are used as-is for those harnesses.
-For Pi, CCL uses an isolated `PI_CODING_AGENT_DIR` and writes a custom
-`models.json` provider for the selected engine/model.
+Your real `~/.claude`, `~/.codex`, and Pi config are used as-is for those
+harnesses. For Pi, CCL adds/updates only its `ccl-*` provider in the normal
+`models.json`, so installed Pi extensions, packages, skills, prompts, themes,
+settings, and auth stay available from `cp`.
 
 You can still pass extra args: `cc -p "what does foo.py do?"`.
 
@@ -53,9 +55,10 @@ You can still pass extra args: `cc -p "what does foo.py do?"`.
 
 ## Return to official mode
 
-Your global `~/.claude`, `~/.codex`, and default `~/.pi/agent` are unchanged.
+Your global `~/.claude` and `~/.codex` are unchanged. Pi keeps using its
+normal config directory; CCL only adds a `ccl-*` provider to `models.json`.
 Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`cp`) to use the
-official backend/config.
+official backend/model selection.
 
 ## Rollback
 

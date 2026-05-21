@@ -3000,8 +3000,18 @@ def _wire_codex(engine: str, tag: str) -> WireResult | None:
 
 
 def _pi_agent_dir() -> Path:
-    """Isolated Pi config dir managed by CCL for local-provider models."""
-    return pb.STATE_DIR / "pi-agent"
+    """Return the Pi config dir CCL should augment.
+
+    CCL intentionally writes Pi's local-provider entry into the same config
+    directory that a normal ``pi`` invocation uses.  Earlier versions pointed
+    ``PI_CODING_AGENT_DIR`` at an isolated CCL directory, which made the
+    generated ``cp``/``pi-local`` helper lose the user's installed Pi packages,
+    extensions, skills, prompts, themes, settings, and auth state.
+    """
+    configured = os.environ.get("PI_CODING_AGENT_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".pi" / "agent"
 
 
 def _pi_provider_for_engine(engine: str) -> str:
@@ -3045,9 +3055,10 @@ def _write_pi_models_config(engine: str, tag: str) -> Path:
     Write the Pi custom-provider entry used by the CCL helper.
 
     Pi reads OpenAI-compatible local backends from models.json rather than
-    OPENAI_BASE_URL-style env vars. Keep this file under CCL's isolated
-    PI_CODING_AGENT_DIR so setup is reversible and does not rewrite the user's
-    normal ~/.pi/agent/models.json.
+    OPENAI_BASE_URL-style env vars. Write only CCL's provider entry into the
+    normal Pi config dir (or the user's existing PI_CODING_AGENT_DIR override)
+    so cp/pi-local keeps the same extensions, skills, prompts, themes,
+    settings, and auth state as official pi.
     """
     base_url = _pi_base_url_for_engine(engine)
     if base_url is None:
@@ -3583,12 +3594,13 @@ Then run:
 
 That's it. The alias execs `{helper_script}`. Claude/Codex helpers either
 run `ollama launch {harness}` (Ollama path) or export the engine env vars
-(LM Studio / llama.cpp / vLLM). Pi helpers set `PI_CODING_AGENT_DIR` and
-launch `pi --provider ccl-{engine} --model {model}`.
+(LM Studio / llama.cpp / vLLM). Pi helpers set `PI_CODING_AGENT_DIR` to
+Pi's normal config directory and launch `pi --provider ccl-{engine} --model {model}`.
 
-Your real `~/.claude` and `~/.codex` are used as-is for those harnesses.
-For Pi, CCL uses an isolated `PI_CODING_AGENT_DIR` under `{state_dir}` and
-writes a custom `models.json` provider for the selected engine/model.
+Your real `~/.claude`, `~/.codex`, and Pi config are used as-is for those
+harnesses. For Pi, CCL adds/updates only its `ccl-*` provider in the normal
+`models.json`, so installed Pi extensions, packages, skills, prompts, themes,
+settings, and auth stay available from `{alias_short}`.
 
 You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 {codex_limitation}
@@ -3607,9 +3619,10 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 
 ## Return to official mode
 
-Your global `~/.claude`, `~/.codex`, and default `~/.pi/agent` are unchanged.
+Your global `~/.claude` and `~/.codex` are unchanged. Pi keeps using its
+normal config directory; CCL only adds a `ccl-*` provider to `models.json`.
 Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`cp`) to use the
-official backend/config.
+official backend/model selection.
 
 ## Rollback
 
