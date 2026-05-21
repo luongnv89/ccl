@@ -125,6 +125,12 @@ class WizardState:
             }
             if "completed_steps" in data:
                 data["completed_steps"] = [legacy_to_new.get(s, s) for s in data["completed_steps"]]
+            # Clear pre-#120 Pi alias cache so the next install step
+            # repopulates it from the new `ccp` mapping.
+            if "cp" in data.get("alias_names", []):
+                data["alias_names"] = []
+            if data.get("launch_command") == ["cp"]:
+                data["launch_command"] = []
             return cls(**data)
         except Exception:
             return cls()
@@ -2794,7 +2800,7 @@ def _materialize_remote_api_key(key_file: Path, key_value: str) -> str:
     # Write the env-supplied API key to a chmod-600 file under STATE_DIR and
     # return the shell expression the helper script substitutes at exec time.
     # Mirrors the 9router/openrouter/vllm keyfile pattern so the literal
-    # secret never lives in the generated cc*/cx*/cp* scripts. The file is
+    # secret never lives in the generated cc*/cx*/ccp* scripts. The file is
     # re-written on each wizard run so env-as-source-of-truth wins; user-
     # managed key files (e.g. pre-existing VLLM_KEY_FILE) are handled by
     # caller precedence and not overwritten here.
@@ -3091,7 +3097,7 @@ def _pi_agent_dir() -> Path:
     CCL intentionally writes Pi's local-provider entry into the same config
     directory that a normal ``pi`` invocation uses.  Earlier versions pointed
     ``PI_CODING_AGENT_DIR`` at an isolated CCL directory, which made the
-    generated ``cp``/``pi-local`` helper lose the user's installed Pi packages,
+    generated ``ccp``/``pi-local`` helper lose the user's installed Pi packages,
     extensions, skills, prompts, themes, settings, and auth state.
     """
     configured = os.environ.get("PI_CODING_AGENT_DIR")
@@ -3154,7 +3160,7 @@ def _write_pi_models_config(engine: str, tag: str) -> Path:
     Pi reads OpenAI-compatible local backends from models.json rather than
     OPENAI_BASE_URL-style env vars. Write only CCL's provider entry into the
     normal Pi config dir (or the user's existing PI_CODING_AGENT_DIR override)
-    so cp/pi-local keeps the same extensions, skills, prompts, themes,
+    so ccp/pi-local keeps the same extensions, skills, prompts, themes,
     settings, and auth state as official pi.
     """
     base_url = _pi_base_url_for_engine(engine)
@@ -3290,6 +3296,23 @@ def _migrate_legacy_alias_block(existing: str) -> str:
     return existing[: match.start()] + migrated + existing[match.end() :]
 
 
+def _remove_legacy_pi_helper(state_dir: Path) -> bool:
+    """
+    Delete the pre-#120 `cp` helper script if it exists.
+
+    Returns True when a legacy helper was removed. The current `ccp` helper
+    is left untouched. Safe to call when no legacy helper exists.
+    """
+    legacy_path = state_dir / "bin" / "cp"
+    if legacy_path.is_file():
+        try:
+            legacy_path.unlink()
+            return True
+        except OSError:
+            return False
+    return False
+
+
 def _fence_tag_for(harness: str, engine: str) -> str:
     """
     Derive the per-install fence-tag from semantic state.
@@ -3316,14 +3339,15 @@ def _helper_script_basename(harness: str) -> str:
     "claude" / "codex" / "pi" (existing local harnesses), their
     "claude9" / "codex9" / "pi9" 9router variants, and the OpenRouter
     variants "claudeo" / "codexo" / "pio". The script names must stay
-    distinct so the local (cc/cx/cp), 9router (cc9/cx9/cp9), and
+    distinct so the local (cc/cx/ccp), 9router (cc9/cx9/cp9), and
     OpenRouter (cco/cxo/cpo) install paths can all coexist on the same
-    machine.
+    machine. The Pi local short name is `ccp` (not `cp`) because `cp`
+    is the standard POSIX copy command — see issue #120.
     """
     mapping = {
         "claude": "cc",
         "codex": "cx",
-        "pi": "cp",
+        "pi": "ccp",
         "claude9": "cc9",
         "codex9": "cx9",
         "pi9": "cp9",
@@ -3344,12 +3368,14 @@ def _alias_names_for(harness: str) -> list[str]:
     short alias (cc9/cx9/cp9 and cco/cxo/cpo). The long forms
     (claude-local / codex-local / pi-local) are reserved for the
     original local-only paths so existing shell aliases keep pointing
-    where users expect.
+    where users expect. The Pi local short name is `ccp` (not `cp`)
+    so the alias does not shadow the standard POSIX copy command —
+    see issue #120.
     """
     mapping = {
         "claude": ["cc", "claude-local"],
         "codex": ["cx", "codex-local"],
-        "pi": ["cp", "pi-local"],
+        "pi": ["ccp", "pi-local"],
         "claude9": ["cc9"],
         "codex9": ["cx9"],
         "pi9": ["cp9"],
@@ -3495,6 +3521,14 @@ def _install_shell_aliases(
         new_text = existing + sep + prefix + block
     rc_path.write_text(new_text)
     ok(f"Installed aliases into {rc_path}: {', '.join(names)}")
+    # Clean up the pre-#120 `cp` Pi helper. The pi fence block has already
+    # been overwritten above so the stale `alias cp=` is gone from the rc
+    # file; this just removes the orphaned binary in STATE_DIR/bin/cp.
+    if harness == "pi" and _remove_legacy_pi_helper(pb.STATE_DIR):
+        warn(
+            "Removed legacy `cp` helper — the Pi local shortcut is now `ccp` (it no "
+            "longer shadows the POSIX copy command). See #120."
+        )
     return rc_path, names
 
 
@@ -3763,7 +3797,7 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 
 Your global `~/.claude` and `~/.codex` are unchanged. Pi keeps using its
 normal config directory; CCL only adds a `ccl-*` provider to `models.json`.
-Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`cp`) to use the
+Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`ccp`) to use the
 official backend/model selection.
 
 ## Rollback
@@ -4558,7 +4592,7 @@ _FENCE_TAG_TO_HARNESS_ENGINE: dict[str, tuple[str, str]] = {
 _BASENAME_TO_FENCE_TAG: dict[str, str] = {
     "cc": "claude",
     "cx": "codex",
-    "cp": "pi",
+    "ccp": "pi",
     "cc9": "claude9",
     "cx9": "codex9",
     "cp9": "pi9",
@@ -4567,15 +4601,25 @@ _BASENAME_TO_FENCE_TAG: dict[str, str] = {
     "cpo": "pio",
 }
 
+# Legacy Pi local basename. `cp` shadowed the POSIX copy command, so the
+# canonical helper was renamed to `ccp` in #120. The legacy basename stays
+# in the detection table so existing installs are recognized and migrated
+# the next time the wizard runs.
+_LEGACY_BASENAME_TO_FENCE_TAG: dict[str, str] = {
+    "cp": "pi",
+}
+
 
 def _detect_existing_shortcuts() -> dict[str, dict[str, Any]]:
     """
     Detect existing helper scripts in STATE_DIR/bin.
 
     Returns a dict mapping helper-script basename -> {path, fence_tag, harness,
-    engine_kind}. `engine_kind` is one of "local", "9router", "openrouter".
-    The concrete engine (ollama/llamacpp/...) for local helpers is inferred
-    separately by :func:`_infer_engine_from_script`.
+    engine_kind, legacy}. `engine_kind` is one of "local", "9router",
+    "openrouter". `legacy` is True for basenames that have been renamed
+    (currently just `cp` → `ccp` per #120); the wizard uses this to migrate
+    them on the next install. The concrete engine (ollama/llamacpp/...) for
+    local helpers is inferred separately by :func:`_infer_engine_from_script`.
     """
     result: dict[str, dict[str, Any]] = {}
     bin_dir = STATE_DIR / "bin"
@@ -4587,14 +4631,19 @@ def _detect_existing_shortcuts() -> dict[str, dict[str, Any]]:
             continue
         basename = script_path.name
         fence_tag = _BASENAME_TO_FENCE_TAG.get(basename)
+        legacy = False
         if not fence_tag:
-            continue
+            fence_tag = _LEGACY_BASENAME_TO_FENCE_TAG.get(basename)
+            if not fence_tag:
+                continue
+            legacy = True
         harness, engine_kind = _FENCE_TAG_TO_HARNESS_ENGINE[fence_tag]
         result[basename] = {
             "path": str(script_path),
             "fence_tag": fence_tag,
             "harness": harness,
             "engine_kind": engine_kind,
+            "legacy": legacy,
         }
     return result
 
@@ -4687,13 +4736,27 @@ def run_status() -> int:
         if engine:
             local_script_configs[basename] = {"engine": engine, "model": model or "(unknown)"}
 
+    # Legacy Pi local helper basename — see #120. The current `ccp` install
+    # rules take precedence; a legacy `cp` helper only surfaces when the
+    # user hasn't re-run setup yet, and even then we mark the row so users
+    # know to re-run.
+    legacy_pi_basename = "cp"
+    has_legacy_pi_script = legacy_pi_basename in existing_shortcuts and existing_shortcuts[
+        legacy_pi_basename
+    ].get("legacy")
+
     all_shortcuts: list[dict[str, Any]] = []
 
     for harness in ["claude", "codex", "pi"]:
-        # ---- Primary (local engine) variant: cc / cx / cp + long alias ----
+        # ---- Primary (local engine) variant: cc / cx / ccp + long alias ----
         local_basename = _helper_script_basename(harness)
         has_local_script = local_basename in existing_shortcuts
         script_cfg = local_script_configs.get(local_basename)
+        # Surface a pre-#120 `cp` install on the Pi row so users see it in
+        # `ccl status` and know to re-run setup.
+        if harness == "pi" and not has_local_script and has_legacy_pi_script:
+            has_local_script = True
+            script_cfg = local_script_configs.get(legacy_pi_basename)
 
         if script_cfg:
             primary_engine_name = script_cfg["engine"]
@@ -4820,7 +4883,7 @@ def run_status() -> int:
 
     # "Default …" rows reflect what `ccl setup` recorded — not what's wired
     # up on disk. The shortcuts table above already tells the user what each
-    # cc/cx/cp script actually runs, so we don't try to back-fill these rows
+    # cc/cx/ccp script actually runs, so we don't try to back-fill these rows
     # from helper-script inference (different harnesses can use different
     # engines, and picking one to call "the default" misleads the user).
     if state.primary_harness:

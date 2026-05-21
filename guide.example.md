@@ -11,7 +11,7 @@
 - **Harness**: `<harness>`
 - **Engine**: `<engine>`
 - **Model**: `<model>:<size>`
-- **Aliases**: `cc`, `claude-local` (or `cp`, `pi-local` for Pi)
+- **Aliases**: `cc`, `claude-local` (or `ccp`, `pi-local` for Pi)
   (installed in `~/.zshrc`)
 - **Helper script**: `<REPO_ROOT>/.claude-codex-local/bin/cc`
 
@@ -36,7 +36,7 @@ the right env vars (LM Studio / llama.cpp / vLLM). Pi helpers set
 Your real `~/.claude`, `~/.codex`, and Pi config are used as-is for those
 harnesses. For Pi, CCL adds/updates only its `ccl-*` provider in the normal
 `models.json`, so installed Pi extensions, packages, skills, prompts, themes,
-settings, and auth stay available from `cp`.
+settings, and auth stay available from `ccp`.
 
 You can still pass extra args: `cc -p "what does foo.py do?"`.
 
@@ -57,7 +57,7 @@ You can still pass extra args: `cc -p "what does foo.py do?"`.
 
 Your global `~/.claude` and `~/.codex` are unchanged. Pi keeps using its
 normal config directory; CCL only adds a `ccl-*` provider to `models.json`.
-Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`cp`) to use the
+Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`ccp`) to use the
 official backend/model selection.
 
 ## Rollback

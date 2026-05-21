@@ -55,7 +55,7 @@ A 9-step wizard that runs once (or with `--resume` after a failure):
 | 4    | Ask which model (or auto-pick via `llmfit`, installed on-demand if needed) |
 | 5    | Smoke-test the engine with the chosen model                                |
 | 6    | Wire up the harness                                                        |
-| 7    | Install helper script + shell aliases (`cc` / `cx` / `cp`)                 |
+| 7    | Install helper script + shell aliases (`cc` / `cx` / `ccp`)                |
 | 8    | End-to-end verification                                                    |
 | 9    | Generate personalized `guide.md`                                           |
 
@@ -65,7 +65,7 @@ State is persisted to `.claude-codex-local/wizard-state.json` so a failed run ca
 
 The user-facing surface after setup:
 
-- `.claude-codex-local/bin/cc` / `cx` / `cp` / `cc9` / `cx9` / `cp9` / `cco` / `cxo` / `cpo` — a short bash wrapper that invokes the configured launch command. The `*9` helpers are installed when the user picks the 9router engine and the `*o` helpers when the user picks OpenRouter; all three families coexist with the local-engine helpers so a single machine can run any combination of backends.
+- `.claude-codex-local/bin/cc` / `cx` / `ccp` / `cc9` / `cx9` / `cp9` / `cco` / `cxo` / `cpo` — a short bash wrapper that invokes the configured launch command. The `*9` helpers are installed when the user picks the 9router engine and the `*o` helpers when the user picks OpenRouter; all three families coexist with the local-engine helpers so a single machine can run any combination of backends. The Pi local helper is named `ccp` (not `cp`) because `cp` is the standard POSIX copy command — see issue #120.
 - `~/.zshrc` / `~/.bashrc` — one fenced block per **install** (`# >>> claude-codex-local:claude >>>` for Claude+local-engine, `# >>> claude-codex-local:pi9 >>>` for Pi+9router, `# >>> claude-codex-local:claudeo >>>` for Claude+OpenRouter, etc.). Fence tags are derived at the alias-emission site as `f"{harness}9"` for 9router, `f"{harness}o"` for OpenRouter, and `harness` otherwise — so `state.primary_harness` stays semantic ("claude" / "codex" / "pi") while the fence-tag stays presentational. Each block is idempotently replaced on re-run of its own install, and all blocks coexist. A one-shot migration rewraps any legacy (pre-#16) unified block into the per-harness format.
 
 ### `WireResult.raw_env` — deferred-secret pattern

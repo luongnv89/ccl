@@ -445,7 +445,7 @@ class TestWireCodex:
 
 
 # ---------------------------------------------------------------------------
-# _wire_pi — augments the normal Pi config so cp keeps official pi resources.
+# _wire_pi — augments the normal Pi config so ccp keeps official pi resources.
 # ---------------------------------------------------------------------------
 
 
@@ -3910,6 +3910,121 @@ class TestAliasNamesOpenRouter:
         assert wiz._alias_names_for("pio") == ["cpo"]
 
 
+class TestPiShortcutRename:
+    """Issue #120 — Pi local shortcut renamed cp → ccp to avoid shadowing POSIX cp."""
+
+    def test_pi_helper_script_basename_is_ccp(self, isolated_state):
+        """The Pi local helper script is `ccp`, not `cp`."""
+        _, wiz, _ = isolated_state
+        assert wiz._helper_script_basename("pi") == "ccp"
+
+    def test_pi_aliases_are_ccp_and_pi_local(self, isolated_state):
+        """The Pi local install emits `alias ccp=` and `alias pi-local=`, never `alias cp=`."""
+        _, wiz, _ = isolated_state
+        assert wiz._alias_names_for("pi") == ["ccp", "pi-local"]
+
+    def test_basename_to_fence_tag_has_no_cp_entry(self, isolated_state):
+        """The canonical lookup table no longer contains `cp` — only the legacy table does."""
+        _, wiz, _ = isolated_state
+        assert "cp" not in wiz._BASENAME_TO_FENCE_TAG
+        assert wiz._BASENAME_TO_FENCE_TAG["ccp"] == "pi"
+
+    def test_legacy_basename_to_fence_tag_preserves_cp(self, isolated_state):
+        """Pre-#120 `cp` installs must still be detectable for migration."""
+        _, wiz, _ = isolated_state
+        assert wiz._LEGACY_BASENAME_TO_FENCE_TAG["cp"] == "pi"
+
+    def test_alias_block_pi_contains_ccp_not_cp(self, isolated_state, tmp_path):
+        """The fenced rc block for a fresh Pi install must declare `alias ccp=` only."""
+        _, wiz, _ = isolated_state
+        script = tmp_path / "ccp"
+        script.write_text("#!/bin/sh\n")
+        block, names = wiz._alias_block(script, "pi")
+        assert names == ["ccp", "pi-local"]
+        assert "alias ccp=" in block
+        assert "alias pi-local=" in block
+        # The whole-word boundary matters here — `alias cp=` must not appear.
+        assert "alias cp=" not in block
+
+    def test_remove_legacy_pi_helper_deletes_existing_cp_binary(self, isolated_state):
+        """The migration helper removes the orphaned `bin/cp` helper."""
+        _, wiz, state_dir = isolated_state
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        legacy = bin_dir / "cp"
+        legacy.write_text("#!/usr/bin/env bash\nexec pi --provider ccl-ollama\n")
+        legacy.chmod(0o755)
+        assert legacy.exists()
+        assert wiz._remove_legacy_pi_helper(state_dir) is True
+        assert not legacy.exists()
+
+    def test_remove_legacy_pi_helper_no_op_when_missing(self, isolated_state):
+        """Calling the migration helper without a legacy binary is safe and returns False."""
+        _, wiz, state_dir = isolated_state
+        (state_dir / "bin").mkdir(parents=True, exist_ok=True)
+        assert wiz._remove_legacy_pi_helper(state_dir) is False
+
+    def test_wizard_state_load_clears_legacy_cp_alias_names(self, isolated_state):
+        """A persisted `state.alias_names == ["cp", "pi-local"]` is reset on load."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState()
+        state.alias_names = ["cp", "pi-local"]
+        state.launch_command = ["cp"]
+        state.save()
+        loaded = wiz.WizardState.load()
+        assert loaded.alias_names == []
+        assert loaded.launch_command == []
+
+    def test_install_shell_aliases_pi_rewrites_legacy_block(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """
+        On a Pi install, an existing `# >>> claude-codex-local:pi >>>` block
+        whose body still says `alias cp=` is replaced by a block declaring
+        `alias ccp=` — the per-harness fence regex matches by tag, so the
+        whole block is overwritten in one shot.
+        """
+        pb, wiz, state_dir = isolated_state
+        # Stand up a fake shell rc file with a pre-#120 Pi block.
+        fake_rc = tmp_path / ".zshrc"
+        fake_rc.write_text(
+            "# user content above\n"
+            "\n"
+            "# >>> claude-codex-local:pi >>>\n"
+            "# Managed by claude-codex-local wizard. Re-run the wizard to update.\n"
+            "alias cp=/old/path/bin/cp\n"
+            "alias pi-local=/old/path/bin/cp\n"
+            "# <<< claude-codex-local:pi <<<\n"
+            "\n"
+            "# user content below\n"
+        )
+        monkeypatch.setattr(wiz, "_detect_shell_rc", lambda: fake_rc)
+        # Drop a legacy helper in bin/ so the migration warn path runs too.
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        legacy = bin_dir / "cp"
+        legacy.write_text("#!/usr/bin/env bash\nexec pi\n")
+        legacy.chmod(0o755)
+
+        new_script = bin_dir / "ccp"
+        new_script.write_text("#!/usr/bin/env bash\nexec pi --provider ccl-ollama\n")
+        new_script.chmod(0o755)
+
+        rc_path, names = wiz._install_shell_aliases(new_script, "pi", non_interactive=True)
+        assert rc_path == fake_rc
+        assert names == ["ccp", "pi-local"]
+        rc_text = fake_rc.read_text()
+        # Surrounding user content is preserved.
+        assert "# user content above" in rc_text
+        assert "# user content below" in rc_text
+        # The new block declares ccp, not cp.
+        assert "alias ccp=" in rc_text
+        assert "alias pi-local=" in rc_text
+        assert "alias cp=" not in rc_text
+        # The orphan legacy binary is removed.
+        assert not legacy.exists()
+
+
 class TestStep4PickOpenRouter:
     """Issue #83 — Step 4 has a dedicated openrouter branch that skips llmfit/download."""
 
@@ -4572,18 +4687,18 @@ class TestRunStatus:
         wiz.WizardState().save()
         self._write_helper(
             state_dir,
-            "cp",
+            "ccp",
             'exec pi --provider ccl-ollama --model qwen3-coder-next:latest "$@"',
         )
 
         rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=["ollama"])
 
         assert rc == 0
-        cp_line = next(line for line in out.splitlines() if "cp, pi-local" in line)
-        assert "qwen3-coder-next" in cp_line
-        assert "ollama" in cp_line
-        assert "available" in cp_line
-        assert "unavailable" not in cp_line
+        ccp_line = next(line for line in out.splitlines() if "ccp, pi-local" in line)
+        assert "qwen3-coder-next" in ccp_line
+        assert "ollama" in ccp_line
+        assert "available" in ccp_line
+        assert "unavailable" not in ccp_line
 
     def test_local_script_without_engine_installed_is_unavailable_not_available(
         self, isolated_state, monkeypatch
@@ -4769,7 +4884,7 @@ class TestInferEngineFromScript:
 
     def test_ollama_helper_via_pi_provider(self, isolated_state, tmp_path):
         _, wiz, _ = isolated_state
-        script = tmp_path / "cp"
+        script = tmp_path / "ccp"
         script.write_text(
             "#!/usr/bin/env bash\n"
             'exec pi --provider ccl-ollama --model qwen3-coder-next:latest "$@"\n'
@@ -4829,3 +4944,40 @@ class TestDetectExistingShortcuts:
         p.write_text("#!/usr/bin/env bash\n")
         p.chmod(0o755)
         assert wiz._detect_existing_shortcuts() == {}
+
+    def test_pi_basenames_resolve_to_pi_harness(self, isolated_state):
+        """Pi local helper is `ccp`, router variants are `cp9` and `cpo`. Issue #120."""
+        _, wiz, state_dir = isolated_state
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        for name in ("ccp", "cp9", "cpo"):
+            p = bin_dir / name
+            p.write_text("#!/usr/bin/env bash\n")
+            p.chmod(0o755)
+
+        result = wiz._detect_existing_shortcuts()
+        assert {b: result[b]["harness"] for b in ("ccp", "cp9", "cpo")} == {
+            "ccp": "pi",
+            "cp9": "pi",
+            "cpo": "pi",
+        }
+        assert result["ccp"]["engine_kind"] == "local"
+        assert result["cp9"]["engine_kind"] == "9router"
+        assert result["cpo"]["engine_kind"] == "openrouter"
+        # New-style installs are not marked legacy.
+        assert result["ccp"]["legacy"] is False
+
+    def test_legacy_cp_basename_detected_with_legacy_flag(self, isolated_state):
+        """Pre-#120 `cp` helper is still detected so migration can find it."""
+        _, wiz, state_dir = isolated_state
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        legacy = bin_dir / "cp"
+        legacy.write_text("#!/usr/bin/env bash\nexec pi --provider ccl-ollama\n")
+        legacy.chmod(0o755)
+
+        result = wiz._detect_existing_shortcuts()
+        assert "cp" in result
+        assert result["cp"]["harness"] == "pi"
+        assert result["cp"]["engine_kind"] == "local"
+        assert result["cp"]["legacy"] is True
