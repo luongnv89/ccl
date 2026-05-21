@@ -299,6 +299,12 @@ export VLLM_BASE_URL=http://gpu-box.local:8000
 export VLLM_API_KEY=...   # optional; vLLM only checks this if configured
 ```
 
+Each URL must be the **base** of the engine host — scheme, host, and port only.
+Do **not** append `/v1`, `/api`, or any other path. The wizard's probes add the
+correct suffix per engine (`/api/tags` for Ollama, `/health` and `/v1/models`
+for llama.cpp, `/v1/models` for vLLM). A trailing path silently double-suffixes
+to a 404; the wizard warns and strips it, but the right input is the bare host.
+
 Local and remote engines can coexist: unset the relevant env var to go back to
 the localhost default, or choose a different engine in the wizard.
 
