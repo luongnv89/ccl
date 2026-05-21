@@ -546,6 +546,26 @@ class TestWirePi:
         assert "existing" in models["providers"]
         assert "ccl-ollama" in models["providers"]
 
+    def test_invalid_existing_pi_models_config_is_not_overwritten(self, isolated_state):
+        _, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
+        pi_dir.mkdir(parents=True)
+        models_path = pi_dir / "models.json"
+        models_path.write_text("{not valid json\n")
+
+        assert wiz._wire_pi("ollama", "qwen2.5-coder:7b") is None
+        assert models_path.read_text() == "{not valid json\n"
+
+    def test_non_object_pi_models_providers_is_not_overwritten(self, isolated_state):
+        _, wiz, _ = isolated_state
+        pi_dir = Path.home() / ".pi" / "agent"
+        pi_dir.mkdir(parents=True)
+        models_path = pi_dir / "models.json"
+        models_path.write_text(json.dumps({"providers": []}) + "\n")
+
+        assert wiz._wire_pi("ollama", "qwen2.5-coder:7b") is None
+        assert json.loads(models_path.read_text()) == {"providers": []}
+
     def test_respects_existing_pi_coding_agent_dir_override(
         self, isolated_state, monkeypatch, tmp_path
     ):

@@ -73,6 +73,8 @@ To wipe only the claude harness:
    `# <<< claude-codex-local:claude <<<` markers).
 2. `rm -f <REPO_ROOT>/.claude-codex-local/bin/cc`
 3. `rm -f <REPO_ROOT>/guide.md`
+4. For Pi installs, optionally remove this harness's `ccl-*` provider from
+   Pi's normal `models.json`.
 
 To wipe the local bridge entirely:
 
@@ -80,3 +82,5 @@ To wipe the local bridge entirely:
    `~/.zshrc`.
 2. `rm -rf <REPO_ROOT>/.claude-codex-local`
 3. `rm -f <REPO_ROOT>/guide.md`
+4. For Pi installs, optionally remove all `ccl-*` providers from Pi's normal
+   `models.json`.

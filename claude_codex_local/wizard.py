@@ -3072,11 +3072,21 @@ def _write_pi_models_config(engine: str, tag: str) -> Path:
     if models_path.exists():
         try:
             loaded = json.loads(models_path.read_text())
-            if isinstance(loaded, dict):
-                data = loaded
-        except json.JSONDecodeError:
-            data = {"providers": {}}
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Cannot update {models_path}: invalid JSON. "
+                "Fix or back up the file before re-running ccl setup."
+            ) from exc
+        if not isinstance(loaded, dict):
+            raise RuntimeError(
+                f"Cannot update {models_path}: expected a JSON object at the top level."
+            )
+        data = loaded
     providers = data.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        raise RuntimeError(
+            f"Cannot update {models_path}: expected 'providers' to be a JSON object."
+        )
     providers[provider] = {
         "baseUrl": base_url,
         "api": "openai-completions",
@@ -3097,6 +3107,9 @@ def _wire_pi(engine: str, tag: str) -> WireResult | None:
         _write_pi_models_config(engine, tag)
     except ValueError:
         fail(f"Unknown engine for Pi wire-up: {engine}")
+        return None
+    except RuntimeError as exc:
+        fail(str(exc))
         return None
     provider = _pi_provider_for_engine(engine)
     return WireResult(
@@ -3637,6 +3650,8 @@ To wipe only this install:
    `# <<< claude-codex-local:{fence_tag} <<<` markers).
 2. `rm -f {helper_script}`
 3. `rm -f {guide_path}`
+4. For Pi installs, optionally remove this install's `ccl-*` provider from
+   Pi's normal `models.json`.
 
 To wipe every ccl install (all fence-tagged blocks):
 
@@ -3644,6 +3659,8 @@ To wipe every ccl install (all fence-tagged blocks):
    `{shell_rc}`.
 2. `rm -rf {state_dir}`
 3. `rm -f {guide_path}`
+4. For Pi installs, optionally remove all `ccl-*` providers from Pi's normal
+   `models.json`.
 """
 
 
