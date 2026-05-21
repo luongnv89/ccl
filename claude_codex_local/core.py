@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import ipaddress
 import json
 import os
 import platform
@@ -13,6 +14,7 @@ import struct
 import subprocess
 import sys
 import time
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -25,16 +27,40 @@ LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
 
 
 def _normalize_base_url(value: str, *, default_scheme: str = "http") -> str:
-    """Return a client base URL with scheme and no trailing slash."""
+    """Return a client base URL with scheme and no trailing slash.
+
+    A non-empty path/query/fragment is stripped with a warning. Engine
+    probes append their own paths (`/api/tags`, `/v1/models`, `/health`); a
+    user-supplied `/v1` or `/api` suffix would otherwise double-up to a 404
+    that surfaces as a generic "endpoint unreachable" error.
+    """
     base = value.strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
         base = f"{default_scheme}://{base}"
+    parsed = urlparse(base)
+    if parsed.path or parsed.query or parsed.fragment:
+        warnings.warn(
+            f"Engine endpoint base URL {value!r} should not include a path, "
+            f"query, or fragment (engine probes append their own paths). "
+            f"Stripped to {parsed.scheme}://{parsed.netloc!r}.",
+            stacklevel=2,
+        )
+        base = f"{parsed.scheme}://{parsed.netloc}"
     return base
 
 
 def _is_local_base_url(base_url: str) -> bool:
     host = (urlparse(base_url).hostname or "").lower()
-    return host in {"", "localhost", "127.0.0.1", "::1"}
+    if not host:
+        return True
+    # RFC 6761: localhost and any *.localhost name resolves to loopback.
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    # Numeric hosts: anything in 127.0.0.0/8 or ::1 (incl. ::ffff:127.0.0.1).
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 OLLAMA_BASE_URL = _normalize_base_url(os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
@@ -98,6 +124,12 @@ OPENROUTER_KEY_FILE = STATE_DIR / "openrouter-api-key"
 # next to the 9router one — same security boundary.
 VLLM_BASE_URL = _normalize_base_url(os.environ.get("VLLM_BASE_URL", "http://localhost:8000"))
 VLLM_KEY_FILE = STATE_DIR / "vllm-api-key"
+# Snapshotted at import like the other endpoint envs above. The wizard's
+# vLLM keyfile branch (wizard.py) still reads os.environ.get("VLLM_API_KEY")
+# live to support both user-managed VLLM_KEY_FILE and env materialization;
+# this constant exists so _endpoint_config_signature() can include it without
+# the asymmetric live-vs-snapshot read that the cache key previously had.
+VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "")
 
 # Machine profile cache: persist the full scan so subsequent setup runs
 # do not re-probe every tool on the host.
@@ -3140,14 +3172,20 @@ def _is_llmfit_skipped(value: Any) -> bool:
 
 
 def _endpoint_config_signature() -> dict[str, Any]:
-    """Cache key material for endpoint env vars that change engine discovery."""
+    """Cache key material for endpoint env vars that change engine discovery.
+
+    All values snapshot at import time (consistent with the URL / key-file
+    constants above). Env-var changes during a long-running process do not
+    invalidate the cache; a process restart is required. Tests force a
+    refresh via ``importlib.reload(core)``.
+    """
     return {
         "ollama_base_url": ollama_base_url(),
         "ollama_api_key_set": bool(OLLAMA_API_KEY),
         "llamacpp_base_url": llamacpp_base_url(),
         "llamacpp_api_key_set": bool(LLAMACPP_API_KEY),
         "vllm_base_url": VLLM_BASE_URL,
-        "vllm_api_key_set": bool(os.environ.get("VLLM_API_KEY", "")),
+        "vllm_api_key_set": bool(VLLM_API_KEY),
     }
 
 

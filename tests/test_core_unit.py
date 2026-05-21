@@ -3071,3 +3071,132 @@ class TestInvalidateInprocCache:
 
         pb.invalidate_machine_profile_inproc_cache()
         assert pb._machine_profile_in_process_cache() is None
+
+
+# ---------------------------------------------------------------------------
+# _normalize_base_url (issue #116).
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeBaseUrl:
+    def test_adds_default_scheme(self):
+        assert pb._normalize_base_url("gpu-box.local:8001") == "http://gpu-box.local:8001"
+
+    def test_strips_trailing_slash(self):
+        assert pb._normalize_base_url("http://gpu-box.local:8001/") == "http://gpu-box.local:8001"
+
+    def test_preserves_https(self):
+        assert pb._normalize_base_url("https://gpu-box.local") == "https://gpu-box.local"
+
+    def test_strips_v1_path_with_warning(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pb._normalize_base_url("http://gpu-box.local:8001/v1")
+        assert result == "http://gpu-box.local:8001"
+        assert any("should not include a path" in str(w.message) for w in caught)
+
+    def test_strips_api_path_with_warning(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pb._normalize_base_url("http://gpu-box.local:11434/api")
+        assert result == "http://gpu-box.local:11434"
+        assert any("should not include a path" in str(w.message) for w in caught)
+
+    def test_strips_query_and_fragment(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            assert (
+                pb._normalize_base_url("http://gpu-box.local:8001?x=1#frag")
+                == "http://gpu-box.local:8001"
+            )
+
+    def test_no_warning_for_bare_host(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            pb._normalize_base_url("http://gpu-box.local:8001")
+        assert not any("should not include a path" in str(w.message) for w in caught)
+
+
+# ---------------------------------------------------------------------------
+# _is_local_base_url (issue #115).
+# ---------------------------------------------------------------------------
+
+
+class TestIsLocalBaseUrl:
+    def test_empty_treated_as_local(self):
+        assert pb._is_local_base_url("") is True
+
+    def test_localhost(self):
+        assert pb._is_local_base_url("http://localhost:11434") is True
+
+    def test_loopback_127_0_0_1(self):
+        assert pb._is_local_base_url("http://127.0.0.1:8001") is True
+
+    def test_loopback_127_0_0_2(self):
+        # Anywhere in 127.0.0.0/8 counts as loopback.
+        assert pb._is_local_base_url("http://127.0.0.2:11434") is True
+
+    def test_loopback_ipv6(self):
+        assert pb._is_local_base_url("http://[::1]:8000") is True
+
+    def test_loopback_ipv6_mapped_ipv4(self):
+        assert pb._is_local_base_url("http://[::ffff:127.0.0.1]:8000") is True
+
+    def test_localhost_suffix(self):
+        # RFC 6761: foo.localhost resolves to loopback.
+        assert pb._is_local_base_url("http://foo.localhost:11434") is True
+
+    def test_remote_hostname(self):
+        assert pb._is_local_base_url("http://gpu-box.local:11434") is False
+
+    def test_remote_ipv4(self):
+        assert pb._is_local_base_url("http://192.168.1.10:11434") is False
+
+    def test_remote_ipv6(self):
+        assert pb._is_local_base_url("http://[2001:db8::1]:11434") is False
+
+    def test_localhost_case_insensitive(self):
+        assert pb._is_local_base_url("http://LOCALHOST:11434") is True
+
+
+# ---------------------------------------------------------------------------
+# _endpoint_config_signature (issue #117).
+# ---------------------------------------------------------------------------
+
+
+class TestEndpointConfigSignature:
+    def test_signature_uses_module_constants(self, monkeypatch):
+        # The signature reads module-level constants snapshotted at import.
+        # Changing os.environ at runtime without reload must NOT affect it —
+        # that is the documented contract.
+        before = pb._endpoint_config_signature()
+        monkeypatch.setenv("VLLM_API_KEY", "newly-set-key")
+        monkeypatch.setenv("OLLAMA_API_KEY", "newly-set-key")
+        after = pb._endpoint_config_signature()
+        assert before == after
+
+    def test_signature_shape(self):
+        sig = pb._endpoint_config_signature()
+        assert set(sig.keys()) == {
+            "ollama_base_url",
+            "ollama_api_key_set",
+            "llamacpp_base_url",
+            "llamacpp_api_key_set",
+            "vllm_base_url",
+            "vllm_api_key_set",
+        }
+        # All booleans on the *_set fields, all strings on the URLs.
+        assert isinstance(sig["ollama_api_key_set"], bool)
+        assert isinstance(sig["llamacpp_api_key_set"], bool)
+        assert isinstance(sig["vllm_api_key_set"], bool)
+        assert isinstance(sig["ollama_base_url"], str)
+        assert isinstance(sig["llamacpp_base_url"], str)
+        assert isinstance(sig["vllm_base_url"], str)
