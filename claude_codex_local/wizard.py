@@ -3519,12 +3519,30 @@ def _install_shell_aliases(
         sep = "" if existing.endswith("\n") or not existing else "\n"
         prefix = "\n" if existing else ""
         new_text = existing + sep + prefix + block
+    # Pre-#120 Pi installs left an `alias cp=` line inside the `:pi` fence
+    # block. If the user re-runs setup for a Pi router variant (pi9 / pio)
+    # without ever re-installing the local engine, that legacy block sticks
+    # around and continues to shadow POSIX `cp`. Force-rewrite it to the
+    # new `:pi` block whenever any Pi-family install runs.
+    if harness in ("pi9", "pio"):
+        pi_re = _harness_alias_block_re("pi")
+        pi_match = pi_re.search(new_text)
+        if pi_match and "alias cp=" in pi_match.group(0):
+            existing_ccp = pb.STATE_DIR / "bin" / "ccp"
+            if existing_ccp.is_file():
+                refreshed_block, _ = _alias_block(existing_ccp, "pi")
+                new_text = pi_re.sub(refreshed_block, new_text, count=1)
+            else:
+                # No fresh ccp helper to point at — drop the stale block
+                # entirely so `alias cp=` stops shadowing POSIX cp.
+                new_text = pi_re.sub("", new_text, count=1)
     rc_path.write_text(new_text)
     ok(f"Installed aliases into {rc_path}: {', '.join(names)}")
-    # Clean up the pre-#120 `cp` Pi helper. The pi fence block has already
-    # been overwritten above so the stale `alias cp=` is gone from the rc
-    # file; this just removes the orphaned binary in STATE_DIR/bin/cp.
-    if harness == "pi" and _remove_legacy_pi_helper(pb.STATE_DIR):
+    # Clean up the orphaned pre-#120 `cp` Pi helper binary. The rc block
+    # was overwritten above (either by the per-harness regex for harness=="pi"
+    # or by the cross-fence rewrite for pi9/pio), so the binary is now
+    # unreachable from any alias.
+    if harness.startswith("pi") and _remove_legacy_pi_helper(pb.STATE_DIR):
         warn(
             "Removed legacy `cp` helper — the Pi local shortcut is now `ccp` (it no "
             "longer shadows the POSIX copy command). See #120."
@@ -4720,7 +4738,7 @@ def run_status() -> int:
     presence = profile.get("presence", {})
     installed_engines: list[str] = presence.get("engines", []) or []
 
-    # Helper scripts are the source of truth for what `cc` / `cx` / `cp`
+    # Helper scripts are the source of truth for what `cc` / `cx` / `ccp`
     # (and the 9/o variants) actually run today. The wizard state captures
     # the user's most recent setup choices but the user may have rerun the
     # wizard for one harness without touching another, so we inspect each

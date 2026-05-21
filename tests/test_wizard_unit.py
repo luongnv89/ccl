@@ -3975,6 +3975,78 @@ class TestPiShortcutRename:
         assert loaded.alias_names == []
         assert loaded.launch_command == []
 
+    def test_install_shell_aliases_pi9_strips_legacy_pi_block(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """
+        A user who re-runs setup with 9router after a pre-#120 install must
+        not be left with the legacy `:pi` block (which still says
+        `alias cp=…`) lingering in their rc file. The installer drops it
+        when no fresh `ccp` helper exists to repoint at.
+        """
+        pb, wiz, state_dir = isolated_state
+        fake_rc = tmp_path / ".zshrc"
+        fake_rc.write_text(
+            "# >>> claude-codex-local:pi >>>\n"
+            "alias cp=/old/path/bin/cp\n"
+            "alias pi-local=/old/path/bin/cp\n"
+            "# <<< claude-codex-local:pi <<<\n"
+        )
+        monkeypatch.setattr(wiz, "_detect_shell_rc", lambda: fake_rc)
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        legacy = bin_dir / "cp"
+        legacy.write_text("#!/usr/bin/env bash\nexec pi\n")
+        legacy.chmod(0o755)
+        cp9_script = bin_dir / "cp9"
+        cp9_script.write_text("#!/usr/bin/env bash\nexec pi --provider ccl-9router\n")
+        cp9_script.chmod(0o755)
+
+        wiz._install_shell_aliases(cp9_script, "pi9", non_interactive=True)
+        rc_text = fake_rc.read_text()
+        assert "alias cp9=" in rc_text
+        assert "# >>> claude-codex-local:pi9 >>>" in rc_text
+        # The legacy `:pi` block — and its stale `alias cp=` line — are gone.
+        assert "alias cp=" not in rc_text
+        assert "# >>> claude-codex-local:pi >>>" not in rc_text
+        assert not legacy.exists()
+
+    def test_install_shell_aliases_pi9_rewrites_legacy_pi_block_to_ccp(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """
+        Variant of the strip test: when a fresh `ccp` binary already exists
+        (the user previously fixed Pi local and is now adding 9router), the
+        legacy `:pi` block is rewritten to point at `ccp` instead of being
+        dropped entirely — so the user retains a working `ccp` alias.
+        """
+        pb, wiz, state_dir = isolated_state
+        fake_rc = tmp_path / ".zshrc"
+        fake_rc.write_text(
+            "# >>> claude-codex-local:pi >>>\n"
+            "alias cp=/old/path/bin/cp\n"
+            "alias pi-local=/old/path/bin/cp\n"
+            "# <<< claude-codex-local:pi <<<\n"
+        )
+        monkeypatch.setattr(wiz, "_detect_shell_rc", lambda: fake_rc)
+        bin_dir = state_dir / "bin"
+        bin_dir.mkdir(parents=True)
+        ccp_script = bin_dir / "ccp"
+        ccp_script.write_text("#!/usr/bin/env bash\nexec pi --provider ccl-ollama\n")
+        ccp_script.chmod(0o755)
+        cp9_script = bin_dir / "cp9"
+        cp9_script.write_text("#!/usr/bin/env bash\nexec pi --provider ccl-9router\n")
+        cp9_script.chmod(0o755)
+
+        wiz._install_shell_aliases(cp9_script, "pi9", non_interactive=True)
+        rc_text = fake_rc.read_text()
+        assert "alias cp9=" in rc_text
+        # Legacy `:pi` block rewritten to point at ccp.
+        assert "alias ccp=" in rc_text
+        assert "alias pi-local=" in rc_text
+        assert "alias cp=" not in rc_text
+        assert "# >>> claude-codex-local:pi >>>" in rc_text
+
     def test_install_shell_aliases_pi_rewrites_legacy_block(
         self, isolated_state, monkeypatch, tmp_path
     ):
