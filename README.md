@@ -111,7 +111,7 @@ Then run:
 ```bash
 cc        # Claude Code → local model
 cx        # Codex CLI → local model
-cp        # Pi → local model
+ccp       # Pi → local model
 ```
 
 ---
@@ -154,7 +154,7 @@ ccl --version                                   # print version and exit
 `ccl run -p "<prompt>"` runs the harness in non-interactive mode (Claude
 Code's `-p`, Codex's `exec`, Pi's `--print`) so external agents and CI scripts
 can drive a local model end-to-end without keystrokes. Without `-p`, behavior
-matches the `cc` / `cx` / `cp` alias and the session starts interactively.
+matches the `cc` / `cx` / `ccp` alias and the session starts interactively.
 
 ### Forwarding harness-native flags (`--native-params`)
 
@@ -265,16 +265,16 @@ entirely.
 | ----------- | --------- | ---------------------- | ----------------------------------------------------------------------- |
 | Claude Code | Ollama    | `gemma4:26b`           | Verified end-to-end                                                     |
 | Codex CLI   | Ollama    | `gemma4:26b`           | Verified                                                                |
-| Pi          | Ollama    | any local tag          | Supported via isolated Pi `models.json` and `cp` alias                  |
+| Pi          | Ollama    | any local tag          | Supported via isolated Pi `models.json` and `ccp` alias                 |
 | Claude Code | LM Studio | Qwen3 family           | Blocked — `400 thinking.type`; wizard warns and recommends alternatives |
 | Any         | llama.cpp | any                    | Inline-env code path exists, no live proof yet                          |
 | Any         | vLLM      | any                    | New in 0.8.0 — adapter shipped with tests                               |
 | Claude Code | 9router   | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cc9` alias; existing `cc` is untouched |
 | Codex CLI   | 9router   | `kr/claude-sonnet-4.5` | New in 0.9.0 — cloud-routed via `cx9` alias; existing `cx` is untouched |
-| Pi          | 9router   | `kr/claude-sonnet-4.5` | Cloud-routed via `cp9`; existing `cp` is untouched                      |
+| Pi          | 9router   | `kr/claude-sonnet-4.5` | Cloud-routed via `cp9`; existing `ccp` is untouched                     |
 | Claude Code | OpenRouter | `anthropic/claude-sonnet-4.6` | Hosted SaaS via `cco` alias; existing `cc` is untouched (#83)           |
 | Codex CLI   | OpenRouter | `anthropic/claude-sonnet-4.6` | Hosted SaaS via `cxo` alias; existing `cx` is untouched (#83)           |
-| Pi          | OpenRouter | `anthropic/claude-sonnet-4.6` | Hosted SaaS via `cpo`; existing `cp` is untouched (#83)                 |
+| Pi          | OpenRouter | `anthropic/claude-sonnet-4.6` | Hosted SaaS via `cpo`; existing `ccp` is untouched (#83)                |
 
 ---
 
@@ -312,7 +312,7 @@ the localhost default, or choose a different engine in the wizard.
 
 ## 9router quick-start
 
-[9router](https://github.com/decolua/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude), `cx9` (Codex), or `cp9` (Pi) alias and leaves your existing `cc` / `cx` / `cp` aliases untouched.
+[9router](https://github.com/decolua/9router) is a local proxy that exposes an OpenAI-compatible API on `http://localhost:20128/v1` and routes calls to cloud models such as `kr/claude-sonnet-4.5`. Picking 9router as the engine adds a **new** `cc9` (Claude), `cx9` (Codex), or `cp9` (Pi) alias and leaves your existing `cc` / `cx` / `ccp` aliases untouched.
 
 ### Installing and running 9router
 
@@ -396,7 +396,7 @@ For Codex: `OPENAI_BASE_URL=http://localhost:20128/v1`, `OPENAI_API_KEY=$(cat �
 
 ## OpenRouter quick-start
 
-[OpenRouter](https://openrouter.ai) is a hosted-SaaS cloud-routing service that exposes an OpenAI-compatible API at `https://openrouter.ai/api/v1` and forwards calls to dozens of cloud models (Claude, GPT-4o, Llama 3.1, Mistral, and many more). Unlike 9router, there is **no daemon to install** — only an API key. Picking OpenRouter as the engine adds a **new** `cco` (Claude), `cxo` (Codex), or `cpo` (Pi) alias and leaves your existing `cc` / `cx` / `cp` aliases untouched.
+[OpenRouter](https://openrouter.ai) is a hosted-SaaS cloud-routing service that exposes an OpenAI-compatible API at `https://openrouter.ai/api/v1` and forwards calls to dozens of cloud models (Claude, GPT-4o, Llama 3.1, Mistral, and many more). Unlike 9router, there is **no daemon to install** — only an API key. Picking OpenRouter as the engine adds a **new** `cco` (Claude), `cxo` (Codex), or `cpo` (Pi) alias and leaves your existing `cc` / `cx` / `ccp` aliases untouched.
 
 ### Setting up OpenRouter
 
@@ -423,7 +423,7 @@ The wizard:
 
 1. Asks for the OpenRouter API key and writes it to `~/.claude-codex-local/openrouter-api-key` with `chmod 0600`. The helper script reads this file at exec time via `$(cat …)` — the key is never embedded in the script body or wizard state file.
 2. Verifies reachability via `GET /models` only. **It deliberately does not call `/chat/completions`** during smoke-test or verify, because OpenRouter routes to paid cloud models. The verification record is `{"ok": true, "via": "openrouter-models-endpoint", "skipped_chat": true}`.
-3. Installs `cco` (or `cxo` / `cpo`) into your shell rc as a new fenced block (`# >>> claude-codex-local:claudeo >>>`), leaving any existing `cc` / `cx` / `cp` block alone.
+3. Installs `cco` (or `cxo` / `cpo`) into your shell rc as a new fenced block (`# >>> claude-codex-local:claudeo >>>`), leaving any existing `cc` / `cx` / `ccp` block alone.
 
 **Tip:** `cco` and `cc` can coexist on the same machine — pick `cco` when you want a hosted model, and `cc` (Ollama / LM Studio / llama.cpp) for everyday local work.
 

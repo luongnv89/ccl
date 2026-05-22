@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Rename Pi local shortcut `cp` → `ccp`** (#120): the wizard-installed `cp` alias shadowed the standard POSIX copy command, so running `cp source dest` in a shell with CCL installed launched a Pi session instead of copying files. The Pi local helper script and short alias are now `ccp` (long alias `pi-local` is unchanged because it never collided). On the next `ccl setup` run, an existing pre-#120 install is migrated automatically: the legacy `alias cp=` line is rewritten to `alias ccp=`, the orphaned `.claude-codex-local/bin/cp` binary is removed, and the wizard prints a warning explaining the change. `ccl status` still detects pre-migration installs and shows them on the Pi row so users know to re-run setup. Router-suffixed variants `cp9` (9router) and `cpo` (OpenRouter) are not affected because they do not collide with any system command.
+
 ## v0.14.0 — 2026-05-20
 
 ### Features
