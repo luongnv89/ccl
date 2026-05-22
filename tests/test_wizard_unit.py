@@ -374,6 +374,184 @@ class TestWireClaude:
 # ---------------------------------------------------------------------------
 
 
+class TestCodexDirectConfig:
+    def test_ollama_writes_codex_oss_defaults_and_backup(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir(parents=True)
+        config_path = codex_dir / "config.toml"
+        config_path.write_text(
+            'personality = "pragmatic"\n\n[projects."/repo"]\ntrust_level = "trusted"\n'
+        )
+
+        written, backup = wiz._configure_codex_with_backup("ollama", "qwen2.5-coder:7b")
+
+        assert written == config_path
+        assert backup["existed"] is True
+        assert Path(backup["backup_path"]).read_text().startswith('personality = "pragmatic"')
+        body = config_path.read_text()
+        assert 'model = "qwen2.5-coder:7b"' in body
+        assert 'model_provider = "oss"' in body
+        assert 'oss_provider = "ollama"' in body
+        assert '[projects."/repo"]' in body
+        assert str(state_dir / "backups" / "codex") in backup["backup_path"]
+
+    def test_llamacpp_writes_codex_custom_provider(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "LLAMACPP_BASE_URL", "http://llama.test:8001")
+
+        config_path = wiz._write_codex_config("llamacpp", "local-gguf")
+
+        body = config_path.read_text()
+        assert 'model = "local-gguf"' in body
+        assert 'model_provider = "ccl-llamacpp"' in body
+        assert "[model_providers.ccl-llamacpp]" in body
+        assert 'name = "CCL llamacpp"' in body
+        assert 'base_url = "http://llama.test:8001/v1"' in body
+        assert "requires_openai_auth = false" in body
+
+    def test_codex_config_rollback_restores_previous_file(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir(parents=True)
+        config_path = codex_dir / "config.toml"
+        config_path.write_text('model = "old-model"\n')
+
+        def clobber_then_fail(engine: str, tag: str) -> Path:
+            config_path.write_text('model = "broken"\n')
+            raise RuntimeError("write failed")
+
+        monkeypatch.setattr(wiz, "_write_codex_config", clobber_then_fail)
+
+        with pytest.raises(RuntimeError):
+            wiz._configure_codex_with_backup("ollama", "new-model")
+
+        assert config_path.read_text() == 'model = "old-model"\n'
+
+    def test_step_6_codex_writes_config_with_backup(self, isolated_state):
+        """Codex harness writes config via _configure_codex_with_backup."""
+        _, wiz, state_dir = isolated_state
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir(parents=True)
+        config_path = codex_dir / "config.toml"
+        config_path.write_text('model = "existing-cloud-model"\n')
+        state = wiz.WizardState(
+            primary_harness="codex",
+            primary_engine="ollama",
+            model_source="ollama-installed",
+            engine_model_tag="qwen2.5-coder:7b",
+        )
+
+        assert wiz.step_2_6_wire_harness(state, non_interactive=True) is True
+
+        # Config was mutated with the new model and OSS provider.
+        body = config_path.read_text()
+        assert 'model = "qwen2.5-coder:7b"' in body
+        assert 'model_provider = "oss"' in body
+        assert 'oss_provider = "ollama"' in body
+        # Backup should now be present for the codex path.
+        assert "codex" in state.config_backups
+        assert str(state_dir / "backups" / "codex") in state.config_backups["codex"]["backup_path"]
+        assert state.wire_result["effective_tag"] == "qwen2.5-coder:7b"
+        assert "6" in state.completed_steps
+
+    def test_codex_guide_explains_model_list_and_skipped_alias(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_harness="codex",
+            primary_engine="llamacpp",
+            engine_model_tag="local-gguf",
+            helper_script_path="/tmp/cx",
+            alias_names=["cx", "codex-local"],
+            shell_rc_path="",
+        )
+
+        assert wiz.step_2_8_generate_guide(state, non_interactive=True) is True
+
+        body = wiz.GUIDE_PATH.read_text()
+        assert "Alias installation was skipped" in body
+        assert "Reload your shell" not in body
+        assert "Then run:" not in body
+        assert "```bash\n/tmp/cx\n```" in body
+        # The codex harness now writes config via backup — settings_note reflects this.
+        assert "Codex's normal config is updated" in body
+        assert "interactive `/model` list" in body
+        assert "helper script/alias" in body
+
+    def test_setup_complete_skipped_alias_uses_helper_not_alias(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+
+        def fake_step(state, non_interactive=False):
+            state.primary_harness = "codex"
+            state.primary_engine = "llamacpp"
+            state.engine_model_tag = "local-gguf"
+            state.helper_script_path = "/tmp/cx"
+            state.alias_names = ["cx", "codex-local"]
+            state.shell_rc_path = ""
+            state.mark("x")
+            return True
+
+        monkeypatch.setattr(wiz, "STEPS", [("x", "fake", fake_step)])
+        wiz.console.width = 200
+        with wiz.console.capture() as cap:
+            rc = wiz.run_wizard()
+
+        out = cap.get()
+        assert rc == 0
+        assert "Alias install was skipped" in out
+        assert "Run the helper directly" in out
+        assert "/tmp/cx" in out
+        assert "Reload your shell" not in out
+        assert "Then run" not in out
+
+    def test_step_6_pi_updates_direct_config_after_selection(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        state = wiz.WizardState(
+            primary_harness="pi",
+            primary_engine="ollama",
+            model_source="ollama-installed",
+            engine_model_tag="qwen2.5-coder:7b",
+        )
+
+        assert wiz.step_2_6_wire_harness(state, non_interactive=True) is True
+
+        models_path = Path.home() / ".pi" / "agent" / "models.json"
+        models = json.loads(models_path.read_text())
+        assert models["providers"]["ccl-ollama"]["models"] == [
+            {
+                "id": "qwen2.5-coder:7b",
+                "name": "CCL ollama qwen2.5-coder:7b",
+            }
+        ]
+        assert state.config_backups["pi"]["path"] == str(models_path)
+        assert str(state_dir / "backups" / "pi") in state.config_backups["pi"]["backup_path"]
+        assert state.wire_result["argv"] == [
+            "pi",
+            "--provider",
+            "ccl-ollama",
+            "--model",
+            "qwen2.5-coder:7b",
+        ]
+        assert "6" in state.completed_steps
+
+    def test_step_6_pi_materializes_env_key_before_config_write(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "OLLAMA_API_KEY", "ollama-test-key")
+        state = wiz.WizardState(
+            primary_harness="pi",
+            primary_engine="ollama",
+            model_source="ollama-installed",
+            engine_model_tag="qwen2.5-coder:7b",
+        )
+
+        assert wiz.step_2_6_wire_harness(state, non_interactive=True) is True
+
+        models_path = Path.home() / ".pi" / "agent" / "models.json"
+        models = json.loads(models_path.read_text())
+        assert pb.OLLAMA_KEY_FILE.read_text().strip() == "ollama-test-key"
+        assert models["providers"]["ccl-ollama"]["apiKey"] == f"!cat {pb.OLLAMA_KEY_FILE}"
+
+
 class TestWireCodex:
     def test_ollama_path(self, isolated_state):
         _, wiz, _ = isolated_state
@@ -520,7 +698,7 @@ class TestWirePi:
         assert str(pb.OPENROUTER_KEY_FILE) in provider["apiKey"]
 
     def test_preserves_existing_pi_models_config(self, isolated_state):
-        _, wiz, _ = isolated_state
+        _, wiz, state_dir = isolated_state
         pi_dir = Path.home() / ".pi" / "agent"
         pi_dir.mkdir(parents=True)
         models_path = pi_dir / "models.json"
@@ -546,6 +724,9 @@ class TestWirePi:
         models = json.loads(models_path.read_text())
         assert "existing" in models["providers"]
         assert "ccl-ollama" in models["providers"]
+        backups = list((state_dir / "backups" / "pi").glob("models.json.*.bak"))
+        assert len(backups) == 1
+        assert "existing" in backups[0].read_text()
 
     def test_invalid_existing_pi_models_config_is_not_overwritten(self, isolated_state):
         _, wiz, _ = isolated_state

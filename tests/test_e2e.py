@@ -328,6 +328,15 @@ class TestCliSubprocesses:
         env["PATH"] = f"{bdir}:/usr/bin:/bin"
         env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
         env["HOME"] = str(tmp_path / "home")
+        # Keep subprocess smoke tests hermetic even when the developer shell
+        # points CCL at real remote engines.
+        for key in (
+            "OLLAMA_HOST",
+            "LLAMACPP_BASE_URL",
+            "VLLM_BASE_URL",
+            "LMS_BASE_URL",
+        ):
+            env.pop(key, None)
         (tmp_path / "home").mkdir(exist_ok=True)
         if extra_env:
             env.update(extra_env)
@@ -349,6 +358,15 @@ class TestCliSubprocesses:
         env["PATH"] = f"{bdir}:/usr/bin:/bin"
         env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
         env["HOME"] = str(tmp_path / "home")
+        # Keep subprocess smoke tests hermetic even when the developer shell
+        # points CCL at real remote engines.
+        for key in (
+            "OLLAMA_HOST",
+            "LLAMACPP_BASE_URL",
+            "VLLM_BASE_URL",
+            "LMS_BASE_URL",
+        ):
+            env.pop(key, None)
         (tmp_path / "home").mkdir(exist_ok=True)
         if extra_env:
             env.update(extra_env)

@@ -57,7 +57,7 @@ def reload_modules():
 
 
 @pytest.fixture(autouse=True)
-def restore_reloaded_modules():
+def restore_reloaded_modules(tmp_path):
     env_keys = [
         "CLAUDE_CODEX_LOCAL_STATE_DIR",
         "OLLAMA_HOST",
@@ -68,6 +68,7 @@ def restore_reloaded_modules():
         "VLLM_API_KEY",
     ]
     original = {key: os.environ.get(key) for key in env_keys}
+    os.environ["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
     yield
     for key, value in original.items():
         if value is None:
