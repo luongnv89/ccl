@@ -390,7 +390,7 @@ curl http://localhost:20128/v1/models
 **Step 5: Configure CCL to use 9router**
 
 ```bash
-# Interactive setup (wizard will prompt for API key)
+# Interactive setup (wizard will prompt for API key, then list models from /v1/models)
 ccl setup --engine 9router
 
 # Non-interactive (CI / scripted):
@@ -403,8 +403,9 @@ CCL_9ROUTER_API_KEY=<paste-here> CCL_9ROUTER_MODEL=kr/claude-sonnet-4.5 \
 The wizard:
 
 1. Asks for the 9router API key and writes it to `~/.claude-codex-local/9router-api-key` with `chmod 0600`. The helper script reads this file at exec time via `$(cat …)` — the key is never embedded in the script body or wizard state file.
-2. Verifies reachability via `GET /v1/models` only. **It deliberately does not call `/chat/completions`** during smoke-test or verify, because 9router routes to paid cloud models. The verification record is `{"ok": true, "via": "9router-models-endpoint", "skipped_chat": true}`.
-3. Installs `cc9` (or `cx9`) into your shell rc as a new fenced block (`# >>> claude-codex-local:claude9 >>>`), leaving any existing `cc` / `cx` block alone.
+2. Fetches available models via `GET /v1/models` and shows them as a selectable list. If the endpoint is unreachable or returns no models, the wizard falls back to manual model-name entry.
+3. Verifies reachability via `GET /v1/models` only. **It deliberately does not call `/chat/completions`** during smoke-test or verify, because 9router routes to paid cloud models. The verification record is `{"ok": true, "via": "9router-models-endpoint", "skipped_chat": true}`.
+4. Installs `cc9` (or `cx9`) into your shell rc as a new fenced block (`# >>> claude-codex-local:claude9 >>>`), leaving any existing `cc` / `cx` block alone.
 
 **Tip:** `cc9` and `cc` can coexist on the same machine — pick `cc9` when you want to burn cloud quota for a tough prompt, and `cc` (Ollama / LM Studio / llama.cpp) for everyday work.
 
