@@ -5147,6 +5147,27 @@ def run_status() -> int:
     console.print(table)
     console.print()
 
+    # Skills surface — currently only the llamacpp-tuner (issue #124). The
+    # tuner targets a *local* llama-server (it kills + restarts the process
+    # over a shell), so it must show as `unavailable (remote)` whenever the
+    # configured LLAMACPP_BASE_URL points outside loopback. We surface it
+    # here so users see why the skill no-ops instead of discovering it only
+    # at invocation time.
+    skills_table = Table(title="Skills", show_header=True)
+    skills_table.add_column("Skill", style="bold")
+    skills_table.add_column("Engine", style="magenta")
+    skills_table.add_column("Availability", style="green")
+
+    llamacpp_url = pb.llamacpp_base_url()
+    if pb._is_local_base_url(llamacpp_url):
+        tuner_availability = "[green]available[/green]"
+    else:
+        tuner_availability = f"[red]unavailable (remote — {llamacpp_url})[/red]"
+    skills_table.add_row("llamacpp-tuner", "llamacpp", tuner_availability)
+
+    console.print(skills_table)
+    console.print()
+
     # Overall setup summary
     console.print("[bold]Overall Setup Summary[/bold]")
 
