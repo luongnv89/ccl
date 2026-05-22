@@ -526,6 +526,23 @@ class TestCodexDirectConfig:
         ]
         assert "6" in state.completed_steps
 
+    def test_step_6_pi_materializes_env_key_before_config_write(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setattr(pb, "OLLAMA_API_KEY", "ollama-test-key")
+        state = wiz.WizardState(
+            primary_harness="pi",
+            primary_engine="ollama",
+            model_source="ollama-installed",
+            engine_model_tag="qwen2.5-coder:7b",
+        )
+
+        assert wiz.step_2_6_wire_harness(state, non_interactive=True) is True
+
+        models_path = Path.home() / ".pi" / "agent" / "models.json"
+        models = json.loads(models_path.read_text())
+        assert pb.OLLAMA_KEY_FILE.read_text().strip() == "ollama-test-key"
+        assert models["providers"]["ccl-ollama"]["apiKey"] == f"!cat {pb.OLLAMA_KEY_FILE}"
+
 
 class TestWireCodex:
     def test_ollama_path(self, isolated_state):

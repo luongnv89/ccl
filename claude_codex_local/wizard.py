@@ -3332,6 +3332,7 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
         )
         result = _wire_codex(engine, tag)
     elif harness == "pi":
+        _materialize_pi_api_key_files(engine)
         try:
             config_path, backup = _configure_pi_with_backup(engine, tag)
         except Exception as exc:
@@ -3775,10 +3776,8 @@ def _write_pi_models_config(engine: str, tag: str) -> Path:
     return models_path
 
 
-def _wire_pi(engine: str, tag: str, configure: bool = True) -> WireResult | None:
-    """Build a WireResult for Pi against a CCL-supported local/provider engine."""
-    # Materialize env-supplied API keys to chmod-600 files before the
-    # models.json write so `_pi_api_key_for_engine` can emit `!cat <file>`.
+def _materialize_pi_api_key_files(engine: str) -> None:
+    """Materialize env-supplied API keys before writing Pi models.json."""
     # vLLM intentionally honors a pre-existing user-managed VLLM_KEY_FILE.
     if engine == "ollama" and pb.OLLAMA_API_KEY:
         _materialize_remote_api_key(pb.OLLAMA_KEY_FILE, pb.OLLAMA_API_KEY)
@@ -3788,6 +3787,13 @@ def _wire_pi(engine: str, tag: str, configure: bool = True) -> WireResult | None
         env_key = os.environ.get("VLLM_API_KEY", "")
         if env_key:
             _materialize_remote_api_key(pb.VLLM_KEY_FILE, env_key)
+
+
+def _wire_pi(engine: str, tag: str, configure: bool = True) -> WireResult | None:
+    """Build a WireResult for Pi against a CCL-supported local/provider engine."""
+    # Ensure direct callers that still use configure=True keep the historical
+    # write-before-launch behavior and emit `!cat <keyfile>` references.
+    _materialize_pi_api_key_files(engine)
     if configure:
         try:
             _configure_pi_with_backup(engine, tag)
