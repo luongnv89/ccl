@@ -478,3 +478,226 @@ def test_verify_materializes_vllm_keyfile_raw_env(monkeypatch, tmp_path):
     assert wz.step_2_7_verify(state, non_interactive=True) is True
     assert captured["env"]["ANTHROPIC_API_KEY"] == "from-file"
     assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "from-file"
+
+
+# ---------------------------------------------------------------------------
+# Issue #123 — branch llamacpp downstream code paths on remote vs. local.
+# Each test exercises one of the acceptance-criteria touch points: the helper
+# script must not embed a local spawn, llamacpp_info must report `present`
+# purely from the remote /health probe, and the start/ensure paths must
+# refuse to spawn a local llama-server when the base URL is remote.
+# ---------------------------------------------------------------------------
+
+
+def test_helper_script_omits_llama_server_block_for_remote_llamacpp(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    _, wz = reload_modules()
+    result = wz._wire_claude("llamacpp", "remote-gguf")
+    assert result is not None
+    path = wz._write_helper_script("claude", result, engine="llamacpp")
+    body = path.read_text()
+    # AC #2: no local llama-server spawn / binary check / ccl serve fallback.
+    assert "llama-server" not in body
+    assert "ccl serve" not in body
+    assert "__CCL_HEALTH_URL" not in body
+    # The remote base URL must still be wired into the harness env.
+    assert "http://gpu-box.local:8001" in body
+
+
+def test_helper_script_keeps_llama_server_block_for_local_llamacpp(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+    monkeypatch.delenv("LLAMACPP_BASE_URL", raising=False)
+    _, wz = reload_modules()
+    result = wz._wire_claude("llamacpp", "local-gguf")
+    assert result is not None
+    path = wz._write_helper_script("claude", result, engine="llamacpp")
+    body = path.read_text()
+    # AC #4: existing local behaviour preserved (pre-flight stanza still
+    # emitted for loopback base URLs).
+    assert "ccl serve" in body
+    assert "llama-server" in body
+
+
+def test_llamacpp_info_remote_present_purely_from_health_probe(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, _ = reload_modules()
+
+    detect_calls: list[bool] = []
+
+    def fake_detect():
+        detect_calls.append(True)
+        return {"present": True, "binary": "llama-server", "version": "x"}
+
+    # Even if llamacpp_detect *would* return present=True, the remote branch
+    # must not call it — `present` for a remote URL comes from /health only.
+    monkeypatch.setattr(pb, "llamacpp_detect", fake_detect)
+
+    def fake_urlopen(req, timeout):
+        if req.full_url.endswith("/health"):
+            return FakeResponse({}, status=200)
+        if req.full_url.endswith("/v1/models"):
+            return FakeResponse({"data": [{"id": "remote-gguf"}]})
+        raise urllib.error.URLError("unexpected URL")
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        info = pb.llamacpp_info()
+
+    assert info["remote"] is True
+    assert info["server_running"] is True
+    assert info["present"] is True
+    # Local detect must NOT be consulted for remote endpoints.
+    assert detect_calls == []
+    assert info["binary"] == ""
+
+
+def test_llamacpp_info_remote_health_failure_marks_not_present(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, _ = reload_modules()
+    # Even if a local binary is on PATH, a remote URL whose /health is down
+    # must report present=False — there is nothing for the user here.
+    monkeypatch.setattr(
+        pb, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server", "version": "x"}
+    )
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.URLError("unreachable")
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        info = pb.llamacpp_info()
+
+    assert info["remote"] is True
+    assert info["server_running"] is False
+    assert info["present"] is False
+
+
+def test_llamacpp_start_server_refuses_to_spawn_when_remote(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, _ = reload_modules()
+
+    popen_calls: list[tuple] = []
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        raise AssertionError("Popen must not be invoked for remote llamacpp")
+
+    monkeypatch.setattr(pb.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        pb,
+        "llamacpp_detect",
+        lambda: {"present": True, "binary": "llama-server", "version": "x"},
+    )
+
+    out = pb.llamacpp_start_server(model_path="/tmp/does-not-matter.gguf")
+    # AC #1: the wizard must not start a local llama-server when remote.
+    assert out["ok"] is False
+    assert out.get("remote") is True
+    assert "remote" in (out.get("error") or "").lower()
+    assert popen_calls == []
+
+
+def test_ensure_llamacpp_server_running_remote_ok_when_health_passes(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, wz = reload_modules()
+
+    monkeypatch.setattr(
+        pb,
+        "llamacpp_info",
+        lambda: {
+            "remote": True,
+            "server_running": True,
+            "base_url": "http://gpu-box.local:8001",
+            "server_port": 8001,
+            "model": "remote-gguf",
+            "present": True,
+            "binary": "",
+        },
+    )
+
+    def boom(**kwargs):
+        raise AssertionError("llamacpp_start_server must not be called for remote")
+
+    monkeypatch.setattr(pb, "llamacpp_start_server", boom)
+
+    state = wz.WizardState(
+        primary_harness="claude",
+        primary_engine="llamacpp",
+        engine_model_tag="remote-gguf",
+    )
+    result = wz._ensure_llamacpp_server_running(state)
+    assert result["ok"] is True
+    assert result.get("remote") is True
+
+
+def test_ensure_llamacpp_server_running_remote_error_when_health_fails(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, wz = reload_modules()
+
+    monkeypatch.setattr(
+        pb,
+        "llamacpp_info",
+        lambda: {
+            "remote": True,
+            "server_running": False,
+            "base_url": "http://gpu-box.local:8001",
+            "server_port": 8001,
+            "model": None,
+            "present": False,
+            "binary": "",
+        },
+    )
+
+    def boom(**kwargs):
+        raise AssertionError("must not try to spawn locally for a remote endpoint")
+
+    monkeypatch.setattr(pb, "llamacpp_start_server", boom)
+
+    state = wz.WizardState(
+        primary_harness="claude",
+        primary_engine="llamacpp",
+        engine_model_tag="remote-gguf",
+    )
+    result = wz._ensure_llamacpp_server_running(state)
+    assert result["ok"] is False
+    assert result.get("remote") is True
+    assert "remote" in result["error"].lower()
+
+
+def test_llamacpp_adapter_healthcheck_remote_mentions_remote_not_path(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, _ = reload_modules()
+    monkeypatch.setattr(
+        pb, "llamacpp_detect", lambda: {"present": False, "binary": "", "version": ""}
+    )
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.URLError("unreachable")
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        result = pb.LlamaCppAdapter().healthcheck()
+
+    assert result["ok"] is False
+    detail = result["detail"].lower()
+    assert "remote" in detail
+    assert "path" not in detail
+
+
+def test_llamacpp_adapter_healthcheck_remote_ok_when_health_passes(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_BASE_URL", "http://gpu-box.local:8001")
+    pb, _ = reload_modules()
+    monkeypatch.setattr(
+        pb, "llamacpp_detect", lambda: {"present": False, "binary": "", "version": ""}
+    )
+
+    def fake_urlopen(req, timeout):
+        if req.full_url.endswith("/health"):
+            return FakeResponse({}, status=200)
+        if req.full_url.endswith("/v1/models"):
+            return FakeResponse({"data": [{"id": "remote-gguf"}]})
+        raise urllib.error.URLError("unexpected URL")
+
+    with patch("urllib.request.urlopen", fake_urlopen):
+        result = pb.LlamaCppAdapter().healthcheck()
+
+    assert result["ok"] is True
+    assert "http://gpu-box.local:8001" in result["detail"]

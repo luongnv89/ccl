@@ -343,6 +343,14 @@ class LlamaCppAdapter:
                 "ok": True,
                 "detail": f"server up at {base_url}",
             }
+        # Remote endpoint: a local llama-server binary is irrelevant — the
+        # only failure mode worth reporting is the remote /health probe.
+        if info.get("remote"):
+            return {
+                "ok": False,
+                "detail": f"remote llama.cpp server at {base_url} is not responding "
+                f"(GET /health failed). Verify the remote host and LLAMACPP_BASE_URL.",
+            }
         if not info.get("present"):
             return {"ok": False, "detail": "llama-server binary not found in PATH"}
         return {
@@ -2136,17 +2144,28 @@ def llamacpp_info() -> dict[str, Any]:
     Probe llama.cpp: binary presence and server health via HTTP.
 
     Returns:
-        present:        bool — llama-server binary found on PATH
-        binary:         str  — binary name used (e.g. "llama-server")
+        present:        bool — llama-server binary found on PATH (local) or
+                              remote /health probe succeeded (remote)
+        binary:         str  — binary name used (e.g. "llama-server"); empty
+                              when remote (no local binary is involved)
         server_running: bool — server is responding on LLAMACPP_SERVER_PORT
         server_port:    int
         model:          str | None — model reported by /v1/models endpoint (if running)
+        remote:         bool — base_url points to a non-loopback host
     """
     import urllib.error
     import urllib.request
 
-    detect = llamacpp_detect()
     base_url = llamacpp_base_url()
+    is_remote = not _is_local_base_url(base_url)
+    # When the endpoint is remote, the local llama-server binary is irrelevant
+    # — `present` must come from the remote /health probe below, not from a
+    # PATH lookup that would falsely report `present=False` on any laptop that
+    # talks to a GPU box.
+    if is_remote:
+        detect: dict[str, Any] = {"present": False, "binary": "", "version": ""}
+    else:
+        detect = llamacpp_detect()
     base: dict[str, Any] = {
         "present": detect.get("present", False),
         "binary": detect.get("binary", ""),
@@ -2154,7 +2173,7 @@ def llamacpp_info() -> dict[str, Any]:
         "server_port": LLAMACPP_SERVER_PORT,
         "base_url": base_url,
         "model": None,
-        "remote": not _is_local_base_url(base_url),
+        "remote": is_remote,
     }
 
     # Liveness via /health — returns 200 *or* 503 ("loading model") as long
@@ -2731,7 +2750,27 @@ def llamacpp_start_server(
     "error": str | None, "log_path": str, "mtp": dict | None}``. Always returns
     the argv that was attempted (or would have been attempted) so callers can
     echo it on failure.
+
+    Refuses to spawn anything when ``LLAMACPP_BASE_URL`` points to a non-local
+    host (issue #123) — callers are expected to short-circuit on the remote
+    branch before reaching this function. A defensive check here turns any
+    leaked call into a clear error rather than a process being started on the
+    wrong machine.
     """
+    base_url = llamacpp_base_url()
+    if not _is_local_base_url(base_url):
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": [],
+            "error": (
+                f"refusing to spawn local llama-server: LLAMACPP_BASE_URL "
+                f"points to remote host {base_url!r}"
+            ),
+            "log_path": "",
+            "mtp": None,
+            "remote": True,
+        }
     detect = llamacpp_detect()
     if not detect.get("present"):
         return {
