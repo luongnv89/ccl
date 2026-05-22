@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import questionary
 from rich.console import Console
@@ -893,6 +894,206 @@ def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> 
     return True
 
 
+# Engines that can either be run locally or pointed at a remote OpenAI-compatible
+# endpoint. The wizard surfaces the local-vs-remote choice for these only —
+# lmstudio is local-only, and 9router/openrouter are inherently remote.
+_LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
+
+
+def _remote_env_var_names(engine: str) -> tuple[str, str | None]:
+    """
+    Return (URL env var name, API-key env var name or None) for the given
+    engine. These are the names the existing remote-engine plumbing already
+    reads at module load time (see core.py constants) and the names we
+    write into the user's shell rc when they opt in to env-var persistence.
+    """
+    if engine == "ollama":
+        return "OLLAMA_HOST", "OLLAMA_API_KEY"
+    if engine == "llamacpp":
+        return "LLAMACPP_BASE_URL", "LLAMACPP_API_KEY"
+    if engine == "vllm":
+        return "VLLM_BASE_URL", "VLLM_API_KEY"
+    raise ValueError(f"engine {engine!r} does not support local-vs-remote selection")
+
+
+def _apply_remote_endpoint(engine: str, url: str, api_key: str) -> None:
+    """
+    Push the user-supplied remote URL + API key into the live module state so
+    every downstream code path (probe, wire, helper-script emission) reads
+    the new values. The constants in core.py snapshot env vars at import time;
+    we mirror the env vars AND the snapshotted constants so both the live
+    `os.environ.get(...)` reads (vLLM key path) and the `pb.OLLAMA_BASE_URL`-
+    style reads (Claude/Codex wire functions) pick up the choice without a
+    module reload.
+    """
+    url_var, key_var = _remote_env_var_names(engine)
+    os.environ[url_var] = url
+    if engine == "ollama":
+        pb.OLLAMA_BASE_URL = url
+        if key_var is not None:
+            os.environ[key_var] = api_key
+            pb.OLLAMA_API_KEY = api_key
+    elif engine == "llamacpp":
+        pb.LLAMACPP_BASE_URL = url
+        if key_var is not None:
+            os.environ[key_var] = api_key
+            pb.LLAMACPP_API_KEY = api_key
+    elif engine == "vllm":
+        pb.VLLM_BASE_URL = url
+        if key_var is not None:
+            os.environ[key_var] = api_key
+            pb.VLLM_API_KEY = api_key
+
+
+def _env_block(engine: str, url: str, api_key: str) -> str:
+    """Build the fenced shell-rc block of `export FOO=bar` lines for a remote engine."""
+    url_var, key_var = _remote_env_var_names(engine)
+    fence = f"claude-codex-local:remote:{engine}"
+    body_lines = [
+        f"# >>> {fence} >>>",
+        "# Managed by claude-codex-local wizard. Re-run the wizard to update,",
+        "# or delete this block to clear the remote endpoint env vars.",
+        f"export {url_var}={shlex.quote(url)}",
+    ]
+    if key_var is not None and api_key:
+        body_lines.append(f"export {key_var}={shlex.quote(api_key)}")
+    body_lines.append(f"# <<< {fence} <<<")
+    return "\n".join(body_lines) + "\n"
+
+
+def _persist_remote_env_to_shell_rc(engine: str, url: str, api_key: str) -> Path | None:
+    """
+    Append (or replace) a fenced block of `export FOO=bar` lines in the user's
+    shell rc so a fresh shell inherits the remote-endpoint env vars without
+    re-running the wizard. Returns the rc path on success, None when no
+    supported shell rc could be found.
+    """
+    block = _env_block(engine, url, api_key)
+    rc_path = _detect_shell_rc()
+    if rc_path is None:
+        warn("Unsupported shell — please add the following to your shell rc manually:")
+        console.print(block)
+        return None
+    fence = f"claude-codex-local:remote:{engine}"
+    pattern = re.compile(
+        rf"# >>> {re.escape(fence)} >>>.*?# <<< {re.escape(fence)} <<<\n?",
+        re.DOTALL,
+    )
+    existing = rc_path.read_text() if rc_path.exists() else ""
+    if pattern.search(existing):
+        new_text = pattern.sub(block, existing, count=1)
+    else:
+        sep = "" if existing.endswith("\n") or not existing else "\n"
+        prefix = "\n" if existing else ""
+        new_text = existing + sep + prefix + block
+    rc_path.write_text(new_text)
+    ok(f"Persisted remote env vars into {rc_path}")
+    return rc_path
+
+
+def _prompt_remote_endpoint(engine: str) -> tuple[str, str] | None:
+    """
+    Interactive prompt for a remote endpoint base URL + optional API key.
+
+    Returns (normalized_url, api_key) on success, or None if the user
+    cancelled (Ctrl-C / Esc) at any step. The API key is "" for ollama
+    (we do not ask) and for llamacpp/vllm when the user leaves it blank.
+
+    URL validation: the input must be a bare base URL (scheme + host + port).
+    A non-empty path/query/fragment is rejected and the user is re-prompted;
+    `_normalize_base_url` would otherwise silently strip those components,
+    which is fine for env-driven setup but surprising in an interactive flow.
+    """
+    while True:
+        url_raw = questionary.text(
+            f"Remote {engine} base URL (scheme + host + port, no path):",
+            default="",
+        ).ask()
+        if url_raw is None:
+            return None
+        url_raw = url_raw.strip()
+        if not url_raw:
+            warn("Base URL must not be empty.")
+            continue
+        # Reject path/query/fragment BEFORE normalization. The normalizer
+        # strips them with a warning, but interactive users should get a
+        # hard error so they re-type the right value instead of silently
+        # losing the segment they intended.
+        probe = url_raw
+        if not probe.startswith(("http://", "https://")):
+            probe = f"http://{probe}"
+        parsed = urlparse(probe)
+        if parsed.path or parsed.query or parsed.fragment:
+            warn(
+                "Base URL must not contain a path, query, or fragment "
+                "(engine probes append their own paths). Got: "
+                f"{url_raw!r}"
+            )
+            continue
+        if not parsed.netloc:
+            warn(f"Base URL is missing a host. Got: {url_raw!r}")
+            continue
+        url = pb._normalize_base_url(url_raw)
+        api_key = ""
+        if engine in ("llamacpp", "vllm"):
+            # questionary.password masks input; allow empty (open endpoint).
+            key_raw = questionary.password(
+                f"{engine} API key (leave empty for no auth):",
+                default="",
+            ).ask()
+            if key_raw is None:
+                return None
+            api_key = key_raw.strip()
+        return url, api_key
+
+
+def _prompt_local_or_remote(state: WizardState, engine: str) -> bool:
+    """
+    For `ollama`/`llamacpp`/`vllm`, ask whether to run the engine locally or
+    point at a remote endpoint. Default Local. On Remote, also prompt for
+    the base URL (and API key for llamacpp/vllm), apply the choice to live
+    module state, and optionally persist the env vars to the user's shell
+    rc.
+
+    Returns True when remote was selected so the caller can skip the
+    `_ensure_tool` local-install path; False for local (caller proceeds
+    with the existing install flow).
+    """
+    choice = questionary.select(
+        f"Run `{engine}` locally, or use a remote endpoint?",
+        choices=["Local", "Remote"],
+        default="Local",
+    ).ask()
+    if choice is None or choice == "Local":
+        return False
+
+    prompt_result = _prompt_remote_endpoint(engine)
+    if prompt_result is None:
+        # User cancelled the URL/key prompt — fall back to local install path.
+        return False
+    url, api_key = prompt_result
+
+    _apply_remote_endpoint(engine, url, api_key)
+    ok(f"Remote {engine} endpoint configured: [bold]{url}[/bold]")
+
+    # Re-probe the engine against the new URL so the engines presence list
+    # picks it up (so the outer loop's `choice not in engines` check does
+    # not bounce back into `_ensure_tool`).
+    _refresh_selected_engine(state.profile, engine)
+
+    # Default No — accidentally mutating the user's rc on a typo would be
+    # confusing, and the helper script already encodes the choice anyway.
+    persist = questionary.confirm(
+        "Also persist these env vars to your shell rc?",
+        default=False,
+    ).ask()
+    if persist:
+        _persist_remote_env_to_shell_rc(engine, url, api_key)
+    else:
+        info("Skipping shell-rc persistence; env vars apply to this wizard run only.")
+    return True
+
+
 def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 3 — Select engine")
     presence = _sync_presence_from_tools(state.profile)
@@ -952,9 +1153,24 @@ def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> b
             ).ask()
             if choice is None:
                 return False
+            # Surface the local-vs-remote choice for local-capable engines
+            # BEFORE attempting any install or probe — when remote is picked
+            # we want to skip `_ensure_tool(choice)` entirely (the binary is
+            # not needed on this host), and we want the probe below to hit
+            # the remote URL.
+            remote = False
+            if choice in _LOCAL_OR_REMOTE_ENGINES:
+                remote = _prompt_local_or_remote(state, choice)
             _refresh_selected_engine(state.profile, choice)
             engines = state.profile["presence"]["engines"]
             if choice not in engines:
+                if remote:
+                    warn(
+                        f"Remote {choice} endpoint is not reachable yet. "
+                        "Check the URL and that the server is up, then pick "
+                        "this engine again."
+                    )
+                    continue
                 if not _ensure_tool(choice):
                     warn(
                         f"{choice} is still not available. Please pick another or install it first."
