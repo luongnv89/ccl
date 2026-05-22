@@ -1311,15 +1311,10 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     if non_interactive:
         model_name = env_model or _ROUTER9_DEFAULT_MODEL
     else:
-        prompt_default = env_model or _ROUTER9_DEFAULT_MODEL
-        model_input = questionary.text(
-            "9router model name:",
-            default=prompt_default,
-        ).ask()
-        if not model_input:
-            fail("No model name provided.")
+        interactive_model = _step_4_pick_9router_model_interactive(env_model)
+        if interactive_model is None:
             return False
-        model_name = model_input.strip()
+        model_name = interactive_model
 
     if len(model_name) > 256 or not _ROUTER9_MODEL_RE.match(model_name):
         fail(
@@ -1335,6 +1330,46 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     ok(f"Picked 9router model: [bold]{model_name}[/bold]")
     state.mark("4")
     return True
+
+
+def _step_4_pick_9router_model_interactive(env_model: str) -> str | None:
+    """Fetch 9router models for selection, falling back to manual entry."""
+    prompt_default = env_model or _ROUTER9_DEFAULT_MODEL
+
+    info("Fetching available models from 9router...")
+    result = pb.smoke_test_router9_models()
+    model_ids = [m for m in result.get("models", []) if isinstance(m, str) and m]
+
+    if result.get("ok") and model_ids:
+        choices: list[questionary.Choice] = [
+            questionary.Choice(model_id, value=model_id) for model_id in model_ids
+        ]
+        choices.append(questionary.Separator())
+        choices.append(questionary.Choice("Enter a model name manually instead", value=""))
+        picked = questionary.select(
+            "Select a 9router model (or choose manual entry):",
+            choices=choices,
+            default=env_model if env_model in model_ids else model_ids[0],
+        ).ask()
+        if picked:
+            return picked.strip()
+    else:
+        if result.get("ok"):
+            warn("9router returned zero models. Falling back to manual model entry.")
+        else:
+            warn(
+                f"Could not fetch 9router model list: {result.get('error', 'unknown error')}. "
+                "Falling back to manual model entry."
+            )
+
+    model_input = questionary.text(
+        "9router model name:",
+        default=prompt_default,
+    ).ask()
+    if not model_input:
+        fail("No model name provided.")
+        return None
+    return model_input.strip()
 
 
 _OPENROUTER_DEFAULT_MODEL = "anthropic/claude-sonnet-4.6"
