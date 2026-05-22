@@ -31,6 +31,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -101,6 +102,8 @@ class WizardState:
     # smoke test + verify outputs
     smoke_test_result: dict[str, Any] = field(default_factory=dict)
     verify_result: dict[str, Any] = field(default_factory=dict)
+    # direct tool config backups created before mutating Codex/Pi settings
+    config_backups: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def save(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -3101,7 +3104,206 @@ def _report_smoke_test_speed(result: dict[str, Any], non_interactive: bool = Fal
 
 
 # ---------------------------------------------------------------------------
-# Step 6 — Wire up harness with isolated settings
+# Direct Codex/Pi settings mutation
+# ---------------------------------------------------------------------------
+
+
+def _backup_config_file(path: Path, target: str) -> dict[str, Any]:
+    """Copy a config file before mutation and return rollback metadata."""
+    backup_dir = STATE_DIR / "backups" / target
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_path = backup_dir / f"{path.name}.{stamp}.{os.getpid()}.bak"
+    existed = path.exists()
+    if existed:
+        shutil.copy2(path, backup_path)
+    else:
+        backup_path.write_text("")
+        backup_path.chmod(0o600)
+    return {
+        "target": target,
+        "path": str(path),
+        "backup_path": str(backup_path),
+        "existed": existed,
+    }
+
+
+def _rollback_config_backup(backup: dict[str, Any]) -> None:
+    """Best-effort restore for a config mutation that failed mid-write."""
+    path = Path(str(backup["path"]))
+    backup_path = Path(str(backup["backup_path"]))
+    if backup.get("existed"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup_path, path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _codex_home() -> Path:
+    configured = os.environ.get("CODEX_HOME", "")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".codex"
+
+
+def _codex_config_path() -> Path:
+    return _codex_home() / "config.toml"
+
+
+def _toml_quote(value: str) -> str:
+    # JSON string syntax is valid TOML basic string syntax.
+    return json.dumps(value)
+
+
+def _upsert_top_level_toml_key(text: str, key: str, value: str) -> str:
+    rendered = f"{key} = {_toml_quote(value)}"
+    lines = text.splitlines()
+    first_table_idx = len(lines)
+    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            first_table_idx = idx
+            break
+        if stripped.startswith("#"):
+            continue
+        if key_re.match(line):
+            lines[idx] = rendered
+            return "\n".join(lines).rstrip() + "\n"
+
+    lines.insert(first_table_idx, rendered)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _remove_toml_table(text: str, table: str) -> str:
+    lines = text.splitlines()
+    header = f"[{table}]"
+    start: int | None = None
+    for idx, line in enumerate(lines):
+        if line.strip() == header:
+            start = idx
+            break
+    if start is None:
+        return text.rstrip() + ("\n" if text else "")
+
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            end = idx
+            break
+    del lines[start:end]
+    return "\n".join(lines).rstrip() + ("\n" if lines else "")
+
+
+def _append_toml_table(text: str, table: str, values: dict[str, Any]) -> str:
+    body = [f"[{table}]"]
+    for key, value in values.items():
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif isinstance(value, int):
+            rendered = str(value)
+        else:
+            rendered = _toml_quote(str(value))
+        body.append(f"{key} = {rendered}")
+    prefix = text.rstrip()
+    sep = "\n\n" if prefix else ""
+    return prefix + sep + "\n".join(body) + "\n"
+
+
+def _codex_provider_for_engine(engine: str) -> str:
+    return f"ccl-{engine}"
+
+
+def _codex_provider_env_key(engine: str) -> str | None:
+    if engine == "ollama" and pb.OLLAMA_API_KEY:
+        return "OLLAMA_API_KEY"
+    if engine == "llamacpp" and pb.LLAMACPP_API_KEY:
+        return "LLAMACPP_API_KEY"
+    if engine == "vllm":
+        if os.environ.get("VLLM_API_KEY") or pb.VLLM_KEY_FILE.exists():
+            return "VLLM_API_KEY"
+        return None
+    if engine == "9router":
+        return "CCL_9ROUTER_API_KEY"
+    if engine == "openrouter":
+        return "CCL_OPENROUTER_API_KEY"
+    return None
+
+
+def _codex_provider_config(engine: str) -> dict[str, Any] | None:
+    base_url = _pi_base_url_for_engine(engine)
+    if base_url is None:
+        return None
+    config: dict[str, Any] = {
+        "name": f"CCL {engine}",
+        "base_url": base_url,
+        "requires_openai_auth": False,
+    }
+    env_key = _codex_provider_env_key(engine)
+    if env_key:
+        config["env_key"] = env_key
+        config["env_key_instructions"] = f"Export {env_key} before launching codex."
+    return config
+
+
+def _write_codex_config(engine: str, tag: str) -> Path:
+    """
+    Update Codex's normal config so launching `codex` directly uses this model.
+
+    For local Ollama/LM Studio, prefer Codex's built-in OSS provider knobs.
+    Other OpenAI-compatible endpoints are written as CCL-managed providers.
+    """
+    config_path = _codex_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    text = config_path.read_text() if config_path.exists() else ""
+    text = _upsert_top_level_toml_key(text, "model", tag)
+
+    if engine == "ollama" and pb._is_local_base_url(pb.ollama_base_url()):
+        text = _upsert_top_level_toml_key(text, "model_provider", "oss")
+        text = _upsert_top_level_toml_key(text, "oss_provider", "ollama")
+    elif engine == "lmstudio":
+        text = _upsert_top_level_toml_key(text, "model_provider", "oss")
+        text = _upsert_top_level_toml_key(text, "oss_provider", "lmstudio")
+    else:
+        provider = _codex_provider_for_engine(engine)
+        provider_config = _codex_provider_config(engine)
+        if provider_config is None:
+            raise ValueError(f"Unknown engine for Codex config: {engine!r}")
+        text = _upsert_top_level_toml_key(text, "model_provider", provider)
+        text = _remove_toml_table(text, f"model_providers.{provider}")
+        text = _append_toml_table(text, f"model_providers.{provider}", provider_config)
+
+    config_path.write_text(text)
+    config_path.chmod(0o600)
+    return config_path
+
+
+def _configure_codex_with_backup(engine: str, tag: str) -> tuple[Path, dict[str, Any]]:
+    config_path = _codex_config_path()
+    backup = _backup_config_file(config_path, "codex")
+    try:
+        written = _write_codex_config(engine, tag)
+    except Exception:
+        _rollback_config_backup(backup)
+        raise
+    return written, backup
+
+
+def _configure_pi_with_backup(engine: str, tag: str) -> tuple[Path, dict[str, Any]]:
+    config_path = _pi_agent_dir() / "models.json"
+    backup = _backup_config_file(config_path, "pi")
+    try:
+        written = _write_pi_models_config(engine, tag)
+    except Exception:
+        _rollback_config_backup(backup)
+        raise
+    return written, backup
+
+
+# ---------------------------------------------------------------------------
+# Step 6 — Wire up harness with isolated helper and direct tool settings
 # ---------------------------------------------------------------------------
 
 
@@ -3124,9 +3326,20 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
     if harness == "claude":
         result = _wire_claude(engine, tag)
     elif harness == "codex":
+        info(
+            "Codex config left unchanged; the helper script/alias launches the "
+            "selected model. Codex controls its in-session /model list."
+        )
         result = _wire_codex(engine, tag)
     elif harness == "pi":
-        result = _wire_pi(engine, tag)
+        try:
+            config_path, backup = _configure_pi_with_backup(engine, tag)
+        except Exception as exc:
+            fail(f"Cannot update Pi config: {exc}")
+            return False
+        state.config_backups["pi"] = backup
+        ok(f"Updated Pi config: {config_path}")
+        result = _wire_pi(engine, tag, configure=False)
     else:
         fail(f"Unknown harness: {harness}")
         return False
@@ -3562,7 +3775,7 @@ def _write_pi_models_config(engine: str, tag: str) -> Path:
     return models_path
 
 
-def _wire_pi(engine: str, tag: str) -> WireResult | None:
+def _wire_pi(engine: str, tag: str, configure: bool = True) -> WireResult | None:
     """Build a WireResult for Pi against a CCL-supported local/provider engine."""
     # Materialize env-supplied API keys to chmod-600 files before the
     # models.json write so `_pi_api_key_for_engine` can emit `!cat <file>`.
@@ -3575,14 +3788,15 @@ def _wire_pi(engine: str, tag: str) -> WireResult | None:
         env_key = os.environ.get("VLLM_API_KEY", "")
         if env_key:
             _materialize_remote_api_key(pb.VLLM_KEY_FILE, env_key)
-    try:
-        _write_pi_models_config(engine, tag)
-    except ValueError:
-        fail(f"Unknown engine for Pi wire-up: {engine}")
-        return None
-    except RuntimeError as exc:
-        fail(str(exc))
-        return None
+    if configure:
+        try:
+            _configure_pi_with_backup(engine, tag)
+        except ValueError:
+            fail(f"Unknown engine for Pi wire-up: {engine}")
+            return None
+        except RuntimeError as exc:
+            fail(str(exc))
+            return None
     provider = _pi_provider_for_engine(engine)
     return WireResult(
         argv=["pi", "--provider", provider, "--model", tag],
@@ -4135,37 +4349,25 @@ This file was generated by `ccl` on your machine.
 - **Harness**: `{harness}`
 - **Engine**: `{engine}`
 - **Model**: `{model}`
-- **Aliases**: `{alias_short}`, `{alias_long}` (installed in `{shell_rc}`)
+{alias_summary}
 - **Helper script**: `{helper_script}`
 
 ## Daily use
 
-> **First time after setup?** Reload your shell so the new alias is on
-> your `PATH` — run `source {shell_rc}` or open a new terminal. You only
-> need to do this once per shell session.
+{daily_use}
 
-Then run:
+{launch_explanation}. Claude/Codex helpers either run `ollama launch {harness}`
+(Ollama path) or export the engine env vars (LM Studio / llama.cpp / vLLM).
+Pi helpers set `PI_CODING_AGENT_DIR` to Pi's normal config directory and
+launch `pi --provider ccl-{engine} --model {model}`.
 
-```bash
-{alias_short}
-```
+{settings_note}
 
-That's it. The alias execs `{helper_script}`. Claude/Codex helpers either
-run `ollama launch {harness}` (Ollama path) or export the engine env vars
-(LM Studio / llama.cpp / vLLM). Pi helpers set `PI_CODING_AGENT_DIR` to
-Pi's normal config directory and launch `pi --provider ccl-{engine} --model {model}`.
-
-Your real `~/.claude`, `~/.codex`, and Pi config are used as-is for those
-harnesses. For Pi, CCL adds/updates only its `ccl-*` provider in the normal
-`models.json`, so installed Pi extensions, packages, skills, prompts, themes,
-settings, and auth stay available from `{alias_short}`.
-
-You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
+You can still pass extra args: `{launch_command} -p "what does foo.py do?"`.
 {codex_limitation}
 ## Troubleshooting
 
-- **`{alias_short}: command not found`?** Open a new terminal or run
-  `source {shell_rc}`.
+{alias_troubleshooting}
 - **Engine not responding?** Re-run the wizard smoke test:
   ```bash
   ccl doctor
@@ -4177,10 +4379,9 @@ You can still pass extra args: `{alias_short} -p "what does foo.py do?"`.
 
 ## Return to official mode
 
-Your global `~/.claude` and `~/.codex` are unchanged. Pi keeps using its
-normal config directory; CCL only adds a `ccl-*` provider to `models.json`.
 Run `claude`, `codex`, or `pi` directly (without `cc`/`cx`/`ccp`) to use the
-official backend/model selection.
+tool normally. If this setup targeted Pi, the selected model/provider is also
+present in Pi's normal settings file.
 
 ## Rollback
 
@@ -4216,21 +4417,87 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
     alias_short = alias_names[0]
     # claude9 / codex9 / claudeo / codexo only have the short alias; reuse it as the long form.
     alias_long = alias_names[1] if len(alias_names) > 1 else alias_names[0]
+    alias_installed = bool(state.shell_rc_path)
+    helper_script = state.helper_script_path or "(helper script)"
+    launch_command = alias_short if alias_installed else helper_script
+    if alias_installed:
+        alias_summary = (
+            f"- **Aliases**: `{alias_short}`, `{alias_long}` (installed in `{state.shell_rc_path}`)"
+        )
+        daily_use = (
+            "> **First time after setup?** Reload your shell so the new alias is on\n"
+            f"> your `PATH` — run `source {state.shell_rc_path}` or open a new terminal. You only\n"
+            "> need to do this once per shell session.\n\n"
+            "Then run:\n\n"
+            "```bash\n"
+            f"{alias_short}\n"
+            "```"
+        )
+        launch_explanation = f"That's it. The alias execs `{helper_script}`"
+        alias_troubleshooting = (
+            f"- **`{alias_short}: command not found`?** Open a new terminal or run\n"
+            f"  `source {state.shell_rc_path}`."
+        )
+    else:
+        alias_summary = (
+            f"- **Aliases**: `{alias_short}`, `{alias_long}` (not installed; helper script written)"
+        )
+        daily_use = (
+            "> Alias installation was skipped, so no shell reload is required.\n\n"
+            "Run the helper script directly:\n\n"
+            "```bash\n"
+            f"{helper_script}\n"
+            "```\n\n"
+            f"To enable `{alias_short}` later, re-run `ccl setup --resume` and accept "
+            "alias installation, or add the alias block printed by setup to your shell rc."
+        )
+        launch_explanation = (
+            f"That helper script execs the selected harness command from `{helper_script}`"
+        )
+        alias_troubleshooting = (
+            f"- **Want the short `{alias_short}` alias later?** Re-run `ccl setup --resume` "
+            "and accept alias installation, or add the printed alias block to your shell rc."
+        )
+
+    if state.primary_harness == "codex":
+        settings_note = (
+            "Codex config is not edited by CCL; your real `~/.codex` stays as-is. "
+            "Codex controls its interactive `/model` picker, so launch-time custom "
+            f"models may not appear there. Use `{launch_command}` to start Codex "
+            "with this model/provider."
+        )
+    elif state.primary_harness == "pi":
+        settings_note = (
+            "For Pi targets, CCL adds/updates only its `ccl-*` provider in the normal "
+            "`models.json`, so installed Pi extensions, packages, skills, prompts, "
+            f"themes, settings, and auth stay available from `{launch_command}`."
+        )
+    else:
+        settings_note = "Your real `~/.claude`, `~/.codex`, and Pi config are used as-is."
+
     codex_limitation = ""
-    if state.primary_harness == "codex" and state.primary_engine == "ollama":
+    if state.primary_harness == "codex":
         tag = state.engine_model_tag
         codex_limitation = (
             f"\n"
-            f'> **Known limitation**: `{alias_short} exec "prompt"` does not work\n'
-            f"> for one-shot runs. The `--oss --local-provider=ollama` flags in the\n"
-            f"> alias are top-level options and land before the `exec` subcommand,\n"
-            f"> which Codex rejects with a ChatGPT-account error. Interactive\n"
-            f"> `{alias_short}` works fine. For one-shot use, run directly:\n"
-            f"> ```bash\n"
-            f"> ollama launch codex --model {tag} -- exec --oss "
-            f'--local-provider=ollama --skip-git-repo-check "<prompt>"\n'
-            f"> ```\n"
+            f"> **Codex model list note**: CCL launches Codex with `{tag}` via\n"
+            f"> `{launch_command}`. Codex owns the interactive `/model` picker, so\n"
+            f"> custom launch-time models may not appear there. Use `{launch_command}`\n"
+            f"> to keep starting Codex on the selected CCL model/provider.\n"
         )
+        if state.primary_engine == "ollama":
+            codex_limitation += (
+                f"\n"
+                f'> **Known limitation**: `{launch_command} exec "prompt"` does not work\n'
+                f"> for one-shot runs. The `--oss --local-provider=ollama` flags in the\n"
+                f"> helper are top-level options and land before the `exec` subcommand,\n"
+                f"> which Codex rejects with a ChatGPT-account error. Interactive\n"
+                f"> `{launch_command}` works fine. For one-shot use, run directly:\n"
+                f"> ```bash\n"
+                f"> ollama launch codex --model {tag} -- exec --oss "
+                f'--local-provider=ollama --skip-git-repo-check "<prompt>"\n'
+                f"> ```\n"
+            )
     content = GUIDE_TEMPLATE.format(
         harness=state.primary_harness,
         engine=state.primary_engine,
@@ -4238,7 +4505,13 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
         alias_short=alias_short,
         alias_long=alias_long,
         shell_rc=state.shell_rc_path or "(your shell rc)",
-        helper_script=state.helper_script_path or "(helper script)",
+        helper_script=helper_script,
+        alias_summary=alias_summary,
+        daily_use=daily_use,
+        launch_explanation=launch_explanation,
+        launch_command=launch_command,
+        settings_note=settings_note,
+        alias_troubleshooting=alias_troubleshooting,
         state_dir=pb.STATE_DIR,
         guide_path=GUIDE_PATH,
         codex_limitation=codex_limitation,
@@ -4315,14 +4588,27 @@ def run_wizard(
         ]
     else:
         alias_short = "cc"
+    if state.shell_rc_path:
+        completion_body = (
+            f"[bold green]Setup complete![/bold green]\n\n"
+            f"Reload your shell so the new alias is picked up:\n"
+            f"  [cyan]source {state.shell_rc_path}[/cyan]  (or open a new terminal)\n\n"
+            f"Then run: [cyan]{alias_short}[/cyan]\n\n"
+            f"See [bold]{GUIDE_PATH}[/bold] for the full guide."
+        )
+    else:
+        helper = state.helper_script_path or "(helper script)"
+        completion_body = (
+            f"[bold green]Setup complete![/bold green]\n\n"
+            f"Alias install was skipped, so no shell reload is required.\n\n"
+            f"Run the helper directly:\n"
+            f"  [cyan]{helper}[/cyan]\n\n"
+            f"See [bold]{GUIDE_PATH}[/bold] for the full guide."
+        )
     console.print()
     console.print(
         Panel.fit(
-            f"[bold green]Setup complete![/bold green]\n\n"
-            f"Reload your shell so the new alias is picked up:\n"
-            f"  [cyan]source ~/.zshrc[/cyan]  (or [cyan]~/.bashrc[/cyan], or open a new terminal)\n\n"
-            f"Then run: [cyan]{alias_short}[/cyan]\n\n"
-            f"See [bold]{GUIDE_PATH}[/bold] for the full guide.",
+            completion_body,
             border_style="green",
         )
     )
