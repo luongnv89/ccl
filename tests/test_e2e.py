@@ -212,6 +212,8 @@ def _stub_targeted_setup_checks(pb, monkeypatch):
         "parse_ollama_list",
         lambda: [{"name": "qwen3-coder:30b", "local": True, "size": "19 GB"}],
     )
+    # Block the HTTP ollama path — force parse_ollama_list as the only model source.
+    monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
 
 
 class TestWizardFullFlow:

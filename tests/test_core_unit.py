@@ -65,12 +65,21 @@ class _FakeCP:
 
 
 class TestParseOllamaList:
+    def _block_http(self, monkeypatch):
+        """Ensure parse_ollama_list falls through to CLI (subprocess mock), not HTTP.
+
+        ``_ollama_http_models`` reads ``OLLAMA_HOST`` and hits the real server if set.
+        We clear that env var in conftest, but for double-safety we also mock it here.
+        """
+        monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
+
     def test_parses_multiple_rows(self, monkeypatch):
         sample = (
             "NAME                  ID              SIZE      MODIFIED\n"
             "qwen3-coder:30b       abc123          19 GB     2 days ago\n"
             "qwen2.5-coder:7b      def456          4.1 GB    1 week ago\n"
         )
+        self._block_http(monkeypatch)
         monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
         assert len(models) == 2
@@ -81,12 +90,15 @@ class TestParseOllamaList:
         assert models[1]["name"] == "qwen2.5-coder:7b"
 
     def test_only_header_returns_empty(self, monkeypatch):
+        self._block_http(monkeypatch)
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n")
         )
         assert pb.parse_ollama_list() == []
 
     def test_subprocess_failure_returns_empty(self, monkeypatch):
+        self._block_http(monkeypatch)
+
         def boom(*a, **kw):
             raise FileNotFoundError("ollama")
 
@@ -94,6 +106,7 @@ class TestParseOllamaList:
         assert pb.parse_ollama_list() == []
 
     def test_marks_unsized_rows_nonlocal(self, monkeypatch):
+        self._block_http(monkeypatch)
         sample = "NAME  ID  SIZE  MODIFIED\nphantom:latest  xxx  -  never\n"
         monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
@@ -635,6 +648,9 @@ class TestAdapters:
 
     def test_ollama_adapter_healthcheck_when_missing(self, monkeypatch):
         monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        # Block HTTP so ollama_info() falls through to parse_ollama_list.
+        monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
+        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
         adapter = pb.OllamaAdapter()
         result = adapter.healthcheck()
         assert result["ok"] is False
@@ -643,6 +659,8 @@ class TestAdapters:
         monkeypatch.setattr(
             pb, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
         )
+        # Block HTTP so parse_ollama_list mock is reached.
+        monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
         monkeypatch.setattr(pb, "parse_ollama_list", lambda: [{"name": "a"}, {"name": "b"}])
         adapter = pb.OllamaAdapter()
         result = adapter.healthcheck()
