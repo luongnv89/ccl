@@ -899,6 +899,14 @@ def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> 
 # lmstudio is local-only, and 9router/openrouter are inherently remote.
 _LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
 
+# Default ports applied automatically when the user enters a hostname or IP
+# without an explicit port during the remote endpoint prompt.
+_ENGINE_DEFAULT_PORTS: dict[str, int] = {
+    "ollama": 11434,
+    "llamacpp": 8001,
+    "vllm": 8000,
+}
+
 
 def _remote_env_var_names(engine: str) -> tuple[str, str | None]:
     """
@@ -999,14 +1007,14 @@ def _prompt_remote_endpoint(engine: str) -> tuple[str, str] | None:
     cancelled (Ctrl-C / Esc) at any step. The API key is "" for ollama
     (we do not ask) and for llamacpp/vllm when the user leaves it blank.
 
-    URL validation: the input must be a bare base URL (scheme + host + port).
-    A non-empty path/query/fragment is rejected and the user is re-prompted;
-    `_normalize_base_url` would otherwise silently strip those components,
-    which is fine for env-driven setup but surprising in an interactive flow.
+    URL validation: the input must be a bare base URL (scheme + host).
+    A non-empty path/query/fragment is rejected and the user is re-prompted.
+    If no port is specified, the engine-specific default port is applied
+    automatically (Ollama: 11434, llama.cpp: 8001, vLLM: 8000).
     """
     while True:
         url_raw = questionary.text(
-            f"Remote {engine} base URL (scheme + host + port, no path):",
+            f"Remote {engine} base URL (scheme + host, port optional):",
             default="",
         ).ask()
         if url_raw is None:
@@ -1033,6 +1041,12 @@ def _prompt_remote_endpoint(engine: str) -> tuple[str, str] | None:
         if not parsed.netloc:
             warn(f"Base URL is missing a host. Got: {url_raw!r}")
             continue
+        # Apply engine default port when none is specified.
+        if not parsed.port:
+            default_port = _ENGINE_DEFAULT_PORTS.get(engine)
+            if default_port:
+                info(f"No port specified — using default port {default_port} for {engine}.")
+                url_raw = f"{parsed.scheme}://{parsed.hostname}:{default_port}"
         url = pb._normalize_base_url(url_raw)
         api_key = ""
         if engine in ("llamacpp", "vllm"):
