@@ -4473,10 +4473,11 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
 
     if state.primary_harness == "codex":
         settings_note = (
-            "Codex config is not edited by CCL; your real `~/.codex` stays as-is. "
-            "Codex controls its interactive `/model` picker, so launch-time custom "
-            f"models may not appear there. Use `{launch_command}` to start Codex "
-            "with this model/provider."
+            "Codex's normal config is updated so the selected model/provider "
+            "is available from the helper script/alias. Your interactive `/model` "
+            "list is controlled by Codex itself, so the custom model may not "
+            "appear there. Use the helper script/alias for the CCL-configured model "
+            "and run `codex` directly to switch back to your usual model."
         )
     elif state.primary_harness == "pi":
         settings_note = (

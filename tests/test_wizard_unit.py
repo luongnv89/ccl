@@ -473,9 +473,10 @@ class TestCodexDirectConfig:
         assert "Reload your shell" not in body
         assert "Then run:" not in body
         assert "```bash\n/tmp/cx\n```" in body
-        assert "Codex config is not edited" in body
-        assert "interactive `/model` picker" in body
-        assert "updates `~/.codex/config.toml`" not in body
+        # The codex harness now writes config via backup — settings_note reflects this.
+        assert "Codex's normal config is updated" in body
+        assert "interactive `/model` list" in body
+        assert "helper script/alias" in body
 
     def test_setup_complete_skipped_alias_uses_helper_not_alias(self, isolated_state, monkeypatch):
         _, wiz, _ = isolated_state
