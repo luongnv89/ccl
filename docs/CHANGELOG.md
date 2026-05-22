@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] — 2026-05-22
+
+### Added
+
+- **Pi model configuration with clarified Codex launch flow** (#141): the setup step now configures Pi-specific models and the Codex launch flow documentation has been clarified to reduce ambiguity for users configuring the Pi harness.
+
+### Bug Fixes
+
+- **Isolate test environment from real infrastructure** (#136): test execution no longer touches real infrastructure resources, preventing accidental side effects and flaky failures during local and CI test runs.
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.15.0...v0.16.0
 
 ## [0.15.0] — 2026-05-22
 
