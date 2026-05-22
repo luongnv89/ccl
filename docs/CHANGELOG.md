@@ -7,9 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-05-22
+
+### Added
+
+- **Interactive local-vs-remote prompt during engine selection** (#122): the wizard now asks whether the chosen engine (`ollama`, `llamacpp`, or `vllm`) is local on this machine or a remote endpoint. Selecting remote prompts for the base URL (and, for `vllm`, an API key), stores the value in the engine's `*_BASE_URL` env var inside the helper script, and skips the local install/launch path entirely. Local selections behave exactly as before.
+- **Test coverage for the interactive remote-engine wizard path** (#125): new unit and integration tests exercise the local-vs-remote prompt, env-keyfile materialization with `chmod 0600`, and the remote branching in healthcheck, info, and `start_server` for `llamacpp`.
+
+### Fixed
+
+- **`llamacpp` remote-mode branching** (#123): the llama.cpp helper script, healthcheck, `info`, and `start_server` no longer assume a local `llama-server` binary when `LLAMACPP_BASE_URL` points at a remote endpoint. Remote endpoints now skip binary discovery, model-file checks, and the spawn path; healthcheck targets the remote URL directly.
+
+### Changed
+
+- **`llamacpp-tuner` skill no-ops cleanly when llamacpp is remote** (#124): the tuner detects a remote `LLAMACPP_BASE_URL` and exits with a friendly message rather than attempting to introspect a non-existent local binary or rewrite a helper script it does not own.
+- **README and wizard walkthrough lead with the interactive remote-engine flow** (#126): the quickstart and wizard documentation now show the local-vs-remote prompt and remote-endpoint setup as the primary path, with the all-local install positioned as one branch of that prompt.
+
 ### Bug Fixes
 
 - **Rename Pi local shortcut `cp` → `ccp`** (#120): the wizard-installed `cp` alias shadowed the standard POSIX copy command, so running `cp source dest` in a shell with CCL installed launched a Pi session instead of copying files. The Pi local helper script and short alias are now `ccp` (long alias `pi-local` is unchanged because it never collided). On the next `ccl setup` run, an existing pre-#120 install is migrated automatically: the legacy `alias cp=` line is rewritten to `alias ccp=`, the orphaned `.claude-codex-local/bin/cp` binary is removed, and the wizard prints a warning explaining the change. `ccl status` still detects pre-migration installs and shows them on the Pi row so users know to re-run setup. Router-suffixed variants `cp9` (9router) and `cpo` (OpenRouter) are not affected because they do not collide with any system command.
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.14.0...v0.15.0
 
 ## v0.14.0 — 2026-05-20
 
