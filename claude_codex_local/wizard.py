@@ -3326,10 +3326,16 @@ def step_2_6_wire_harness(state: WizardState, non_interactive: bool = False) -> 
     if harness == "claude":
         result = _wire_claude(engine, tag)
     elif harness == "codex":
-        info(
-            "Codex config left unchanged; the helper script/alias launches the "
-            "selected model. Codex controls its in-session /model list."
-        )
+        # Write Codex config with backup/rollback, then build the wire result.
+        # Codex's /model list is controlled by Codex itself; the helper
+        # script/alias launches the selected model with the right provider.
+        try:
+            config_path, backup = _configure_codex_with_backup(engine, tag)
+        except Exception as exc:
+            fail(f"Cannot update Codex config: {exc}")
+            return False
+        state.config_backups["codex"] = backup
+        ok(f"Updated Codex config: {config_path}")
         result = _wire_codex(engine, tag)
     elif harness == "pi":
         _materialize_pi_api_key_files(engine)

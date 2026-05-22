@@ -428,8 +428,9 @@ class TestCodexDirectConfig:
 
         assert config_path.read_text() == 'model = "old-model"\n'
 
-    def test_step_6_codex_leaves_direct_config_unchanged(self, isolated_state):
-        _, wiz, _ = isolated_state
+    def test_step_6_codex_writes_config_with_backup(self, isolated_state):
+        """Codex harness writes config via _configure_codex_with_backup."""
+        _, wiz, state_dir = isolated_state
         codex_dir = Path.home() / ".codex"
         codex_dir.mkdir(parents=True)
         config_path = codex_dir / "config.toml"
@@ -443,8 +444,14 @@ class TestCodexDirectConfig:
 
         assert wiz.step_2_6_wire_harness(state, non_interactive=True) is True
 
-        assert config_path.read_text() == 'model = "existing-cloud-model"\n'
-        assert "codex" not in state.config_backups
+        # Config was mutated with the new model and OSS provider.
+        body = config_path.read_text()
+        assert 'model = "qwen2.5-coder:7b"' in body
+        assert 'model_provider = "oss"' in body
+        assert 'oss_provider = "ollama"' in body
+        # Backup should now be present for the codex path.
+        assert "codex" in state.config_backups
+        assert str(state_dir / "backups" / "codex") in state.config_backups["codex"]["backup_path"]
         assert state.wire_result["effective_tag"] == "qwen2.5-coder:7b"
         assert "6" in state.completed_steps
 
