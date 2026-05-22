@@ -281,9 +281,39 @@ entirely.
 ## Remote engine endpoints
 
 `ccl` can consume Ollama, llama.cpp, and vLLM servers running on another
-machine. Configure the client URL before running `ccl setup`; the wizard probes
-the endpoint over HTTP and does not require the remote engine binary to be
-installed locally.
+machine. The wizard probes the endpoint over HTTP and does **not** require the
+remote engine binary to be installed locally.
+
+### Interactive flow (primary)
+
+When you run `ccl setup` and pick `ollama`, `llamacpp`, or `vllm` as your
+engine, step 3 follows up with:
+
+1. **Local or remote?** — prompt: *Run `<engine>` locally, or use a remote
+   endpoint?* Default is **Local**. Pick **Remote** to point at another host.
+2. **Base URL** — prompt: *Remote `<engine>` base URL (scheme + host + port,
+   no path):* The wizard validates the input must be a bare base URL. Paths
+   (e.g. `http://gpu-box.local:8001/v1`), queries, and fragments are rejected;
+   the engine probes add the correct suffix per engine (`/api/tags` for Ollama,
+   `/health` and `/v1/models` for llama.cpp, `/v1/models` for vLLM).
+3. **API key** — for `llamacpp` and `vllm` only, a masked password prompt:
+   *`<engine>` API key (leave empty for no auth):*. Ollama does not prompt.
+4. **Persist to shell rc?** — prompt: *Also persist these env vars to your
+   shell rc?* Default **No**. Pick Yes to write a fenced
+   `# >>> claude-codex-local:remote:<engine> >>>` block into `~/.zshrc` /
+   `~/.bashrc` so future shells inherit the same endpoint.
+
+**Selecting Remote skips the local-binary install step** — the wizard re-probes
+the URL you just provided and proceeds to model selection without offering to
+install Ollama / llama.cpp / vLLM on the local machine.
+
+Cancel any prompt with `Ctrl-C` / `Esc` to fall back to the local-install path.
+
+### Non-interactive / CI
+
+Set the env vars **before** running `ccl setup` (or pass `--non-interactive`).
+The wizard picks them up via `core.py` and treats the engine as remote without
+asking:
 
 ```bash
 # Ollama native API and OpenAI-compatible /v1 endpoint
@@ -300,13 +330,13 @@ export VLLM_API_KEY=...   # optional; vLLM only checks this if configured
 ```
 
 Each URL must be the **base** of the engine host — scheme, host, and port only.
-Do **not** append `/v1`, `/api`, or any other path. The wizard's probes add the
-correct suffix per engine (`/api/tags` for Ollama, `/health` and `/v1/models`
-for llama.cpp, `/v1/models` for vLLM). A trailing path silently double-suffixes
-to a 404; the wizard warns and strips it, but the right input is the bare host.
+Do **not** append `/v1`, `/api`, or any other path. A trailing path silently
+double-suffixes to a 404; the wizard warns and strips it, but the right input
+is the bare host.
 
-Local and remote engines can coexist: unset the relevant env var to go back to
-the localhost default, or choose a different engine in the wizard.
+Local and remote engines can coexist: unset the relevant env var (or remove
+the fenced rc block) to go back to the localhost default, or choose a different
+engine in the wizard.
 
 ---
 

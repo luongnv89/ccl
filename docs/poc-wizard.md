@@ -19,7 +19,7 @@ Claude Code is now proven end-to-end against a local Ollama engine, not just
 | ---- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | Discover environment            | Load the cached machine profile, print a presence table, and defer the llmfit hardware scan unless `--run-llmfit` is passed. This snapshot is advisory; it no longer blocks setup when cached data says a category is missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 2    | Defer install prompts           | No category-level install gate. Install prompts happen only after the user chooses a specific harness or engine, so setup does not probe or install tools the user does not intend to use.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| 3    | Pick preferences                | Interactive primary-harness and primary-engine picker. Respects `--harness` / `--engine` overrides, then live-checks only the selected harness and selected engine before deciding whether to prompt for installation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 3    | Pick preferences                | Interactive primary-harness and primary-engine picker. Respects `--harness` / `--engine` overrides, then live-checks only the selected harness and selected engine before deciding whether to prompt for installation. For `ollama` / `llamacpp` / `vllm`, a follow-up **Local or remote?** prompt asks whether to run the engine on this machine or point at a remote endpoint (base URL, optional API key for llamacpp/vllm, and an opt-in "persist to shell rc?" step). **Selecting Remote skips the local-binary install step.**                                                                                                                                                                       |
 | 4    | Pick a model (**user-first**)   | Ask the user which model they want. Default path: accept a direct model name and map it into the selected engine's naming scheme. Opt-in `find-model` path: run llmfit, show a ranked list, let the user pick. Handles disk-aware download branches (exists / fits / too big / cancel).                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 5    | Smoke test engine + model       | Run a minimal "Reply with exactly READY" prompt through the chosen engine. Fail fast if the engine rejects the model. Also measures and reports model speed in tokens/second so users can gauge throughput before committing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 6    | Wire up harness                 | Build a `WireResult` (argv + inline env). For Ollama this is just `ollama launch <harness> --model <tag>` — `ollama launch` sets the right env vars internally and execs the user's real `claude`/`codex` against their real `~/.claude` / `~/.codex`. For LM Studio / llama.cpp the env is set inline because `ollama launch` does not apply. **No isolated HOME**, no duplicated settings file.                                                                                                                                                                                                                                                                                                       |
@@ -42,6 +42,32 @@ what they wanted had to fight the recommender. The new shape:
 
 Both paths converge on the same downstream disk/download/smoke-test/wire-up
 pipeline.
+
+## Step 3 — local vs. remote engine
+
+For the three engines that can run either locally or behind an
+OpenAI-compatible HTTP endpoint — `ollama`, `llamacpp`, `vllm` — step 3 surfaces
+a follow-up after the engine is picked:
+
+1. **Run `<engine>` locally, or use a remote endpoint?** — `Local` (default) or
+   `Remote`. `Local` falls through to the existing install / probe flow.
+2. **Remote `<engine>` base URL (scheme + host + port, no path):** — validated
+   on the way in; a path, query, or fragment is rejected and the user is
+   re-prompted (the env-driven code path silently strips them, but interactive
+   users get a hard error).
+3. **`<engine>` API key (leave empty for no auth):** — masked password prompt,
+   shown for `llamacpp` and `vllm` only. Ollama skips this step.
+4. **Also persist these env vars to your shell rc?** — default `No`. On `Yes`
+   the wizard writes a fenced `# >>> claude-codex-local:remote:<engine> >>>`
+   block into the user's `~/.zshrc` / `~/.bashrc` so the endpoint survives
+   future shells.
+
+Picking Remote **skips the `_ensure_tool` local-install path entirely** — the
+wizard re-probes the remote URL, refreshes the engines presence table, and
+proceeds straight to step 4 (model selection). For CI / scripted setup, the
+same effect is achieved non-interactively by exporting `OLLAMA_HOST`,
+`LLAMACPP_BASE_URL` (+ optional `LLAMACPP_API_KEY`), or `VLLM_BASE_URL`
+(+ optional `VLLM_API_KEY`) before running `ccl setup`.
 
 ## Runtime bridge contracts
 
