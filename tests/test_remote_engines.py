@@ -4,12 +4,23 @@ import importlib
 import json
 import os
 import urllib.error
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import claude_codex_local.core as core
 import claude_codex_local.wizard as wizard
+
+
+class _StubAsk:
+    """Minimal questionary stub returning a pre-programmed answer."""
+
+    def __init__(self, answer):
+        self._answer = answer
+
+    def ask(self):
+        return self._answer
 
 
 class FakeResponse:
@@ -701,3 +712,236 @@ def test_llamacpp_adapter_healthcheck_remote_ok_when_health_passes(monkeypatch):
 
     assert result["ok"] is True
     assert "http://gpu-box.local:8001" in result["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #125 — extra coverage for the interactive local-vs-remote wizard.
+#
+# PRs #122/#123/#124 already covered most of the seven coverage bullets in
+# issue #125. The tests below close the remaining gaps:
+#
+#   * Bullet 1 — the local-vs-remote prompt is shown for `vllm` (the ollama
+#     and llamacpp cases were covered by PR #122) AND is NOT shown for the
+#     three non-local-capable engines (`9router`/`openrouter`/`lmstudio`).
+#   * Bullet 3 — the optional API-key prompt fires ONLY for `llamacpp` and
+#     `vllm`. PR #122 exercised the llamacpp API-key path implicitly via the
+#     rc-persist test but never asserted that `questionary.password` is NOT
+#     called for `ollama`, nor that it IS called exactly once for `vllm`.
+# ---------------------------------------------------------------------------
+
+
+def _engine_picker_profile(*, engines: list[str] | None = None) -> dict:
+    """Minimal profile with the picked engine already in presence.engines."""
+    return {
+        "presence": {
+            "harnesses": ["claude"],
+            "engines": engines or ["ollama"],
+        },
+        "host": {"system": "Darwin", "machine": "arm64"},
+        "ollama": {"models": [{"name": "qwen2.5-coder:7b"}]},
+        "lmstudio": {"server_running": False, "models": []},
+    }
+
+
+class TestStep3LocalVsRemoteCoverageGaps:
+    """Issue #125 — close the coverage gaps PRs #122/#123/#124 left open."""
+
+    @pytest.fixture(autouse=True)
+    def _sandbox_home_and_env(self, tmp_path, monkeypatch):
+        """
+        Tests in this class need three guarantees that aren't already
+        satisfied by the module-level autouse fixture:
+
+          1. `Path.home()` must point under tmp_path so any rc write a stray
+             code path performs cannot touch the real user's shell rc.
+          2. `SHELL` is deterministic so `_detect_shell_rc` is reproducible.
+          3. The wizard module is reloaded after `Path.home` is patched so
+             any module-level cached home resolves to the sandbox.
+        """
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        # Reload so module-level reads of env/HOME pick up the sandbox.
+        reload_modules()
+        yield
+
+    # -- Bullet 1: prompt IS shown for vllm ---------------------------------
+
+    def test_local_or_remote_prompt_shown_for_vllm(self, monkeypatch):
+        """vllm picker must surface the local-vs-remote question."""
+        pb, wz = reload_modules()
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=["vllm"])
+
+        prompts: list[str] = []
+
+        def fake_select(message, choices, default=None):
+            prompts.append(message)
+            if "primary" in message:
+                return _StubAsk("vllm")
+            # The local-vs-remote prompt — pick Local to keep the test small.
+            if "Local" in str(choices):
+                return _StubAsk("Local")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        assert state.primary_engine == "vllm"
+        assert any("Run `vllm` locally, or use a remote endpoint" in p for p in prompts)
+
+    # -- Bullet 1: prompt is NOT shown for non-local-capable engines --------
+
+    @pytest.mark.parametrize("engine", ["9router", "openrouter", "lmstudio"])
+    def test_local_or_remote_prompt_skipped_for_non_local_engines(self, monkeypatch, engine):
+        """
+        Engines outside `_LOCAL_OR_REMOTE_ENGINES` must never reach
+        `_prompt_local_or_remote`. We assert this directly by replacing it
+        with a boom — the cleanest possible signal.
+        """
+        pb, wz = reload_modules()
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=[engine])
+
+        prompts: list[str] = []
+
+        def fake_select(message, choices, default=None):
+            prompts.append(message)
+            if "primary" in message:
+                return _StubAsk(engine)
+            raise AssertionError(f"unexpected select prompt for {engine!r}: {message!r}")
+
+        def boom_local_or_remote(*args, **kwargs):
+            raise AssertionError(f"_prompt_local_or_remote must not be called for {engine!r}")
+
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(wz, "_prompt_local_or_remote", boom_local_or_remote)
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        assert state.primary_engine == engine
+        # Belt-and-braces: the prompt message text must never appear.
+        assert all("locally, or use a remote endpoint" not in p for p in prompts)
+        assert engine in {"9router", "openrouter", "lmstudio"}
+        assert engine not in wz._LOCAL_OR_REMOTE_ENGINES
+
+    # -- Bullet 3: ollama remote DOES NOT prompt for API key ----------------
+
+    def test_remote_ollama_does_not_prompt_for_api_key(self, monkeypatch):
+        """
+        AC #3 of issue #125: the API-key prompt is for `llamacpp`/`vllm`
+        only. Selecting Remote for `ollama` must drive the URL prompt but
+        must NOT invoke `questionary.password`.
+        """
+        pb, wz = reload_modules()
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=["ollama"])
+
+        def fake_select(message, choices, default=None):
+            if "primary" in message:
+                return _StubAsk("ollama")
+            if "Local" in str(choices):
+                return _StubAsk("Remote")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        text_calls: list[str] = []
+
+        def fake_text(message, default=""):
+            text_calls.append(message)
+            return _StubAsk("http://gpu-box.local:11434")
+
+        def boom_password(*args, **kwargs):
+            raise AssertionError(
+                "questionary.password must NOT be called for the ollama "
+                "remote branch (ollama has no per-request API key)"
+            )
+
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(wz.questionary, "text", fake_text)
+        monkeypatch.setattr(wz.questionary, "password", boom_password)
+        monkeypatch.setattr(wz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        # URL prompt did fire — make sure the test would actually catch a
+        # regression where the whole remote path is short-circuited.
+        assert any("base URL" in m for m in text_calls)
+        assert pb.OLLAMA_BASE_URL == "http://gpu-box.local:11434"
+
+    # -- Bullet 3: llamacpp remote DOES prompt for API key ------------------
+
+    def test_remote_llamacpp_prompts_for_api_key(self, monkeypatch):
+        """Llamacpp remote must invoke `questionary.password` exactly once."""
+        pb, wz = reload_modules()
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=["llamacpp"])
+
+        def fake_select(message, choices, default=None):
+            if "primary" in message:
+                return _StubAsk("llamacpp")
+            if "Local" in str(choices):
+                return _StubAsk("Remote")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        password_calls: list[str] = []
+
+        def fake_password(message, default=""):
+            password_calls.append(message)
+            return _StubAsk("a-llamacpp-key")
+
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(
+            wz.questionary, "text", lambda *a, **kw: _StubAsk("http://llama-box.local:8001")
+        )
+        monkeypatch.setattr(wz.questionary, "password", fake_password)
+        monkeypatch.setattr(wz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        assert len(password_calls) == 1
+        assert "llamacpp" in password_calls[0]
+        assert pb.LLAMACPP_BASE_URL == "http://llama-box.local:8001"
+        assert pb.LLAMACPP_API_KEY == "a-llamacpp-key"
+
+    # -- Bullet 3: vllm remote DOES prompt for API key ----------------------
+
+    def test_remote_vllm_prompts_for_api_key(self, monkeypatch):
+        """vLLM remote must invoke `questionary.password` exactly once."""
+        pb, wz = reload_modules()
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=["vllm"])
+
+        def fake_select(message, choices, default=None):
+            if "primary" in message:
+                return _StubAsk("vllm")
+            if "Local" in str(choices):
+                return _StubAsk("Remote")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        password_calls: list[str] = []
+
+        def fake_password(message, default=""):
+            password_calls.append(message)
+            return _StubAsk("a-vllm-key")
+
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(
+            wz.questionary, "text", lambda *a, **kw: _StubAsk("http://gpu-box.local:8000")
+        )
+        monkeypatch.setattr(wz.questionary, "password", fake_password)
+        monkeypatch.setattr(wz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        assert len(password_calls) == 1
+        assert "vllm" in password_calls[0]
+        assert pb.VLLM_BASE_URL == "http://gpu-box.local:8000"
+        assert pb.VLLM_API_KEY == "a-vllm-key"
