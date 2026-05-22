@@ -168,7 +168,7 @@
           <div class="hero-left">
             <div class="hero-badge reveal">
               <span class="hero-badge-dot"></span>
-              v0.14.0 · Open Source · <span id="star-count">⭐ Loading...</span>
+              v0.15.0 · Open Source · <span id="star-count">⭐ Loading...</span>
             </div>
 
             <h1 class="hero-headline reveal">
@@ -728,22 +728,22 @@
         <div class="tb-changelog reveal" style="max-width: 860px; margin: 0 auto;">
           <div class="tb-clog-entry">
             <div class="tb-clog-side">
-              <div class="ver">v0.14.0</div>
-              <div class="date">2026-05-20</div>
+              <div class="ver">v0.15.0</div>
+              <div class="date">2026-05-22</div>
               <div class="latest">Latest</div>
             </div>
             <div class="tb-clog-body">
               <div class="tb-clog-group added">
                 <div class="tb-clog-group-head">Added</div>
                 <ul class="tb-clog-list">
-                  <li><strong>MTP (Multi-Token Prediction) support for llama.cpp</strong> (#102, #103): <code>llama-server</code> auto-launches with <code>--spec-type draft-mtp --spec-draft-n-max 5</code> for MTP variants, detected via GGUF metadata probe and filename fallback. Override with <code>LLAMACPP_MTP_ENABLED</code> and <code>LLAMACPP_SPEC_DRAFT_N_MAX</code>.</li>
-                  <li><strong><code>llamacpp-tuner</code> skill:</strong> new Claude Code skill that helps optimize llama.cpp server configuration for coding-agent workloads.</li>
+                  <li><strong>Auto-fetch available models during remote engine model selection</strong> (#134): the wizard's step 4 model picker now calls the remote API to list models instead of showing a local-only picker.</li>
+                  <li><strong>Smart remote endpoint URL scheme detection</strong> (#134): bare IPs/hostnames get <code>http://</code> and default port auto-appended.</li>
                 </ul>
               </div>
               <div class="tb-clog-group fixed">
                 <div class="tb-clog-group-head">Fixed</div>
                 <ul class="tb-clog-list">
-                  <li>Resolve mypy and ruff failures from v0.13.1 CI; apply ruff format and rename ambiguous <code>l</code> identifier in <code>bench_agent.py</code>.</li>
+                  <li><strong>Rename Pi local shortcut <code>cp</code> → <code>ccp</code></strong> (#120): <code>cp</code> alias no longer shadows the POSIX copy command.</li>
                 </ul>
               </div>
               <a href="changelog.html" class="tb-clog-link">
@@ -879,7 +879,7 @@
               stroke-linecap="round"
             />
           </svg>
-          <strong>claude-codex-local</strong> · v0.14.0
+          <strong>claude-codex-local</strong> · v0.15.0
         </div>
         <ul class="footer-links">
           <li>

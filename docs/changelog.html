@@ -67,15 +67,15 @@
         <div class="tb-page-stats reveal">
           <div class="stat">
             <div class="stat-label">Latest</div>
-            <div class="stat-value"><span class="dot"></span>v0.14.0</div>
+            <div class="stat-value"><span class="dot"></span>v0.15.0</div>
           </div>
           <div class="stat">
             <div class="stat-label">Released</div>
-            <div class="stat-value">2026-05-20</div>
+            <div class="stat-value">2026-05-22</div>
           </div>
           <div class="stat">
             <div class="stat-label">Releases shown</div>
-            <div class="stat-value">9</div>
+            <div class="stat-value">10</div>
           </div>
         </div>
       </div>
@@ -92,12 +92,49 @@
 
         <div class="tb-changelog">
 
+          <!-- v0.15.0 -->
+          <div class="tb-clog-entry reveal">
+            <div class="tb-clog-side">
+              <div class="ver">v0.15.0</div>
+              <div class="date">2026-05-22</div>
+              <div class="latest">Latest</div>
+            </div>
+            <div class="tb-clog-body">
+              <div class="tb-clog-group added">
+                <div class="tb-clog-group-head">Added</div>
+                <ul class="tb-clog-list">
+                  <li><strong>Auto-fetch available models during remote engine model selection</strong> (#134): when the wizard's step 4 model picker runs against a remote engine endpoint (Ollama, llama.cpp, or vLLM), it now calls the remote API to list available models instead of showing a local-only picker. This removes the "model not found" guesswork for remote setups — you see exactly what the remote server has installed.</li>
+                  <li><strong>Smart remote endpoint URL scheme detection</strong> (#134): if the user enters a bare IP or hostname (e.g. <code>192.168.1.100:11434</code>) during the local-vs-remote wizard prompt, the step now auto-prepends <code>http://</code> and the engine's default port if missing, so typos like <code>gpu-box.local</code> or <code>192.168.1.100:8000</code> produce a valid URL instead of a confusing connection error.</li>
+                  <li><strong>Test coverage for the remote model-fetch and URL normalization</strong> (#134): new unit tests cover the auto-fetch path (<code>probe_remote_models</code>), the URL-scheme normalizer (<code>_normalize_url</code>), the <code>VLLM_BASE_URL</code> env-key extraction for remote vLLM, and the error-handling boundaries (connection refused, 404, JSON parse failure).</li>
+                  <li><strong>Interactive local-vs-remote prompt during engine selection</strong> (#122): the wizard now asks whether the chosen engine is local on this machine or a remote endpoint. Selecting remote prompts for the base URL (and, for <code>vllm</code>, an API key), stores the value in the engine's <code>*_BASE_URL</code> env var inside the helper script, and skips the local install/launch path entirely.</li>
+                  <li><strong>Test coverage for the interactive remote-engine wizard path</strong> (#125): new unit and integration tests exercise the local-vs-remote prompt, env-keyfile materialization with <code>chmod 0600</code>, and the remote branching in healthcheck, info, and <code>start_server</code> for <code>llamacpp</code>.</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group fixed">
+                <div class="tb-clog-group-head">Fixed</div>
+                <ul class="tb-clog-list">
+                  <li><strong><code>llamacpp</code> remote-mode branching</strong> (#123): the llama.cpp helper script, healthcheck, <code>info</code>, and <code>start_server</code> no longer assume a local <code>llama-server</code> binary when <code>LLAMACPP_BASE_URL</code> points at a remote endpoint. Remote endpoints now skip binary discovery, model-file checks, and the spawn path; healthcheck targets the remote URL directly.</li>
+                  <li><strong>Rename Pi local shortcut <code>cp</code> → <code>ccp</code></strong> (#120): the wizard-installed <code>cp</code> alias shadowed the standard POSIX copy command. The Pi local helper script and short alias are now <code>ccp</code> (long alias <code>pi-local</code> is unchanged). Re-running <code>ccl setup</code> migrates existing installs automatically.</li>
+                </ul>
+              </div>
+              <div class="tb-clog-group changed">
+                <div class="tb-clog-group-head">Changed</div>
+                <ul class="tb-clog-list">
+                  <li><strong><code>llamacpp-tuner</code> skill no-ops cleanly when llamacpp is remote</strong> (#124): the tuner detects a remote <code>LLAMACPP_BASE_URL</code> and exits with a friendly message rather than attempting to introspect a non-existent local binary.</li>
+                  <li><strong>README and wizard walkthrough lead with the interactive remote-engine flow</strong> (#126): the quickstart and wizard documentation now show the local-vs-remote prompt and remote-endpoint setup as the primary path.</li>
+                </ul>
+              </div>
+              <a href="https://github.com/luongnv89/ccl/compare/v0.14.0...v0.15.0" target="_blank" rel="noopener" class="tb-clog-link">
+                Full compare diff →
+              </a>
+            </div>
+          </div>
+
           <!-- v0.14.0 -->
           <div class="tb-clog-entry reveal">
             <div class="tb-clog-side">
               <div class="ver">v0.14.0</div>
               <div class="date">2026-05-20</div>
-              <div class="latest">Latest</div>
             </div>
             <div class="tb-clog-body">
               <div class="tb-clog-group added">
@@ -459,7 +496,7 @@
             <path d="M22,27 L28,32 L22,37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none" />
             <line x1="31" y1="37" x2="39" y2="37" stroke="#00FF41" stroke-width="2.8" stroke-linecap="round" />
           </svg>
-          <strong>claude-codex-local</strong> · v0.14.0
+          <strong>claude-codex-local</strong> · v0.15.0
         </div>
         <ul class="footer-links">
           <li><a href="https://github.com/luongnv89/claude-codex-local" target="_blank" rel="noopener">GitHub</a></li>

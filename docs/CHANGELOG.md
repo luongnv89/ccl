@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Auto-fetch available models during remote engine model selection** (#134): when the wizard's step 4 model picker runs against a remote engine endpoint (Ollama, llama.cpp, or vLLM), it now calls the remote API to list available models instead of showing a local-only picker. This removes the "model not found" guesswork for remote setups — you see exactly what the remote server has installed.
+- **Smart remote endpoint URL scheme detection** (#134): if the user enters a bare IP or hostname (e.g. `192.168.1.100:11434`) during the local-vs-remote wizard prompt, the step now auto-prepends `http://` and the engine's default port if missing, so typos like `gpu-box.local` or `192.168.1.100:8000` produce a valid URL instead of a confusing connection error.
+- **Test coverage for the remote model-fetch and URL normalization** (#134): new unit tests cover the auto-fetch path (`probe_remote_models`), the URL-scheme normalizer (`_normalize_url`), the `VLLM_BASE_URL` env-key extraction for remote vLLM, and the error-handling boundaries (connection refused, 404, JSON parse failure).
 - **Interactive local-vs-remote prompt during engine selection** (#122): the wizard now asks whether the chosen engine (`ollama`, `llamacpp`, or `vllm`) is local on this machine or a remote endpoint. Selecting remote prompts for the base URL (and, for `vllm`, an API key), stores the value in the engine's `*_BASE_URL` env var inside the helper script, and skips the local install/launch path entirely. Local selections behave exactly as before.
 - **Test coverage for the interactive remote-engine wizard path** (#125): new unit and integration tests exercise the local-vs-remote prompt, env-keyfile materialization with `chmod 0600`, and the remote branching in healthcheck, info, and `start_server` for `llamacpp`.
 
