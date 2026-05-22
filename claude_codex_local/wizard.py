@@ -2580,8 +2580,25 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
     tag = state.engine_model_tag
     model_path = state.profile.get("llamacpp_model_path") or ""
 
-    # Phase 1 — handle a server that is already running on our port.
+    # Remote endpoint: skip every local-spawn code path (issue #123). The
+    # smoke test just hits the remote /v1/chat/completions; if the remote
+    # /health probe failed we cannot recover by spawning a local server.
     info_dict = pb.llamacpp_info()
+    if info_dict.get("remote"):
+        base_url = info_dict.get("base_url") or pb.llamacpp_base_url()
+        if info_dict.get("server_running"):
+            ok(f"Using remote llama.cpp server at {base_url}")
+            return pb.smoke_test_llamacpp_model(tag)
+        return {
+            "ok": False,
+            "error": (
+                f"remote llama.cpp server at {base_url} is not reachable "
+                f"(GET /health failed); check the remote host and "
+                f"LLAMACPP_BASE_URL before re-running"
+            ),
+        }
+
+    # Phase 1 — handle a server that is already running on our port.
     if info_dict.get("server_running"):
         running_model = (info_dict.get("model") or "").strip()
         if _llamacpp_models_match(running_model, tag):
@@ -2716,6 +2733,23 @@ def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
     """
     tag = state.engine_model_tag
     info_dict = pb.llamacpp_info()
+    # Remote endpoint: a local spawn is never the right answer (issue #123).
+    # If the remote /health probe says the server is up, we're done; if not,
+    # surface a clear error so the caller does not try to recover by
+    # launching `llama-server` on the wrong machine.
+    if info_dict.get("remote"):
+        base_url = info_dict.get("base_url") or pb.llamacpp_base_url()
+        if info_dict.get("server_running"):
+            return {"ok": True, "reused": True, "remote": True}
+        return {
+            "ok": False,
+            "error": (
+                f"remote llama.cpp server at {base_url} is not reachable "
+                f"(GET /health failed); start it on the remote host or "
+                f"point LLAMACPP_BASE_URL elsewhere"
+            ),
+            "remote": True,
+        }
     if info_dict.get("server_running"):
         running_model = (info_dict.get("model") or "").strip()
         if not running_model or _llamacpp_models_match(running_model, tag):
@@ -3629,12 +3663,18 @@ def _write_helper_script(harness: str, result: WireResult, *, engine: str | None
         "set -e",
     ]
 
-    if engine == "llamacpp":
+    if engine == "llamacpp" and pb._is_local_base_url(pb.llamacpp_base_url()):
         # Hot path = single curl probe (~10ms when server is up). Cold path
         # shells out to `ccl serve`, which prints a clear "loading model
         # into VRAM" banner and waits for /health. Absolute path to the
         # `ccl` binary is captured at install time so the alias works even
         # when the user's interactive shell PATH differs from login PATH.
+        #
+        # Skipped entirely for remote LLAMACPP_BASE_URL (issue #123): the
+        # local helper script must not spawn (or attempt to spawn) a remote
+        # server, and the local `llama-server` binary is irrelevant when the
+        # harness will talk to a GPU box over the network. The harness env
+        # vars below already point at the remote base URL.
         ccl_bin = shutil.which("ccl") or "ccl"
         health_url = f"http://{pb.LLAMACPP_SERVER_HOST}:{pb.LLAMACPP_SERVER_PORT}/health"
         lines.extend(
@@ -4765,6 +4805,19 @@ def run_serve() -> int:
     if info_dict.get("server_running"):
         # Already up — silent reuse keeps the cc/cx hot path quiet.
         return 0
+
+    # Remote endpoint: `ccl serve` cannot start a server on someone else's
+    # box (issue #123). The helper script no longer calls us in this case,
+    # but defend against direct `ccl serve` invocation with a clear error
+    # rather than attempting a doomed local spawn.
+    if info_dict.get("remote"):
+        base_url = info_dict.get("base_url") or pb.llamacpp_base_url()
+        fail(
+            f"Remote llama.cpp server at {base_url} is not reachable. "
+            f"`ccl serve` does not manage remote engines — start the "
+            f"server on the remote host."
+        )
+        return 1
 
     warn(
         "Starting llama-server — first run can take 30s+ while the "
