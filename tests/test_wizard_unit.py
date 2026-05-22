@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import pytest
 import questionary
 
 # ---------------------------------------------------------------------------
@@ -1281,6 +1282,264 @@ class TestForcedPreferenceSelection:
 
         assert prompts == ["Which harness do you want as primary?"]
         assert state.primary_engine == "9router"
+
+
+class TestStep3LocalVsRemotePrompt:
+    """Issue #122: interactive local-vs-remote prompt for ollama/llamacpp/vllm."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_remote_env(self):
+        """
+        The wizard's remote-endpoint prompt mutates `os.environ` directly so
+        downstream `os.environ.get(...)` reads (vLLM key path) see the live
+        value. Snapshot the keys at setup and restore at teardown using raw
+        os.environ ops — `monkeypatch.delenv` would treat the recorded state
+        as the restore target, which is the wrong direction here.
+        """
+        keys = (
+            "OLLAMA_HOST",
+            "OLLAMA_API_KEY",
+            "LLAMACPP_BASE_URL",
+            "LLAMACPP_API_KEY",
+            "VLLM_BASE_URL",
+            "VLLM_API_KEY",
+        )
+        original = {k: os.environ.get(k) for k in keys}
+        for key in keys:
+            os.environ.pop(key, None)
+        yield
+        for key in keys:
+            os.environ.pop(key, None)
+        for key, value in original.items():
+            if value is not None:
+                os.environ[key] = value
+
+    def _base_profile(self) -> dict:
+        return {
+            "presence": {
+                "harnesses": ["claude"],
+                "engines": ["ollama"],
+            },
+            "host": {"system": "Darwin", "machine": "arm64"},
+            "ollama": {"models": [{"name": "qwen2.5-coder:7b"}]},
+            "lmstudio": {"server_running": False, "models": []},
+        }
+
+    def test_non_interactive_skips_local_vs_remote_prompt(self, isolated_state, monkeypatch):
+        """AC: non-interactive forced-engine path must NOT surface the new prompt."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude", primary_engine="ollama")
+        state.profile = self._base_profile()
+
+        def boom_select(*a, **kw):
+            raise AssertionError("non-interactive flow must not call questionary.select")
+
+        def boom_text(*a, **kw):
+            raise AssertionError("non-interactive flow must not call questionary.text")
+
+        def boom_confirm(*a, **kw):
+            raise AssertionError("non-interactive flow must not call questionary.confirm")
+
+        monkeypatch.setattr(wiz.questionary, "select", boom_select)
+        monkeypatch.setattr(wiz.questionary, "text", boom_text)
+        monkeypatch.setattr(wiz.questionary, "confirm", boom_confirm)
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=True) is True
+        assert state.primary_engine == "ollama"
+
+    def test_non_interactive_auto_pick_skips_local_vs_remote_prompt(
+        self, isolated_state, monkeypatch
+    ):
+        """AC: non-interactive auto-pick path must NOT surface the new prompt either."""
+        pb, wiz, _ = isolated_state
+        # No primary_engine set → wizard takes the auto-pick branch in
+        # step_3_select_engine. The local-vs-remote prompt must still be
+        # silent in non-interactive mode.
+        state = wiz.WizardState(primary_harness="claude")
+        state.profile = self._base_profile()
+
+        def boom_select(*a, **kw):
+            raise AssertionError("non-interactive flow must not call questionary.select")
+
+        def boom_text(*a, **kw):
+            raise AssertionError("non-interactive flow must not call questionary.text")
+
+        monkeypatch.setattr(wiz.questionary, "select", boom_select)
+        monkeypatch.setattr(wiz.questionary, "text", boom_text)
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=True) is True
+        assert state.primary_engine == "ollama"
+
+    def test_apply_remote_endpoint_propagates_into_helper_script_env(self, isolated_state):
+        """The remote URL chosen interactively must land in the generated helper script."""
+        pb, wiz, _ = isolated_state
+
+        wiz._apply_remote_endpoint("ollama", "http://gpu-box.local:11434", "")
+        result = wiz._wire_claude("ollama", "qwen:7b")
+        assert result is not None
+        # The remote-ollama branch fires (not the local `ollama launch` argv).
+        assert result.env.get("ANTHROPIC_BASE_URL") == "http://gpu-box.local:11434/v1"
+        assert "claude" in result.argv[0]
+
+    def test_interactive_local_choice_preserves_current_behavior(self, isolated_state, monkeypatch):
+        """AC: selecting Local preserves current behavior — no regression."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude")
+        state.profile = self._base_profile()
+
+        original_url = pb.OLLAMA_BASE_URL
+        prompts: list[str] = []
+
+        def fake_select(message, choices, default=None):
+            prompts.append(message)
+            if "engine" in message and "primary" in message:
+                return _StubAsk("ollama")
+            if "Local" in str(choices):
+                return _StubAsk("Local")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
+        # Local choice must NOT mutate the live module constant.
+        assert pb.OLLAMA_BASE_URL == original_url
+        # The local-vs-remote prompt was shown.
+        assert any("locally, or use a remote endpoint" in p for p in prompts)
+
+    def test_remote_choice_mutates_base_url_and_skips_install(self, isolated_state, monkeypatch):
+        """AC: Remote with a valid URL writes the URL and does NOT call _ensure_tool."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude")
+        state.profile = self._base_profile()
+
+        def fake_select(message, choices, default=None):
+            if "engine" in message and "primary" in message:
+                return _StubAsk("ollama")
+            if "Local" in str(choices):
+                return _StubAsk("Remote")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(
+            wiz.questionary, "text", lambda *a, **kw: _StubAsk("http://gpu-box.local:11434")
+        )
+        # Confirm = persist-to-rc. Decline so we do NOT mutate the user rc.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+
+        ensure_calls: list[str] = []
+        monkeypatch.setattr(wiz, "_ensure_tool", lambda name: ensure_calls.append(name) or True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
+        # Base URL constant must reflect the user's remote choice.
+        assert pb.OLLAMA_BASE_URL == "http://gpu-box.local:11434"
+        # AC: skip the local-install path when Remote is chosen.
+        assert ensure_calls == []
+
+    def test_remote_url_with_path_is_rejected_and_reprompted(self, isolated_state, monkeypatch):
+        """AC: URLs with a path are rejected with a clear error; user is re-prompted."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude")
+        state.profile = self._base_profile()
+
+        def fake_select(message, choices, default=None):
+            if "engine" in message and "primary" in message:
+                return _StubAsk("ollama")
+            return _StubAsk("Remote")
+
+        # First text answer has a path → reject. Second is a clean base URL.
+        text_answers = iter(["http://gpu-box.local:11434/v1", "http://gpu-box.local:11434"])
+
+        def fake_text(*a, **kw):
+            return _StubAsk(next(text_answers))
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(wiz.questionary, "text", fake_text)
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wiz, "_ensure_tool", lambda name: True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
+        assert pb.OLLAMA_BASE_URL == "http://gpu-box.local:11434"
+
+    def test_remote_decline_rc_persist_does_not_mutate_rc(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """AC: declining 'persist to rc?' does NOT touch the shell rc file."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude")
+        state.profile = self._base_profile()
+
+        rc_path = Path.home() / ".zshrc"
+        rc_path.write_text("# pre-existing rc content\n")
+        original_rc = rc_path.read_text()
+
+        def fake_select(message, choices, default=None):
+            if "engine" in message and "primary" in message:
+                return _StubAsk("ollama")
+            return _StubAsk("Remote")
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(
+            wiz.questionary, "text", lambda *a, **kw: _StubAsk("http://gpu-box.local:11434")
+        )
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(False))
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wiz, "_ensure_tool", lambda name: True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
+        # Confirm rc was NOT touched.
+        assert rc_path.read_text() == original_rc
+
+    def test_remote_accept_rc_persist_writes_fenced_block(self, isolated_state, monkeypatch):
+        """AC: accepting 'persist to rc?' writes a fenced `export FOO=...` block."""
+        pb, wiz, _ = isolated_state
+        state = wiz.WizardState(primary_harness="claude")
+        state.profile = {
+            "presence": {"harnesses": ["claude"], "engines": ["llamacpp"]},
+            "host": {"system": "Darwin", "machine": "arm64"},
+        }
+
+        rc_path = Path.home() / ".zshrc"
+        rc_path.write_text("")
+
+        def fake_select(message, choices, default=None):
+            if "engine" in message and "primary" in message:
+                return _StubAsk("llamacpp")
+            return _StubAsk("Remote")
+
+        text_answers = iter(["http://llama-box.local:8001"])
+
+        def fake_text(*a, **kw):
+            return _StubAsk(next(text_answers))
+
+        password_answers = iter(["test-llamacpp-key"])
+
+        def fake_password(*a, **kw):
+            return _StubAsk(next(password_answers))
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(wiz.questionary, "text", fake_text)
+        monkeypatch.setattr(wiz.questionary, "password", fake_password)
+        # Accept persist-to-rc.
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
+        monkeypatch.setattr(wiz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wiz, "_ensure_tool", lambda name: True)
+
+        assert wiz.step_3_select_engine(state, non_interactive=False) is True
+        rc_text = rc_path.read_text()
+        assert "claude-codex-local:remote:llamacpp" in rc_text
+        # shlex.quote only adds quotes when the value contains shell metachars;
+        # plain http://… and a hyphenated token round-trip un-quoted, which is
+        # still a valid `export FOO=bar` line for both bash and zsh.
+        assert "export LLAMACPP_BASE_URL=http://llama-box.local:8001" in rc_text
+        assert "export LLAMACPP_API_KEY=test-llamacpp-key" in rc_text
+        # The live module constants picked up the choice as well.
+        assert pb.LLAMACPP_BASE_URL == "http://llama-box.local:8001"
+        assert pb.LLAMACPP_API_KEY == "test-llamacpp-key"
 
 
 class TestTargetedPreferenceRefresh:
