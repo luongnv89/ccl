@@ -5008,7 +5008,12 @@ class TestRunStatus:
 
         assert rc == 0
         assert out.count("unconfigured") == 9
-        assert "available" not in out
+        # Scope the "no available shortcuts" assertion to the shortcuts
+        # table — the separate Skills table (issue #124) reports the
+        # llamacpp-tuner row as `available` for the default localhost URL
+        # and is independent of helper-script state.
+        shortcuts_section = out.split("Skills", 1)[0]
+        assert "available" not in shortcuts_section
         assert "Default harness" not in out
         assert "Default engine" not in out
         assert "Selected model" not in out
@@ -5183,6 +5188,49 @@ class TestRunStatus:
         assert "qwen3-coder-next" in cx_block
         assert "ollama" in cx_block
         assert "available" in cx_block
+
+    def test_llamacpp_tuner_skill_row_available_when_local_base_url(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        AC #2 of issue #124: any wizard status surface that lists the
+        llamacpp-tuner skill must mark it `available` when the configured
+        LLAMACPP_BASE_URL is local. The tuner kills+restarts the local
+        llama-server, so local is the only case it should run.
+        """
+        pb, wiz, _ = isolated_state
+        wiz.WizardState().save()
+        monkeypatch.setattr(pb, "llamacpp_base_url", lambda: "http://localhost:8001")
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=[])
+
+        assert rc == 0
+        assert "llamacpp-tuner" in out
+        tuner_line = next(line for line in out.splitlines() if "llamacpp-tuner" in line)
+        assert "available" in tuner_line
+        assert "unavailable" not in tuner_line
+        assert "remote" not in tuner_line
+
+    def test_llamacpp_tuner_skill_row_unavailable_when_remote_base_url(
+        self, isolated_state, monkeypatch
+    ):
+        """
+        AC #2 of issue #124: with a remote LLAMACPP_BASE_URL the tuner row
+        must say `unavailable (remote …)` so users see why the skill
+        no-ops instead of discovering it only at invocation time.
+        """
+        pb, wiz, _ = isolated_state
+        wiz.WizardState().save()
+        monkeypatch.setattr(pb, "llamacpp_base_url", lambda: "http://gpu-box.lan:8001")
+
+        rc, out = self._run_status(wiz, pb, monkeypatch, installed_engines=[])
+
+        assert rc == 0
+        assert "llamacpp-tuner" in out
+        tuner_line = next(line for line in out.splitlines() if "llamacpp-tuner" in line)
+        assert "unavailable" in tuner_line
+        assert "remote" in tuner_line
+        assert "gpu-box.lan" in tuner_line
 
 
 class TestInferEngineFromScript:

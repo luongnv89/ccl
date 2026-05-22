@@ -24,6 +24,8 @@ Do **not** use this skill for: vLLM, Ollama (other than as a memory-pressure sus
 The skill runs as a single sequential workflow. Each step gates the next.
 
 ```
+0. remote pre-flight ← STOP if LLAMACPP_BASE_URL is remote
+                                   ↓
 1. discover machine    →  2. discover running server  →  3. research model
         ↓                          ↓                           ↓
         └──────────────────────────┴───────────────────────────┘
@@ -40,6 +42,25 @@ The skill runs as a single sequential workflow. Each step gates the next.
                                    ↓
                           9. final report
 ```
+
+### Step 0 — Remote pre-flight
+
+The tuner only makes sense against a *local* `llama-server` — it kills, restarts, and re-probes the process on the same host. None of that is meaningful (or safe) against a remote llama.cpp endpoint, where the local machine has no `llama-server` binary and no permission to restart someone else's server.
+
+Run the pre-flight gate before doing anything else:
+
+```bash
+python3 scripts/tuner_preflight.py
+```
+
+The script reads `LLAMACPP_BASE_URL` via `claude_codex_local.core` (same loopback rules as the wizard) and behaves as follows:
+
+- **Local base URL** (loopback / `localhost`): exits `0` silently — continue to Step 1.
+- **Remote base URL**: prints the line below and exits `0`. **Stop the workflow** — do not proceed to Step 1.
+
+  > llamacpp is configured as a remote endpoint (`<url>`). The tuner targets local `llama-server` instances only — skipping.
+
+If the script exits non-zero, treat it as an environment problem (e.g. the package is not importable) and surface the stderr to the user before deciding whether to continue.
 
 ### Step 1 — Discover machine
 
@@ -194,7 +215,8 @@ After each numbered step, emit:
 
 A run is complete when **all** of the following hold:
 
-- [ ] Step Completion Report emitted for each of the 9 workflow steps; none ended `FAIL`.
+- [ ] Step Completion Report emitted for each of the 9 workflow steps (10 with Step 0); none ended `FAIL`.
+- [ ] Step 0 ran first; if `LLAMACPP_BASE_URL` was remote the skill exited cleanly with the documented skip message and did **not** touch any of Steps 1–9.
 - [ ] `/tmp/bench-before.json` and `/tmp/bench-after.json` exist and cover the same five prompt sizes (256 / 2k / 8k / 32k / 64k), both cold and warm.
 - [ ] The final report contains: machine+model paragraph, before→after flag diff table, benchmark table with cold/warm/delta columns, verdict line, caveats, optional next experiments.
 - [ ] User approval was captured at Step 5 before any destructive action (server restart).
@@ -241,6 +263,7 @@ The exact numbers will differ per machine and model; the *shape* (flag diff → 
 
 ## Resources
 
+- `scripts/tuner_preflight.py` — Step 0 gate. Exits 0 with a skip message when `LLAMACPP_BASE_URL` is remote, exits 0 silently when local. Imports `_is_local_base_url` / `llamacpp_base_url` from `claude_codex_local.core`.
 - `scripts/bench_agent.py` — coding-agent shaped benchmark. Sends five prompt sizes, both cold and warm, parses the server's `timings` field, writes machine-readable JSON.
 - `references/agent-tuning-knobs.md` — every flag this skill might recommend, why, and what it costs.
 - `references/report-format.md` — the final-report template (full version).
