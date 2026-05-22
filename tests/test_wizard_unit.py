@@ -3490,6 +3490,125 @@ class TestStep4PickModelVLLM:
         assert state.engine_model_tag == "override/model"
 
 
+class TestStep4PickModelRemote:
+    def test_remote_ollama_picks_first_model_non_interactive(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="ollama",
+            primary_harness="claude",
+            profile={
+                "ollama": {
+                    "present": True,
+                    "base_url": "http://gpu-box.local:11434",
+                    "remote": True,
+                    "models": [{"name": "qwen3-coder:30b"}, {"name": "llama3:70b"}],
+                }
+            },
+        )
+        assert wiz._step_4_pick_model_remote(state, "ollama", non_interactive=True) is True
+        assert state.engine_model_tag == "qwen3-coder:30b"
+        assert state.model_source == "ollama-remote"
+
+    def test_remote_ollama_fails_when_unreachable_non_interactive(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="ollama",
+            primary_harness="claude",
+            profile={
+                "ollama": {
+                    "present": False,
+                    "base_url": "http://gpu-box.local:11434",
+                    "remote": True,
+                    "models": [],
+                }
+            },
+        )
+        assert wiz._step_4_pick_model_remote(state, "ollama", non_interactive=True) is False
+
+    def test_remote_llamacpp_picks_first_model_non_interactive(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            primary_harness="claude",
+            profile={
+                "llamacpp": {
+                    "present": True,
+                    "base_url": "http://llama-box.local:8001",
+                    "remote": True,
+                    "models": [{"name": "remote-gguf"}],
+                }
+            },
+        )
+        assert wiz._step_4_pick_model_remote(state, "llamacpp", non_interactive=True) is True
+        assert state.engine_model_tag == "remote-gguf"
+        assert state.model_source == "llamacpp-remote"
+
+    def test_remote_llamacpp_fails_when_unreachable_non_interactive(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            primary_harness="claude",
+            profile={
+                "llamacpp": {
+                    "present": False,
+                    "base_url": "http://llama-box.local:8001",
+                    "remote": True,
+                    "models": [],
+                }
+            },
+        )
+        assert wiz._step_4_pick_model_remote(state, "llamacpp", non_interactive=True) is False
+
+    def test_step_2_4_dispatches_to_remote_picker_for_ollama(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setattr(wiz.pb, "_is_local_base_url", lambda url: False)
+        state = wiz.WizardState(
+            primary_engine="ollama",
+            primary_harness="claude",
+            profile={
+                "ollama": {
+                    "present": True,
+                    "base_url": "http://gpu-box.local:11434",
+                    "remote": True,
+                    "models": [{"name": "qwen3-coder:30b"}],
+                }
+            },
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "qwen3-coder:30b"
+        assert state.model_source == "ollama-remote"
+
+    def test_step_2_4_uses_local_picker_when_ollama_not_remote(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setattr(wiz, "_find_model_auto", lambda *a, **kw: None)
+        monkeypatch.setattr(wiz.pb, "merge_models_for_engine", lambda *a, **kw: [])
+        monkeypatch.setattr(wiz.pb, "_is_local_base_url", lambda url: True)
+        state = wiz.WizardState(
+            primary_engine="ollama",
+            primary_harness="claude",
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
+
+    def test_step_2_4_dispatches_to_remote_picker_for_llamacpp(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        monkeypatch.setattr(wiz.pb, "_is_local_base_url", lambda url: False)
+        state = wiz.WizardState(
+            primary_engine="llamacpp",
+            primary_harness="claude",
+            profile={
+                "llamacpp": {
+                    "present": True,
+                    "base_url": "http://llama-box.local:8001",
+                    "remote": True,
+                    "models": [{"name": "remote-gguf"}],
+                }
+            },
+        )
+        assert wiz.step_2_4_pick_model(state, non_interactive=True) is True
+        assert state.engine_model_tag == "remote-gguf"
+        assert state.model_source == "llamacpp-remote"
+
+
 class TestStep5SmokeTestVLLM:
     def test_step5_calls_smoke_test_vllm_model(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state

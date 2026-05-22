@@ -899,6 +899,14 @@ def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> 
 # lmstudio is local-only, and 9router/openrouter are inherently remote.
 _LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
 
+# Default ports applied automatically when the user enters a hostname or IP
+# without an explicit port during the remote endpoint prompt.
+_ENGINE_DEFAULT_PORTS: dict[str, int] = {
+    "ollama": 11434,
+    "llamacpp": 8001,
+    "vllm": 8000,
+}
+
 
 def _remote_env_var_names(engine: str) -> tuple[str, str | None]:
     """
@@ -999,14 +1007,14 @@ def _prompt_remote_endpoint(engine: str) -> tuple[str, str] | None:
     cancelled (Ctrl-C / Esc) at any step. The API key is "" for ollama
     (we do not ask) and for llamacpp/vllm when the user leaves it blank.
 
-    URL validation: the input must be a bare base URL (scheme + host + port).
-    A non-empty path/query/fragment is rejected and the user is re-prompted;
-    `_normalize_base_url` would otherwise silently strip those components,
-    which is fine for env-driven setup but surprising in an interactive flow.
+    URL validation: the input must be a bare base URL (scheme + host).
+    A non-empty path/query/fragment is rejected and the user is re-prompted.
+    If no port is specified, the engine-specific default port is applied
+    automatically (Ollama: 11434, llama.cpp: 8001, vLLM: 8000).
     """
     while True:
         url_raw = questionary.text(
-            f"Remote {engine} base URL (scheme + host + port, no path):",
+            f"Remote {engine} base URL (scheme + host, port optional):",
             default="",
         ).ask()
         if url_raw is None:
@@ -1033,6 +1041,12 @@ def _prompt_remote_endpoint(engine: str) -> tuple[str, str] | None:
         if not parsed.netloc:
             warn(f"Base URL is missing a host. Got: {url_raw!r}")
             continue
+        # Apply engine default port when none is specified.
+        if not parsed.port:
+            default_port = _ENGINE_DEFAULT_PORTS.get(engine)
+            if default_port:
+                info(f"No port specified — using default port {default_port} for {engine}.")
+                url_raw = f"{parsed.scheme}://{parsed.hostname}:{default_port}"
         url = pb._normalize_base_url(url_raw)
         api_key = ""
         if engine in ("llamacpp", "vllm"):
@@ -1551,6 +1565,91 @@ def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -
     return True
 
 
+def _step_4_pick_model_remote(
+    state: WizardState, engine: str, non_interactive: bool = False
+) -> bool:
+    """Step 4 specialisation for engine=ollama or engine=llamacpp with a
+    remote endpoint.
+
+    When the user has configured a remote server URL, the model picker
+    fetches the available models from that server's API endpoint and shows
+    only those as selectable options — static suggestions and llmfit
+    profiles are irrelevant because the remote server determines which
+    models are actually available.
+
+    Fallback: if the server is unreachable or reports zero models, show an
+    error message and allow the user to enter a model name manually.
+    """
+    info(f"Remote {engine} endpoint detected — fetching available models from the server...")
+
+    profile = state.profile.get(engine, {})
+    profile_models = profile.get("models", [])
+
+    remote_models = [
+        {"name": m["name"], "local": False}
+        for m in profile_models
+        if isinstance(m, dict) and m.get("name")
+    ]
+
+    if non_interactive:
+        if remote_models:
+            choice = remote_models[0]["name"]
+            ok(f"Non-interactive: picking [bold]{choice}[/bold] from remote server")
+        else:
+            fail(f"Remote {engine} server unreachable and no model name was explicitly provided.")
+            return False
+    else:
+        if remote_models:
+            choices = [
+                questionary.Choice(
+                    m["name"],
+                    value=m["name"],
+                )
+                for m in remote_models
+            ]
+            choices.append(questionary.Separator("── Other ──"))
+            choices.append(questionary.Choice("I'll type a different model name", value="direct"))
+            choices.append(questionary.Choice("Cancel setup", value="cancel"))
+            picked = questionary.select(
+                f"Which model does the remote {engine} server serve?",
+                choices=choices,
+            ).ask()
+            if picked is None or picked == "cancel":
+                fail("Setup cancelled by user.")
+                return False
+            if picked == "direct":
+                name = questionary.text(
+                    f"Model name for {engine} (e.g. qwen3-coder:30b):",
+                ).ask()
+                if not name:
+                    fail("No model name provided.")
+                    return False
+                choice = name.strip()
+            else:
+                choice = picked
+        else:
+            base_url = profile.get("base_url", "")
+            warn(
+                f"Remote {engine} server at {base_url} is unreachable or "
+                "reports zero available models."
+            )
+            name = questionary.text(
+                f"Model name for {engine} (manual entry — server unreachable):",
+            ).ask()
+            if not name:
+                fail("No model name provided.")
+                return False
+            choice = name.strip()
+
+    state.engine_model_tag = choice
+    state.model_name = choice
+    state.model_source = f"{engine}-remote"
+    state.model_candidate = {}
+    ok(f"Picked remote {engine} model: [bold]{choice}[/bold]")
+    state.mark("4")
+    return True
+
+
 def step_2_4_pick_model(
     state: WizardState,
     non_interactive: bool = False,
@@ -1573,6 +1672,15 @@ def step_2_4_pick_model(
     # from /v1/models rather than llmfit / disk.
     if engine == "vllm":
         return _step_4_pick_model_vllm(state, non_interactive)
+
+    # Remote engine branch: when Ollama or llama.cpp has a remote endpoint
+    # configured, fetch models from the server instead of showing static
+    # suggestions / llmfit profiles (which are only meaningful for local).
+    if engine == "ollama" and pb._is_local_base_url(pb.ollama_base_url()) is False:
+        return _step_4_pick_model_remote(state, "ollama", non_interactive)
+
+    if engine == "llamacpp" and pb._is_local_base_url(pb.llamacpp_base_url()) is False:
+        return _step_4_pick_model_remote(state, "llamacpp", non_interactive)
 
     # If llamacpp is primary and a server is already running with a model loaded,
     # offer to use that model directly — the user clearly already has it set up.

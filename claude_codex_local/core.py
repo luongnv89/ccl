@@ -2192,6 +2192,8 @@ def llamacpp_info() -> dict[str, Any]:
     if base["server_running"]:
         base["present"] = True
 
+    base["models"] = []
+
     # Read the served model name from /v1/models — only meaningful once the
     # model is loaded; missing during the loading window is expected and not
     # an error.
@@ -2200,8 +2202,13 @@ def llamacpp_info() -> dict[str, Any]:
     try:
         with urllib.request.urlopen(req, timeout=2) as resp:
             body = json.loads(resp.read())
-            models = body.get("data", [])
-            base["model"] = models[0]["id"] if models else None
+            models_data = body.get("data", [])
+            base["model"] = models_data[0]["id"] if models_data else None
+            base["models"] = [
+                {"name": m["id"], "format": "gguf", "local": not base.get("remote", False)}
+                for m in models_data
+                if isinstance(m, dict) and m.get("id")
+            ]
     except (urllib.error.URLError, OSError):
         pass
     except Exception:
