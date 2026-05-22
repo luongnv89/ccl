@@ -43,10 +43,16 @@ def isolated_state(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
-    # Deterministic shell detection for the alias-installer tests.
+    # Determine shell type
     monkeypatch.setenv("SHELL", "/bin/zsh")
     # Make Path.home() resolve to the sandbox so shell-rc edits stay confined.
     monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    # Block environment variables that would cause code to reach real infrastructure.
+    # Ollama: prevent HTTP path from bypassing subprocess mock; fallback to CLI stub.
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    # Pi coding agent: prevent _pi_agent_dir() from resolving to the real ~/.pi/agent.
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
 
     # Reload core first, then wizard (wizard imports core).
     import claude_codex_local.core as pb_mod
@@ -55,6 +61,12 @@ def isolated_state(tmp_path, monkeypatch):
     import claude_codex_local.wizard as wiz_mod
 
     wiz_mod = importlib.reload(wiz_mod)
+
+    # Clear any lingering in-process caches from previous test runs (machine profile,
+    # llmfit candidates, llmfit system) so each test starts with a clean slate.
+    if hasattr(pb_mod, "_machine_profile_in_process_cache"):
+        ck = "_inproc_cache"
+        setattr(pb_mod._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
 
     # Redirect the wizard's guide.md so it doesn't splatter the real repo.
     monkeypatch.setattr(wiz_mod, "GUIDE_PATH", guide_root / "guide.md")
