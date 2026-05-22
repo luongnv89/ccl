@@ -3126,6 +3126,100 @@ class TestStep4Pick9Router:
         state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
         assert wiz.step_2_4_pick_model(state, non_interactive=True) is False
 
+    def test_interactive_fetches_models_and_uses_selected_model(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.delenv("CCL_9ROUTER_MODEL", raising=False)
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_router9_models",
+            lambda: {"ok": True, "models": ["kr/claude-sonnet-4.5", "or/gpt-5"]},
+        )
+
+        def fake_select(message, choices, default=None):
+            assert "Select a 9router model" in message
+            assert default == "kr/claude-sonnet-4.5"
+            assert [choice.value for choice in choices if hasattr(choice, "value")][:2] == [
+                "kr/claude-sonnet-4.5",
+                "or/gpt-5",
+            ]
+            return _StubAsk("or/gpt-5")
+
+        monkeypatch.setattr(wiz.questionary, "select", fake_select)
+        monkeypatch.setattr(
+            wiz.questionary,
+            "text",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("text fallback not expected")),
+        )
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
+        assert state.engine_model_tag == "or/gpt-5"
+        assert state.model_source == "9router-direct"
+
+    def test_interactive_unreachable_models_endpoint_falls_back_to_text(
+        self, isolated_state, monkeypatch
+    ):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_router9_models",
+            lambda: {"ok": False, "error": "connection refused"},
+        )
+        monkeypatch.setattr(
+            wiz.questionary,
+            "select",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("select not expected")),
+        )
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("kr/manual-model"))
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
+        assert state.engine_model_tag == "kr/manual-model"
+
+    def test_interactive_empty_model_list_falls_back_to_text(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.setattr(pb, "smoke_test_router9_models", lambda: {"ok": True, "models": []})
+        monkeypatch.setattr(
+            wiz.questionary,
+            "select",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("select not expected")),
+        )
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("kr/manual-model"))
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is True
+        assert state.engine_model_tag == "kr/manual-model"
+
+    def test_interactive_invalid_selected_model_is_rejected(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_router9_models",
+            lambda: {"ok": True, "models": ["no-slash-model"]},
+        )
+        monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("no-slash-model"))
+        monkeypatch.setattr(
+            wiz.questionary,
+            "text",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("text fallback not expected")),
+        )
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is False
+
+    def test_interactive_invalid_typed_model_is_rejected(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        monkeypatch.setenv("CCL_9ROUTER_API_KEY", "router9-test-key")  # pragma: allowlist secret
+        monkeypatch.setattr(pb, "smoke_test_router9_models", lambda: {"ok": True, "models": []})
+        monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("no-slash-model"))
+        state = wiz.WizardState(primary_engine="9router", primary_harness="claude")
+
+        assert wiz.step_2_4_pick_model(state, non_interactive=False) is False
+
 
 class TestClaudeOllamaThenClaude9Coexist:
     """Issue #51 — installing claude+ollama and claude+9router must coexist.
