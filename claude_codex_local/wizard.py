@@ -923,6 +923,15 @@ _ENGINE_DEFAULT_PORTS: dict[str, int] = {
     "vllm": 8000,
 }
 
+# Canonical local base URLs per engine — used to reset in-process state when
+# the user picks Local after a prior shell export (e.g. OLLAMA_HOST) seeded
+# core.py's snapshotted constants with a remote URL at import time.
+_ENGINE_LOCAL_BASE_URLS: dict[str, str] = {
+    "ollama": f"http://localhost:{_ENGINE_DEFAULT_PORTS['ollama']}",
+    "llamacpp": f"http://localhost:{_ENGINE_DEFAULT_PORTS['llamacpp']}",
+    "vllm": f"http://localhost:{_ENGINE_DEFAULT_PORTS['vllm']}",
+}
+
 
 def _remote_env_var_names(engine: str) -> tuple[str, str | None]:
     """
@@ -967,6 +976,47 @@ def _apply_remote_endpoint(engine: str, url: str, api_key: str) -> None:
         if key_var is not None:
             os.environ[key_var] = api_key
             pb.VLLM_API_KEY = api_key
+
+
+def _apply_local_endpoint(engine: str) -> str | None:
+    """
+    Reset in-process state to the canonical localhost URL for `engine`, and
+    clear the matching env var so subsequent reads in this process don't see
+    the previous remote value. Mirrors `_apply_remote_endpoint` for the
+    Local branch of the wizard.
+
+    Returns the URL that was previously in effect (i.e. the value being
+    overridden) when it differed from the localhost default, otherwise None.
+    The caller uses this to warn the user that a shell export had seeded the
+    snapshot — so they can either re-pick Local next session or remove the
+    export from their rc.
+    """
+    url_var, key_var = _remote_env_var_names(engine)
+    local_url = _ENGINE_LOCAL_BASE_URLS[engine]
+    previous_env = os.environ.pop(url_var, None)
+    previous_snapshot: str | None = None
+    if engine == "ollama":
+        previous_snapshot = pb.OLLAMA_BASE_URL
+        pb.OLLAMA_BASE_URL = local_url
+        if key_var is not None:
+            os.environ.pop(key_var, None)
+            pb.OLLAMA_API_KEY = ""
+    elif engine == "llamacpp":
+        previous_snapshot = pb.LLAMACPP_BASE_URL
+        pb.LLAMACPP_BASE_URL = local_url
+        if key_var is not None:
+            os.environ.pop(key_var, None)
+            pb.LLAMACPP_API_KEY = ""
+    elif engine == "vllm":
+        previous_snapshot = pb.VLLM_BASE_URL
+        pb.VLLM_BASE_URL = local_url
+        if key_var is not None:
+            os.environ.pop(key_var, None)
+            pb.VLLM_API_KEY = ""
+    overridden = previous_env or (
+        previous_snapshot if previous_snapshot and previous_snapshot != local_url else None
+    )
+    return overridden
 
 
 def _env_block(engine: str, url: str, api_key: str) -> str:
@@ -1095,6 +1145,18 @@ def _prompt_local_or_remote(state: WizardState, engine: str) -> bool:
         default="Local",
     ).ask()
     if choice is None or choice == "Local":
+        # Reset in-process state so the snapshotted base URL (which may have
+        # been seeded from a shell export like OLLAMA_HOST at import time)
+        # does not silently keep pointing at a remote server.
+        overridden = _apply_local_endpoint(engine)
+        if overridden:
+            url_var, _ = _remote_env_var_names(engine)
+            warn(
+                f"Your shell exports {url_var}={overridden}; using "
+                f"{_ENGINE_LOCAL_BASE_URLS[engine]} for this run. "
+                f"Remove that export (or re-pick Local) next session to "
+                f"avoid hitting the remote endpoint again."
+            )
         return False
 
     prompt_result = _prompt_remote_endpoint(engine)
