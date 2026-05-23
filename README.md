@@ -182,7 +182,37 @@ Advanced / debug (no user binary — run as a Python module):
 python -m claude_codex_local.core profile      # full hardware profile as JSON
 python -m claude_codex_local.core recommend    # llmfit-only model recommendation
 python -m claude_codex_local.core adapters     # list all engine adapters
+python -m claude_codex_local.core engine ollama config
+python -m claude_codex_local.core engine vllm benchmark --model <served-model>
 ```
+
+---
+
+## Engine Lifecycle Scripts
+
+Engine-specific lifecycle behavior lives under `claude_codex_local/engines/`.
+Each supported engine owns the same script contract:
+
+| Action | Purpose |
+|---|---|
+| `install` | Installation command or manual setup instructions |
+| `config` | Endpoint, key-file, and environment settings |
+| `optimize` | Engine-specific tuning recommendations |
+| `test` | Smoke test for the selected model or endpoint |
+| `benchmark` | Lightweight timing/throughput check where safe |
+
+Supported engine packages are `ollama`, `lmstudio`, `llamacpp`, `vllm`,
+`router9` (engine name `9router`), and `openrouter`. Power users can customize
+one engine by editing only that engine package. Typical callers should use the
+uniform dispatcher:
+
+```bash
+python -m claude_codex_local.core engine <engine> <action> [--model <tag>] [--execute]
+```
+
+`test` and `benchmark` dry-run unless `--execute` is passed. Adding another
+engine means adding a package with those five modules and `ENGINE_NAME` metadata;
+the dispatcher discovers it without new core branching.
 
 ---
 
@@ -552,6 +582,7 @@ The `--oss --local-provider=ollama` flags are required after `--` because Codex 
 .
 ├── claude_codex_local/
 │   ├── __init__.py             # Package metadata + __version__
+│   ├── engines/                # Per-engine install/config/optimize/test/benchmark scripts
 │   ├── wizard.py               # Interactive setup wizard + `ccl` CLI
 │   └── core.py                 # Machine profile, engine adapters, llmfit bindings
 ├── scripts/

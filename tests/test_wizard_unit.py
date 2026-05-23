@@ -5,6 +5,7 @@ logic, presence checks, and the Claude/Codex wiring helpers.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from pathlib import Path
@@ -2212,6 +2213,15 @@ class TestStep2_5SmokeTest:
         state = self._setup_state(wiz)
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is False
         assert "5" not in state.completed_steps
+
+    def test_uses_uniform_lifecycle_dispatch(self, isolated_state):
+        _pb, wiz, _ = isolated_state
+        source = inspect.getsource(wiz.step_2_5_smoke_test)
+
+        assert "_run_engine_lifecycle" in source
+        for engine in ("ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"):
+            assert f'== "{engine}"' not in source
+            assert f"== '{engine}'" not in source
 
 
 # ---------------------------------------------------------------------------

@@ -55,7 +55,10 @@ run "core profile --help"              "$PY" -m claude_codex_local.core profile 
 run "core recommend --help"            "$PY" -m claude_codex_local.core recommend --help
 run "core doctor --help"               "$PY" -m claude_codex_local.core doctor --help
 run "core adapters --help"             "$PY" -m claude_codex_local.core adapters --help
+run "core engine --help"               "$PY" -m claude_codex_local.core engine --help
 run "core adapters"                    "$PY" -m claude_codex_local.core adapters
+run "core engine ollama config"        "$PY" -m claude_codex_local.core engine ollama config
+run "core engine vllm benchmark"       "$PY" -m claude_codex_local.core engine vllm benchmark --model dummy-model
 
 echo "=== E2E: error paths ==="
 if "$PY" -m claude_codex_local.core bogus-command >/dev/null 2>&1; then

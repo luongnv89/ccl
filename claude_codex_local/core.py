@@ -4265,6 +4265,24 @@ def main() -> None:
     # adapters: expose the RuntimeAdapter contract for inspection
     sub.add_parser("adapters")
 
+    engine_cmd = sub.add_parser(
+        "engine",
+        help="Run a per-engine lifecycle script through the uniform engine contract",
+    )
+    engine_cmd.add_argument("engine", help="Engine name, e.g. ollama, llamacpp, vllm, 9router")
+    engine_cmd.add_argument(
+        "action",
+        help="Lifecycle action: install, config, optimize, test, or benchmark",
+    )
+    engine_cmd.add_argument(
+        "--model", default="", help="Model/tag/path for test and benchmark actions"
+    )
+    engine_cmd.add_argument(
+        "--execute",
+        action="store_true",
+        help="Run actions that touch a live engine. Without this, test/benchmark actions dry-run.",
+    )
+
     args = parser.parse_args()
 
     if args.command == "profile":
@@ -4286,6 +4304,25 @@ def main() -> None:
                 }
             )
         print_payload({"adapters": result})
+    elif args.command == "engine":
+        from claude_codex_local.engines import run_engine_action
+        from claude_codex_local.engines.registry import EngineLifecycleError
+
+        kwargs: dict[str, Any] = {
+            "model": args.model,
+            "dry_run": not args.execute,
+        }
+        if args.action == "optimize":
+            kwargs["profile"] = machine_profile(run_llmfit=False)
+        try:
+            engine_result = run_engine_action(
+                args.engine,
+                args.action,
+                **kwargs,
+            )
+        except EngineLifecycleError as exc:
+            parser.error(str(exc))
+        print_payload(engine_result)
 
 
 if __name__ == "__main__":

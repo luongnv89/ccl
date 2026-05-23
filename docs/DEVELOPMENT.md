@@ -115,8 +115,28 @@ python -m claude_codex_local.core profile | python3 -m json.tool
 
 ## Adding a New Engine
 
-1. Add detection logic in `claude_codex_local/core.py` (engine `*_detect()` / `*_info()` helpers and the `RuntimeAdapter` list)
-2. Add wiring logic in `claude_codex_local/wizard.py` (`_wire_engine()`)
-3. Add a new helper script template in `claude_codex_local/wizard.py` (`_render_helper_script()`)
-4. Add tests in `tests/`
-5. Update `docs/ARCHITECTURE.md`
+Engine lifecycle behavior is intentionally separated from the core config
+layer. Add or customize lifecycle behavior under `claude_codex_local/engines/`,
+not by adding another engine branch to `core.py`.
+
+Required package contract:
+
+```text
+claude_codex_local/engines/<engine_package>/
+├── __init__.py      # ENGINE_NAME = "<engine-name>"
+├── install.py       # run(**kwargs) -> dict
+├── config.py        # run(**kwargs) -> dict
+├── optimize.py      # run(**kwargs) -> dict
+├── test.py          # run(model="", dry_run=True, **kwargs) -> dict
+└── benchmark.py     # run(model="", dry_run=True, **kwargs) -> dict
+```
+
+The core dispatcher discovers packages dynamically:
+
+```bash
+python -m claude_codex_local.core engine <engine-name> <action> --model <tag>
+```
+
+For a sixth engine, add the package above and tests for the lifecycle registry.
+Only add core/wizard code when the new engine also needs detection, model
+selection, or harness wiring beyond the lifecycle contract.
