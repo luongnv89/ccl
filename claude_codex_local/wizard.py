@@ -985,11 +985,12 @@ def _apply_local_endpoint(engine: str) -> str | None:
     the previous remote value. Mirrors `_apply_remote_endpoint` for the
     Local branch of the wizard.
 
-    Returns the URL that was previously in effect (i.e. the value being
-    overridden) when it differed from the localhost default, otherwise None.
-    The caller uses this to warn the user that a shell export had seeded the
-    snapshot — so they can either re-pick Local next session or remove the
-    export from their rc.
+    Returns the URL that was previously in effect when it was a *remote*
+    address that would have overridden the localhost default; otherwise
+    None. Prior values that were themselves local (any host in
+    127.0.0.0/8, ::1, or `*.localhost`) are not treated as overrides — a
+    user exporting `OLLAMA_HOST=http://127.0.0.1:11434` does not need the
+    "remove the export from your rc" warning.
     """
     url_var, key_var = _remote_env_var_names(engine)
     local_url = _ENGINE_LOCAL_BASE_URLS[engine]
@@ -1013,10 +1014,12 @@ def _apply_local_endpoint(engine: str) -> str | None:
         if key_var is not None:
             os.environ.pop(key_var, None)
             pb.VLLM_API_KEY = ""
-    overridden = previous_env or (
+    candidate = previous_env or (
         previous_snapshot if previous_snapshot and previous_snapshot != local_url else None
     )
-    return overridden
+    if candidate and pb._is_local_base_url(candidate):
+        return None
+    return candidate
 
 
 def _env_block(engine: str, url: str, api_key: str) -> str:
