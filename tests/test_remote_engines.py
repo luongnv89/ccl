@@ -946,3 +946,67 @@ class TestStep3LocalVsRemoteCoverageGaps:
         assert "vllm" in password_calls[0]
         assert pb.VLLM_BASE_URL == "http://gpu-box.local:8000"
         assert pb.VLLM_API_KEY == "a-vllm-key"
+
+    # -- Bullet 4: picking Local resets a remote env-seeded base URL --------
+
+    def test_local_resets_base_url_when_env_var_pointed_remote(self, monkeypatch):
+        """
+        Regression: when OLLAMA_HOST is exported to a remote URL in the user's
+        shell, core.py snapshots it at import time. Picking Local must reset
+        the in-process base URL back to the localhost default — otherwise the
+        subsequent probe (and model fetch) silently hits the remote server.
+        """
+        monkeypatch.setenv("OLLAMA_HOST", "http://100.117.100.54:11434")
+        pb, wz = reload_modules()
+        # Sanity: the env export propagated into the snapshot at import time.
+        assert pb.OLLAMA_BASE_URL == "http://100.117.100.54:11434"
+
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=["ollama"])
+
+        def fake_select(message, choices, default=None):
+            if "primary" in message:
+                return _StubAsk("ollama")
+            if "Local" in str(choices):
+                return _StubAsk("Local")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        assert pb.OLLAMA_BASE_URL == "http://localhost:11434"
+        assert "OLLAMA_HOST" not in os.environ
+
+    def test_local_does_not_warn_when_env_var_was_already_local(self, monkeypatch):
+        """
+        When the prior OLLAMA_HOST export was already a local URL (e.g.
+        127.0.0.1), `_apply_local_endpoint` still resets the snapshot to
+        the canonical localhost form, but the user-facing warning must
+        stay silent — they didn't have a remote export to remove.
+        """
+        monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+        pb, wz = reload_modules()
+        assert pb.OLLAMA_BASE_URL == "http://127.0.0.1:11434"
+
+        state = wz.WizardState(primary_harness="claude")
+        state.profile = _engine_picker_profile(engines=["ollama"])
+
+        def fake_select(message, choices, default=None):
+            if "primary" in message:
+                return _StubAsk("ollama")
+            if "Local" in str(choices):
+                return _StubAsk("Local")
+            raise AssertionError(f"unexpected select prompt: {message}")
+
+        warn_calls: list[str] = []
+        monkeypatch.setattr(wz.questionary, "select", fake_select)
+        monkeypatch.setattr(wz, "_refresh_selected_engine", lambda *a, **kw: True)
+        monkeypatch.setattr(wz, "_ensure_tool", lambda name: True)
+        monkeypatch.setattr(wz, "warn", lambda msg: warn_calls.append(msg))
+
+        assert wz.step_3_select_engine(state, non_interactive=False) is True
+        assert pb.OLLAMA_BASE_URL == "http://localhost:11434"
+        assert "OLLAMA_HOST" not in os.environ
+        assert not any("OLLAMA_HOST" in m for m in warn_calls), warn_calls
