@@ -357,10 +357,7 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
 
 
 def _show_install_hint(key: str) -> None:
-    try:
-        lifecycle = _run_engine_lifecycle(key, "install")
-    except NameError:
-        lifecycle = {}
+    lifecycle = _run_engine_lifecycle(key, "install")
     if lifecycle.get("ok"):
         engine_hint = INSTALL_HINTS.get(key, {})
         title = engine_hint.get("name", key)
