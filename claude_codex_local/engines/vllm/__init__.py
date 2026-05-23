@@ -1,0 +1,2 @@
+ENGINE_NAME = "vllm"
+DISPLAY_NAME = "vLLM"

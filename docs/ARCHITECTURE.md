@@ -38,6 +38,7 @@ This document describes the system design of `claude-codex-local`.
 - `recommend` — picks the best-fit installed coding model for the hardware
 - `doctor` — pretty-prints the current wizard state and re-runs presence checks
 - `adapters` — lists the registered `RuntimeAdapter` implementations (ollama, lmstudio, llamacpp, vllm, 9router, openrouter)
+- `engine <engine> <action>` — dispatches install/config/optimize/test/benchmark through the per-engine lifecycle scripts
 
 These are reachable for debugging via `python -m claude_codex_local.core <cmd>`. There is no user-facing binary for them — they return JSON for scripting and introspection.
 
@@ -61,7 +62,36 @@ A 9-step wizard that runs once (or with `--resume` after a failure):
 
 State is persisted to `.claude-codex-local/wizard-state.json` so a failed run can be resumed without starting over.
 
-### 3. Helper scripts + shell aliases
+### 3. Engine lifecycle scripts (`claude_codex_local/engines/`)
+
+Engine operational behavior is split into one package per engine. Each package
+owns five modules:
+
+- `install.py`
+- `config.py`
+- `optimize.py`
+- `test.py`
+- `benchmark.py`
+
+The registry discovers packages dynamically from `claude_codex_local/engines/`
+and calls `run(**kwargs)` on the selected action. This keeps the core
+configuration surface narrow: callers dispatch through one uniform action name
+instead of adding new engine-specific branches. Power users can customize deep
+engine behavior by editing only that engine package; for example,
+`claude_codex_local/engines/llamacpp/optimize.py` owns llama.cpp tuning.
+
+`test` and `benchmark` dry-run by default from the CLI and require `--execute`
+to call a live engine:
+
+```bash
+python -m claude_codex_local.core engine llamacpp optimize
+python -m claude_codex_local.core engine ollama test --model qwen3-coder:30b --execute
+```
+
+Adding an engine means adding another package with the five lifecycle modules
+and `ENGINE_NAME` metadata. Core lifecycle dispatch does not change.
+
+### 4. Helper scripts + shell aliases
 
 The user-facing surface after setup:
 

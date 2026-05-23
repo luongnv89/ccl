@@ -357,11 +357,27 @@ def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) 
 
 
 def _show_install_hint(key: str) -> None:
-    hint = INSTALL_HINTS.get(key)
-    if not hint:
+    try:
+        lifecycle = _run_engine_lifecycle(key, "install")
+    except NameError:
+        lifecycle = {}
+    if lifecycle.get("ok"):
+        engine_hint = INSTALL_HINTS.get(key, {})
+        title = engine_hint.get("name", key)
+        url = engine_hint.get("url")
+        console.print(f"\n[bold]{title}[/bold]" + (f" → {url}" if url else ""))
+        for cmd in lifecycle.get("commands", []):
+            console.print(f"    [cyan]{cmd}[/cyan]")
+        detail = lifecycle.get("detail")
+        if detail:
+            info(str(detail))
         return
-    console.print(f"\n[bold]{hint['name']}[/bold] → {hint['url']}")
-    console.print(f"    [cyan]{hint['cmd']}[/cyan]")
+
+    fallback_hint = INSTALL_HINTS.get(key)
+    if not fallback_hint:
+        return
+    console.print(f"\n[bold]{fallback_hint['name']}[/bold] → {fallback_hint['url']}")
+    console.print(f"    [cyan]{fallback_hint['cmd']}[/cyan]")
 
 
 _LLMFIT_INSTALL_SCRIPT = """\
@@ -3016,51 +3032,56 @@ def _normalize_model_id(value: str) -> str:
     return raw
 
 
+def _run_engine_lifecycle(
+    engine: str,
+    action: str,
+    *,
+    model: str = "",
+    dry_run: bool = True,
+    profile: dict[str, Any] | None = None,
+    non_interactive: bool = True,
+) -> dict[str, Any]:
+    from claude_codex_local.engines import run_engine_action
+    from claude_codex_local.engines.registry import EngineLifecycleError
+
+    try:
+        return run_engine_action(
+            engine,
+            action,
+            model=model,
+            dry_run=dry_run,
+            profile=profile,
+            non_interactive=non_interactive,
+        )
+    except EngineLifecycleError as exc:
+        return {
+            "engine": engine,
+            "action": action,
+            "ok": False,
+            "detail": str(exc),
+            "data": {"ok": False, "error": str(exc)},
+        }
+
+
 def step_2_5_smoke_test(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 5 — Smoke test engine + model")
     engine = state.primary_engine
     tag = state.engine_model_tag
     info(f"Running minimal prompt through {engine} / {tag}...")
 
-    if engine == "ollama":
-        result = pb.smoke_test_ollama_model(tag)
-    elif engine == "lmstudio":
-        # Ensure server is up + model loaded
-        if not pb.lms_info().get("server_running"):
-            info("Starting LM Studio server...")
-            pb.lms_start_server()
-        pb.lms_load_model(tag)
-        result = pb.smoke_test_lmstudio_model(tag)
-    elif engine == "llamacpp":
-        # Auto-start llama-server with the just-downloaded GGUF model so the
-        # user doesn't have to launch it by hand (issue #53).
-        result = _llamacpp_smoke_test(state, non_interactive=non_interactive)
-    elif engine == "vllm":
-        # vLLM is user-managed (Python venv + GPU drivers); the wizard never
-        # starts the server. Hit the OpenAI-compatible chat endpoint directly.
-        base_url = state.profile.get("vllm", {}).get("base_url") or pb.VLLM_BASE_URL
-        api_key = ""
-        if pb.VLLM_KEY_FILE.exists():
-            api_key = pb.VLLM_KEY_FILE.read_text().strip()
-        if not api_key:
-            api_key = os.environ.get("VLLM_API_KEY", "")
-        result = pb.smoke_test_vllm_model(tag, base_url=base_url, api_key=api_key)
-    elif engine == "9router":
-        # CRITICAL: never call /chat/completions for 9router — that's paid
-        # cloud quota. We verify reachability by re-checking /v1/models.
-        result = pb.smoke_test_router9_models()
-    elif engine == "openrouter":
-        # Step 5 is an explicit user-requested smoke test: send a minimal
-        # request through the selected OpenRouter model, not just /models.
-        api_key = ""
-        if pb.OPENROUTER_KEY_FILE.exists():
-            api_key = pb.OPENROUTER_KEY_FILE.read_text().strip()
-        if not api_key:
-            api_key = os.environ.get("CCL_OPENROUTER_API_KEY", "")
-        result = pb.smoke_test_openrouter_model(tag, api_key=api_key)
-    else:
-        warn(f"Smoke test for engine '{engine}' not implemented — skipping.")
-        result = {"ok": True, "response": "(skipped)"}
+    lifecycle = _run_engine_lifecycle(
+        engine,
+        "test",
+        model=tag,
+        dry_run=False,
+        profile=state.profile,
+        non_interactive=non_interactive,
+    )
+    result = lifecycle.get("data") or {
+        "ok": lifecycle.get("ok", False),
+        "response": lifecycle.get("detail", ""),
+        "error": None if lifecycle.get("ok") else lifecycle.get("detail", ""),
+    }
 
     state.smoke_test_result = result
     if not result.get("ok"):
