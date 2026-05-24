@@ -58,6 +58,43 @@ class TestWizardState:
 
 
 # ---------------------------------------------------------------------------
+# Step 5.5 benchmark — optional and non-blocking.
+# ---------------------------------------------------------------------------
+
+
+class TestBenchmarkStep:
+    def test_no_successful_trials_does_not_block_setup(self, isolated_state, monkeypatch):
+        _, wiz, _ = isolated_state
+        from claude_codex_local import bench
+
+        class ConfirmYes:
+            def ask(self):
+                return True
+
+        state = wiz.WizardState(primary_engine="ollama", engine_model_tag="fake:1b")
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *args, **kwargs: ConfirmYes())
+        monkeypatch.setattr(
+            bench,
+            "benchmark_model",
+            lambda *args, **kwargs: bench.BenchmarkSummary(
+                model="fake:1b",
+                engine="ollama",
+                num_trials=0,
+                avg_first_token_ms=0.0,
+                avg_total_time_ms=0.0,
+                avg_tokens_per_second=0.0,
+                min_first_token_ms=0.0,
+                max_first_token_ms=0.0,
+                min_tokens_per_second=0.0,
+                max_tokens_per_second=0.0,
+            ),
+        )
+
+        assert wiz.step_2_5_5_benchmark(state, non_interactive=False) is True
+        assert "5.5" in state.completed_steps
+
+
+# ---------------------------------------------------------------------------
 # _default_engine — platform-aware preference rules.
 # ---------------------------------------------------------------------------
 

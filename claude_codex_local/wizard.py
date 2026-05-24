@@ -2,16 +2,18 @@
 """
 Interactive first-run wizard for claude-codex-local.
 
-Implements the 8-step flow from PRD v1.2 §4.1:
+Implements the 9-step flow:
 
   1 Discover environment (harnesses, engines, llmfit, disk)
-  2 Defer install prompts until selected component checks
-  3 Pick preferences (primary harness + engine)
+  2 Select harness
+  3 Select engine
   4 Pick a model (user-first, optional find-model helper)
   5 Smoke test engine + model
+  5.5 Optional lightweight benchmark (NEW)
   6 Wire up harness (isolated settings.json / launch config)
-  7 Verify launch command end-to-end
-  8 Generate personalized guide.md
+  7 Install helper script + shell aliases
+  8 Verify launch command end-to-end
+  9 Generate personalized guide.md
 
 The wizard is idempotent and resumable: state is checkpointed to
 `.claude-codex-local/wizard-state.json` after every completed step.
@@ -3222,6 +3224,110 @@ def _report_smoke_test_speed(result: dict[str, Any], non_interactive: bool = Fal
 
 
 # ---------------------------------------------------------------------------
+# Step 5.5 — Optional benchmark
+# ---------------------------------------------------------------------------
+
+
+def step_2_5_5_benchmark(state: WizardState, non_interactive: bool = False) -> bool:
+    """Offer an optional lightweight benchmark of the selected model."""
+    from claude_codex_local import bench
+
+    header("Step 5.5 — Optional lightweight benchmark")
+
+    engine = state.primary_engine
+    model_tag = state.engine_model_tag
+
+    if not engine or not model_tag:
+        info("No model selected. Skipping benchmark.")
+        state.mark("5.5")
+        return True
+
+    if non_interactive:
+        info("Benchmark skipped in non-interactive mode.")
+        state.mark("5.5")
+        return True
+
+    run_bench = questionary.confirm(
+        f"Run a lightweight benchmark of {engine} / {model_tag}?\n"
+        "(Measures first-token latency and throughput on a coding prompt. Takes ~30-60s.)",
+        default=False,
+    ).ask()
+
+    if run_bench is None or not run_bench:
+        info("Benchmark skipped.")
+        state.mark("5.5")
+        return True
+
+    console.print()
+    info(f"Benchmarking {engine} / {model_tag}...")
+    info("(Running 3 trials of the benchmark prompt)\n")
+
+    try:
+        summary = bench.benchmark_model(
+            engine=engine,
+            model=model_tag,
+            num_trials=3,
+            timeout=120,
+        )
+
+        if summary.num_trials == 0:
+            warn("Benchmark failed: no successful trials. Continuing setup.")
+            state.mark("5.5")
+            return True
+
+        # Display results
+        console.print()
+        ok(f"Benchmark completed: {summary.num_trials} trials")
+        console.print()
+
+        results_table = Table(title="Benchmark Results", show_header=True)
+        results_table.add_column("Metric", style="cyan")
+        results_table.add_column("Value", style="green")
+        results_table.add_column("Range", style="yellow")
+
+        results_table.add_row(
+            "First Token Latency",
+            f"{summary.avg_first_token_ms:.1f} ms",
+            f"{summary.min_first_token_ms:.1f}–{summary.max_first_token_ms:.1f} ms",
+        )
+        results_table.add_row(
+            "Throughput",
+            f"{summary.avg_tokens_per_second:.2f} tok/s",
+            f"{summary.min_tokens_per_second:.2f}–{summary.max_tokens_per_second:.2f} tok/s",
+        )
+        results_table.add_row(
+            "Total Generation Time",
+            f"{summary.avg_total_time_ms:.1f} ms",
+            "(average across trials)",
+        )
+
+        console.print(results_table)
+        console.print()
+
+        # Save report
+        report_dir = STATE_DIR / "benchmarks"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        report_path = (
+            report_dir / f"benchmark-{engine}-{model_tag.replace(':', '-')}-{timestamp}.md"
+        )
+        bench.save_benchmark_report(summary, report_path)
+
+        ok(f"Benchmark report saved: {report_path}")
+        info("View the full report to see detailed metrics and interpretation.")
+        console.print()
+
+        state.mark("5.5")
+        return True
+
+    except Exception as exc:
+        fail(f"Benchmark error: {exc}")
+        console.print()
+        state.mark("5.5")
+        return True  # Don't block wizard on benchmark failure
+
+
+# ---------------------------------------------------------------------------
 # Direct Codex/Pi settings mutation
 # ---------------------------------------------------------------------------
 
@@ -4664,6 +4770,7 @@ STEPS: list[tuple[str, str, Callable[[WizardState, bool], bool]]] = [
     ("3", "Select engine", step_3_select_engine),
     ("4", "Pick a model", step_2_4_pick_model),
     ("5", "Smoke test engine + model", step_2_5_smoke_test),
+    ("5.5", "Optional benchmark", step_2_5_5_benchmark),
     ("6", "Wire up harness", step_2_6_wire_harness),
     ("7", "Install helper script + shell aliases", step_2_65_install_aliases),
     ("8", "Verify launch command", step_2_7_verify),
