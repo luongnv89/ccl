@@ -74,18 +74,39 @@ def _measure_first_token(
     """
     Call the engine-specific probe and extract first-token latency.
 
-    Returns (first_token_ms, full_result_dict). `timeout` is honored only
-    by engines whose smoke_test_* signature accepts it (currently vLLM);
-    the other probes use their own defaults.
+    Returns (first_token_ms, full_result_dict). Benchmark probes pass the
+    coding prompt through to the engine and accept any non-empty response;
+    the regular smoke-test path still validates the exact READY sentinel.
     """
     if engine == "ollama":
-        result = pb.smoke_test_ollama_model(model)
+        result = pb.smoke_test_ollama_model(
+            model,
+            prompt=prompt,
+            expected=None,
+            max_tokens=256,
+        )
     elif engine == "lmstudio":
-        result = pb.smoke_test_lmstudio_model(model)
+        result = pb.smoke_test_lmstudio_model(
+            model,
+            prompt=prompt,
+            expected=None,
+            max_tokens=256,
+        )
     elif engine == "llamacpp":
-        result = pb.smoke_test_llamacpp_model(model)
+        result = pb.smoke_test_llamacpp_model(
+            model,
+            prompt=prompt,
+            expected=None,
+            max_tokens=256,
+        )
     elif engine == "vllm":
-        result = pb.smoke_test_vllm_model(model, timeout=timeout)
+        result = pb.smoke_test_vllm_model(
+            model,
+            timeout=timeout,
+            prompt=prompt,
+            expected=None,
+            max_tokens=256,
+        )
     else:
         return 0.0, {"ok": False, "error": f"unsupported engine: {engine}"}
 
@@ -175,11 +196,11 @@ def benchmark_model(
     # Aggregate successful results
     successful = [r for r in results if r.status == "ok"]
     if not successful:
-        # All failed — return a summary with zeros
+        # All failed — return a summary with zeros and no successful trials.
         return BenchmarkSummary(
             model=model,
             engine=engine,
-            num_trials=num_trials,
+            num_trials=0,
             avg_first_token_ms=0.0,
             avg_total_time_ms=0.0,
             avg_tokens_per_second=0.0,

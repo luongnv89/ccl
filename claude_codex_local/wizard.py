@@ -3271,8 +3271,9 @@ def step_2_5_5_benchmark(state: WizardState, non_interactive: bool = False) -> b
         )
 
         if summary.num_trials == 0:
-            fail("Benchmark failed: no successful trials.")
-            return False
+            warn("Benchmark failed: no successful trials. Continuing setup.")
+            state.mark("5.5")
+            return True
 
         # Display results
         console.print()

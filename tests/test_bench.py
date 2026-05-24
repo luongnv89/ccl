@@ -18,10 +18,46 @@ def test_benchmark_model_returns_zero_summary_when_all_trials_fail(monkeypatch):
     summary = bench.benchmark_model(engine="ollama", model="fake:1b", num_trials=3)
 
     assert isinstance(summary, bench.BenchmarkSummary)
-    assert summary.num_trials == 3  # the input count is preserved when all fail
+    assert summary.num_trials == 0  # no successful trials are reported
     assert summary.avg_first_token_ms == 0.0
     assert summary.avg_tokens_per_second == 0.0
     assert summary.max_tokens_per_second == 0.0
+
+
+def test_measure_first_token_uses_benchmark_prompt(monkeypatch):
+    """Benchmark probes pass the coding prompt through instead of READY smoke text."""
+    calls = []
+
+    def fake_smoke(model, **kwargs):
+        calls.append((model, kwargs))
+        return {
+            "ok": True,
+            "completion_tokens": 4,
+            "tokens_per_second": 20.0,
+            "duration_seconds": 0.5,
+        }
+
+    monkeypatch.setattr(bench.pb, "smoke_test_ollama_model", fake_smoke)
+
+    first_token_ms, result = bench._measure_first_token(
+        "ollama",
+        "fake:1b",
+        "write benchmark code",
+        timeout=12,
+    )
+
+    assert result["ok"] is True
+    assert first_token_ms == pytest.approx(100.0)
+    assert calls == [
+        (
+            "fake:1b",
+            {
+                "prompt": "write benchmark code",
+                "expected": None,
+                "max_tokens": 256,
+            },
+        )
+    ]
 
 
 def test_benchmark_model_aggregates_successful_trials(monkeypatch):

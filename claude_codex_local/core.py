@@ -839,7 +839,12 @@ def hf_name_to_lms_hub(hf_name: str) -> str | None:
     return None
 
 
-def smoke_test_ollama_model(model: str) -> dict[str, Any]:
+def smoke_test_ollama_model(
+    model: str,
+    prompt: str = "Reply with exactly READY",
+    expected: str | None = "READY",
+    max_tokens: int | None = None,
+) -> dict[str, Any]:
     """
     Smoke-test an Ollama model via its HTTP API (/api/generate).
 
@@ -853,13 +858,14 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
     import urllib.request
 
     url = f"{ollama_base_url()}/api/generate"
-    payload = json.dumps(
-        {
-            "model": model,
-            "prompt": "Reply with exactly READY",
-            "stream": False,
-        }
-    ).encode()
+    payload_dict: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+    }
+    if max_tokens is not None:
+        payload_dict["options"] = {"num_predict": max_tokens}
+    payload = json.dumps(payload_dict).encode()
     req = urllib.request.Request(url, data=payload, headers=_auth_headers(OLLAMA_API_KEY))
     start = time.time()
     try:
@@ -885,8 +891,9 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
             # Fallback: approximate from wall-clock time and response length.
             duration_seconds = wall_seconds
 
+        ok_flag = bool(text) if expected is None else expected.upper() in text.upper()
         return {
-            "ok": "READY" in text.upper(),
+            "ok": ok_flag,
             "response": text,
             "tokens_per_second": tokens_per_second,
             "completion_tokens": completion_tokens,
@@ -894,18 +901,23 @@ def smoke_test_ollama_model(model: str) -> dict[str, Any]:
         }
     except urllib.error.URLError:
         # Fall back to the CLI path — the HTTP daemon may not be running.
-        return _smoke_test_ollama_cli(model)
+        return _smoke_test_ollama_cli(model, prompt=prompt, expected=expected)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
-def _smoke_test_ollama_cli(model: str) -> dict[str, Any]:
+def _smoke_test_ollama_cli(
+    model: str,
+    prompt: str = "Reply with exactly READY",
+    expected: str | None = "READY",
+) -> dict[str, Any]:
     """Legacy CLI-based smoke test for Ollama; no timing info available."""
     try:
-        cp = run(["ollama", "run", model, "Reply with exactly READY"], timeout=180)
+        cp = run(["ollama", "run", model, prompt], timeout=180)
         text = cp.stdout.strip()
+        ok_flag = bool(text) if expected is None else expected.upper() in text.upper()
         return {
-            "ok": "READY" in text.upper(),
+            "ok": ok_flag,
             "response": text,
             "tokens_per_second": None,
             "completion_tokens": None,
@@ -1096,7 +1108,12 @@ def lms_download_model(hub_name: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
+def smoke_test_lmstudio_model(
+    model_path: str,
+    prompt: str = "Reply with exactly READY",
+    expected: str | None = "READY",
+    max_tokens: int = 16,
+) -> dict[str, Any]:
     """
     Smoke-test a model loaded in the LM Studio server via its OpenAI-compatible API.
     Requires the server to be running and the model loaded.
@@ -1112,8 +1129,8 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
     payload = json.dumps(
         {
             "model": model_path,
-            "messages": [{"role": "user", "content": "Reply with exactly READY"}],
-            "max_tokens": 16,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
             "temperature": 0,
         }
     ).encode()
@@ -1130,8 +1147,9 @@ def smoke_test_lmstudio_model(model_path: str) -> dict[str, Any]:
         tokens_per_second: float | None = None
         if completion_tokens is not None and completion_tokens > 0:
             tokens_per_second = completion_tokens / duration_seconds
+        ok_flag = bool(text) if expected is None else expected.upper() in text.upper()
         return {
-            "ok": "READY" in text.upper(),
+            "ok": ok_flag,
             "response": text,
             "tokens_per_second": tokens_per_second,
             "completion_tokens": completion_tokens,
@@ -1401,6 +1419,8 @@ def smoke_test_vllm_model(
     api_key: str | None = "",
     timeout: int = 60,
     max_tokens: int = 2048,
+    prompt: str = "Reply with exactly READY",
+    expected: str | None = "READY",
 ) -> dict[str, Any]:
     """
     Smoke-test a model hosted by a vLLM server via its OpenAI-compatible API.
@@ -1433,7 +1453,7 @@ def smoke_test_vllm_model(
     payload = json.dumps(
         {
             "model": model,
-            "messages": [{"role": "user", "content": "Reply with exactly READY"}],
+            "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": 0,
         }
@@ -1460,8 +1480,9 @@ def smoke_test_vllm_model(
         if completion_tokens is not None and completion_tokens > 0:
             tokens_per_second = completion_tokens / duration_seconds
 
+        ok_flag = bool(text) if expected is None else expected.upper() in text.upper()
         return {
-            "ok": "READY" in text.upper(),
+            "ok": ok_flag,
             "response": text,
             "tokens_per_second": tokens_per_second,
             "completion_tokens": completion_tokens,
@@ -3043,7 +3064,12 @@ def _cleanup_pid_file(pid_file: str) -> None:
         Path(pid_file).unlink(missing_ok=True)
 
 
-def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
+def smoke_test_llamacpp_model(
+    model: str,
+    prompt: str = "Reply with exactly READY",
+    expected: str | None = "READY",
+    max_tokens: int = 256,
+) -> dict[str, Any]:
     """
     Smoke-test a model loaded in the llama.cpp server via its OpenAI-compatible API.
     Requires the server to be running with the model loaded.
@@ -3059,12 +3085,12 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
     payload = json.dumps(
         {
             "model": model,
-            "messages": [{"role": "user", "content": "Reply with exactly READY"}],
+            "messages": [{"role": "user", "content": prompt}],
             # Reasoning models (Qwen3+, DeepSeek-R1, …) consume tokens inside
             # <think> before producing the visible answer. 16 tokens is far
             # too tight; 256 leaves room for a brief thinking pass without
             # letting a runaway model hang the wizard.
-            "max_tokens": 256,
+            "max_tokens": max_tokens,
             "temperature": 0,
             # Suppress chain-of-thought when the chat template understands
             # this kwarg (Qwen3, etc.). Templates that don't reference it
@@ -3093,7 +3119,11 @@ def smoke_test_llamacpp_model(model: str) -> dict[str, Any]:
         tokens_per_second: float | None = None
         if completion_tokens is not None and completion_tokens > 0:
             tokens_per_second = completion_tokens / duration_seconds
-        ok_flag = "READY" in text.upper() or "READY" in reasoning.upper()
+        ok_flag = (
+            bool(text or reasoning)
+            if expected is None
+            else expected.upper() in text.upper() or expected.upper() in reasoning.upper()
+        )
         result: dict[str, Any] = {
             "ok": ok_flag,
             "response": text,
