@@ -63,6 +63,43 @@ def _wrap(result: dict[str, Any]) -> dict[str, object]:
     )
 
 
+def _spawn_and_smoke(model: str, model_path: str, profile: dict[str, Any]) -> dict[str, Any]:
+    """Verify the GGUF path, start llama-server, then smoke-test it.
+
+    Returns the raw ``{"ok": bool, ...}`` smoke dict (callers ``_wrap`` it).
+    """
+    if not model_path or not Path(model_path).is_file():
+        return {
+            "ok": False,
+            "error": f"no resolved GGUF path for model '{model}'; re-run wizard step 4",
+        }
+
+    start_result = pb.llamacpp_start_server(
+        model_path=model_path,
+        profile=profile,
+        port=pb.LLAMACPP_SERVER_PORT,
+        host=pb.LLAMACPP_SERVER_HOST,
+    )
+    argv = start_result.get("argv") or []
+    manual_cmd = _render_command(argv) if argv else ""
+    if not start_result.get("ok"):
+        return {
+            "ok": False,
+            "error": start_result.get("error") or "unknown error",
+            "hint": start_result.get("hint"),
+            "manual_command": manual_cmd,
+            "log_path": start_result.get("log_path") or "",
+        }
+
+    handle = start_result["handle"]
+    smoke = pb.smoke_test_llamacpp_model(model)
+    if not smoke.get("ok"):
+        smoke = dict(smoke)
+        smoke.setdefault("manual_command", manual_cmd)
+        smoke.setdefault("log_path", handle.log_path)
+    return smoke
+
+
 def run(
     model: str = "",
     dry_run: bool = True,
@@ -100,50 +137,27 @@ def run(
         running_model = (info.get("model") or "").strip()
         if _models_match(running_model, model):
             return _wrap(pb.smoke_test_llamacpp_model(model))
-        if non_interactive:
-            return _wrap(
-                {
+
+        # Different model on our port. If WE started it (pid-file gated), stop
+        # and restart with the wanted model (issue #149).
+        def _switch() -> dict[str, Any]:
+            stop_res = pb.llamacpp_stop_server_by_port(info["server_port"])
+            if not stop_res.get("ok"):
+                return {
                     "ok": False,
                     "error": (
-                        f"port {info['server_port']} is serving a different model "
-                        f"('{running_model or 'unknown'}'); aborting in non-interactive mode"
+                        f"could not stop the running llama-server on port "
+                        f"{info['server_port']}: {stop_res.get('error')}; "
+                        f"stop it manually and re-run with --resume"
                     ),
                 }
-            )
+            return _spawn_and_smoke(model, model_path, profile)
+
+        if non_interactive:
+            return _wrap(_switch())
+        # Interactive: caller drives the prompt elsewhere; default to using the
+        # already-running model for the smoke test rather than killing it.
         smoke_target = running_model or model
         return _wrap(pb.smoke_test_llamacpp_model(smoke_target))
 
-    if not model_path or not Path(model_path).is_file():
-        return _wrap(
-            {
-                "ok": False,
-                "error": f"no resolved GGUF path for model '{model}'; re-run wizard step 4",
-            }
-        )
-
-    start_result = pb.llamacpp_start_server(
-        model_path=model_path,
-        profile=profile,
-        port=pb.LLAMACPP_SERVER_PORT,
-        host=pb.LLAMACPP_SERVER_HOST,
-    )
-    argv = start_result.get("argv") or []
-    manual_cmd = _render_command(argv) if argv else ""
-    if not start_result.get("ok"):
-        return _wrap(
-            {
-                "ok": False,
-                "error": start_result.get("error") or "unknown error",
-                "hint": start_result.get("hint"),
-                "manual_command": manual_cmd,
-                "log_path": start_result.get("log_path") or "",
-            }
-        )
-
-    handle = start_result["handle"]
-    smoke = pb.smoke_test_llamacpp_model(model)
-    if not smoke.get("ok"):
-        smoke = dict(smoke)
-        smoke.setdefault("manual_command", manual_cmd)
-        smoke.setdefault("log_path", handle.log_path)
-    return _wrap(smoke)
+    return _wrap(_spawn_and_smoke(model, model_path, profile))
