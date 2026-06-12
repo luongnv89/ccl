@@ -2551,6 +2551,71 @@ class TestStep2_5LlamaCppAutostart:
         assert spawn_calls == []
         assert "could not stop" in (state.smoke_test_result.get("error") or "")
 
+    def test_interactive_mismatch_switches_to_selected_model(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        # A ccl-managed server is running a DIFFERENT model on our port. Even in
+        # INTERACTIVE mode (the wizard default) we must stop it and restart with
+        # the model the user actually selected — not silently smoke-test the old
+        # one (issue #149). Exercises the live engine path directly.
+        from claude_codex_local.engines.llamacpp import test as llamacpp_test
+
+        pb, _wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_info",
+            lambda: {
+                "remote": False,
+                "server_running": True,
+                "server_port": 8001,
+                "model": "Old-Model-Q4.gguf",
+            },
+        )
+        stop_calls = []
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_stop_server_by_port",
+            lambda port, **kw: stop_calls.append(port) or {"ok": True, "pid": 999},
+        )
+        spawned: dict = {}
+
+        def _fake_start(**kw):
+            spawned.update(kw)
+            return {
+                "ok": True,
+                "argv": ["llama-server", "--model", kw["model_path"]],
+                "handle": pb.LlamaServerHandle(
+                    pid=42424,
+                    port=kw.get("port", 8001),
+                    host=kw.get("host", "127.0.0.1"),
+                    model_path=kw["model_path"],
+                    argv=["llama-server", "--model", kw["model_path"]],
+                    log_path=str(tmp_path / "log.txt"),
+                    pid_file=str(tmp_path / "pid"),
+                    we_started_it=True,
+                ),
+                "error": None,
+                "log_path": str(tmp_path / "log.txt"),
+            }
+
+        monkeypatch.setattr(pb, "llamacpp_start_server", _fake_start)
+        monkeypatch.setattr(
+            pb,
+            "smoke_test_llamacpp_model",
+            lambda tag: {"ok": True, "response": "READY"},
+        )
+        result = llamacpp_test.run(
+            model="org/Wanted-Model-GGUF",
+            dry_run=False,
+            profile={"llamacpp_model_path": str(gguf)},
+            non_interactive=False,
+        )
+        assert result.get("ok") is True
+        assert stop_calls == [8001]
+        assert spawned["model_path"] == str(gguf)
+
 
 class TestEnsureLlamacppServerRunning:
     """Step 7's pre-flight guard: server may have died between Step 5 and 7."""
@@ -2980,8 +3045,15 @@ class TestStep2_5LlamaCppPreservesEngineModelTag:
     """When the user opts in to a mismatched running model, the wizard must
     not overwrite the persisted HF repo id (Step 6 wires the harness from it)."""
 
-    def test_engine_model_tag_is_preserved_on_opt_in(self, isolated_state, monkeypatch):
+    def test_engine_model_tag_is_preserved_on_mismatch_switch(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        # A different model is running on our port; the mismatch now triggers a
+        # stop+restart with the selected model (issue #149). The persisted HF
+        # repo id must survive the switch so Step 6 wires the right harness.
         pb, wiz, _ = isolated_state
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"\x00")
         monkeypatch.setattr(
             pb,
             "llamacpp_info",
@@ -2992,12 +3064,31 @@ class TestStep2_5LlamaCppPreservesEngineModelTag:
                 "model": "deepseek-coder-v2-lite-instruct.gguf",
             },
         )
+        monkeypatch.setattr(
+            pb,
+            "llamacpp_stop_server_by_port",
+            lambda port, **kw: {"ok": True, "pid": 999},
+        )
 
-        class _Yes:
-            def ask(self):
-                return True
+        def _fake_start(**kw):
+            return {
+                "ok": True,
+                "argv": ["llama-server", "--model", kw["model_path"]],
+                "handle": pb.LlamaServerHandle(
+                    pid=42424,
+                    port=kw.get("port", 8001),
+                    host=kw.get("host", "127.0.0.1"),
+                    model_path=kw["model_path"],
+                    argv=["llama-server", "--model", kw["model_path"]],
+                    log_path=str(tmp_path / "log.txt"),
+                    pid_file=str(tmp_path / "pid"),
+                    we_started_it=True,
+                ),
+                "error": None,
+                "log_path": str(tmp_path / "log.txt"),
+            }
 
-        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _Yes())
+        monkeypatch.setattr(pb, "llamacpp_start_server", _fake_start)
         captured: dict = {}
 
         def _fake_smoke(tag):
@@ -3015,12 +3106,14 @@ class TestStep2_5LlamaCppPreservesEngineModelTag:
             primary_engine="llamacpp",
             engine_model_tag="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
         )
-        state.profile = {"llmfit_system": {"system": {"has_gpu": False, "cpu_cores": 4}}}
+        state.profile = {
+            "llmfit_system": {"system": {"has_gpu": False, "cpu_cores": 4}},
+            "llamacpp_model_path": str(gguf),
+        }
         assert wiz.step_2_5_smoke_test(state, non_interactive=False) is True
-        # Smoke test ran against whatever the running server has loaded.
-        assert captured["tag"] == "deepseek-coder-v2-lite-instruct.gguf"
-        # Persisted state must still be the user's HF repo id, NOT the basename
-        # of the running server (otherwise Step 6 would wire a broken harness).
+        # Smoke test ran against the model the user selected, not the old one.
+        assert captured["tag"] == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
+        # Persisted state must still be the user's HF repo id (Step 6 wires it).
         assert state.engine_model_tag == "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"
 
 

@@ -153,11 +153,9 @@ def run(
                 }
             return _spawn_and_smoke(model, model_path, profile)
 
-        if non_interactive:
-            return _wrap(_switch())
-        # Interactive: caller drives the prompt elsewhere; default to using the
-        # already-running model for the smoke test rather than killing it.
-        smoke_target = running_model or model
-        return _wrap(pb.smoke_test_llamacpp_model(smoke_target))
+        # Different model on our port: stop the ccl-managed server (pid-file
+        # gated, so a server started outside ccl is never killed) and restart
+        # with the model the user actually selected (issue #149).
+        return _wrap(_switch())
 
     return _wrap(_spawn_and_smoke(model, model_path, profile))
