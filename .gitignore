@@ -11,5 +11,6 @@ coverage.xml
 .claude/worktrees/
 .test-model-cache/
 *.egg-info/
+dist/
 .gstack/
 .asm-improver/
