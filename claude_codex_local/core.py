@@ -3033,6 +3033,72 @@ def llamacpp_stop_server(handle: LlamaServerHandle, *, grace_seconds: float = 5.
     return _pid_gone(pid)
 
 
+def llamacpp_stop_server_by_port(port: int, *, grace_seconds: float = 5.0) -> dict[str, Any]:
+    """Stop a ccl-managed llama-server identified by its on-disk pid file.
+
+    This is the by-port counterpart to :func:`llamacpp_stop_server` (which
+    needs a live :class:`LlamaServerHandle`). It is used when we only know the
+    port — e.g. the wizard wants to switch models against a server that a
+    *previous* ccl run started, so there is no in-memory handle to pass.
+
+    It will only ever stop a server this tool started: the target is found
+    solely via the pid file ``LLAMACPP_PID_DIR / f"llama-server-{port}.pid"``.
+    If no such pid file exists we refuse and report it, so a foreign /
+    unmanaged llama-server on the same port is never killed.
+
+    Returns ``{"ok": bool, "pid": int | None, ...}``. On a stale pid file the
+    dict carries ``"already_gone": True``; on failure it carries ``"error"``.
+    """
+    pid_file = LLAMACPP_PID_DIR / f"llama-server-{port}.pid"
+    if not pid_file.exists():
+        return {
+            "ok": False,
+            "pid": None,
+            "error": (
+                f"no ccl-managed llama-server pid file for port {port}; "
+                f"the server was started outside ccl"
+            ),
+        }
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        _cleanup_pid_file(str(pid_file))
+        return {
+            "ok": False,
+            "pid": None,
+            "error": f"unreadable pid file for port {port}",
+        }
+
+    if _pid_gone(pid):
+        _cleanup_pid_file(str(pid_file))
+        return {"ok": True, "pid": pid, "already_gone": True}
+
+    _signal_process(pid, 15)
+    deadline = time.monotonic() + max(grace_seconds, 0.0)
+    while time.monotonic() < deadline:
+        if _pid_gone(pid):
+            _cleanup_pid_file(str(pid_file))
+            return {"ok": True, "pid": pid}
+        time.sleep(0.1)
+
+    _signal_process(pid, 9)
+    deadline2 = time.monotonic() + 2.0
+    while time.monotonic() < deadline2:
+        if _pid_gone(pid):
+            _cleanup_pid_file(str(pid_file))
+            return {"ok": True, "pid": pid}
+        time.sleep(0.1)
+
+    if _pid_gone(pid):
+        _cleanup_pid_file(str(pid_file))
+        return {"ok": True, "pid": pid}
+    return {
+        "ok": False,
+        "pid": pid,
+        "error": f"failed to stop llama-server pid {pid} on port {port}",
+    }
+
+
 def _pid_gone(pid: int) -> bool:
     """Best-effort check that ``pid`` is no longer alive."""
     try:

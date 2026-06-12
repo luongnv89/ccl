@@ -2841,6 +2841,55 @@ class TestLlamaCppStopServer:
         assert len(wait_calls) == 2  # one for SIGTERM, one after SIGKILL
 
 
+class TestLlamaCppStopServerByPort:
+    def test_no_pid_file_refuses(self, isolated_state, monkeypatch, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(pb_mod, "LLAMACPP_PID_DIR", tmp_path)
+        out = pb_mod.llamacpp_stop_server_by_port(8001)
+        assert out["ok"] is False
+        assert out["pid"] is None
+        assert "outside ccl" in out["error"]
+
+    def test_stale_pid_file_is_removed(self, isolated_state, monkeypatch, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(pb_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        pid_file.write_text("4242")
+        monkeypatch.setattr(pb_mod, "_pid_gone", lambda pid: True)
+        out = pb_mod.llamacpp_stop_server_by_port(8001)
+        assert out["ok"] is True
+        assert out["already_gone"] is True
+        assert out["pid"] == 4242
+        assert not pid_file.exists()
+
+    def test_alive_then_dies_after_sigterm(self, isolated_state, monkeypatch, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(pb_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        pid_file.write_text("4242")
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(pb_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig)))
+
+        gone_states = iter([False, True])
+
+        def _gone(pid):
+            try:
+                return next(gone_states)
+            except StopIteration:
+                return True
+
+        monkeypatch.setattr(pb_mod, "_pid_gone", _gone)
+        monkeypatch.setattr(pb_mod.time, "sleep", lambda _s: None)
+
+        out = pb_mod.llamacpp_stop_server_by_port(8001, grace_seconds=0.1)
+        assert out["ok"] is True
+        assert out["pid"] == 4242
+        assert not pid_file.exists()
+        # SIGTERM (15) was sent to the recorded pid.
+        assert (4242, 15) in signals
+
+
 def _wiz_temp_pid_path(isolated_state):
     """Return a writable pid-file path inside the isolated state dir."""
     _pb, _wiz, state_dir = isolated_state

@@ -2793,86 +2793,14 @@ def _lms_model_size_hint(tag: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[str, Any]:
+def _llamacpp_spawn_and_smoke(state: WizardState, *, tag: str, model_path: str) -> dict[str, Any]:
     """
-    Auto-start llama-server with the just-downloaded GGUF (issue #53), wait
-    for the /health endpoint, then run the actual smoke test against
-    /v1/chat/completions.
+    Verify a GGUF path, auto-start llama-server with sensible defaults, then
+    run the smoke test against the fresh server.
 
-    Returns the standard ``{"ok": bool, ...}`` dict that
-    ``step_2_5_smoke_test`` already understands. On failure, the dict carries
-    a ``manual_command`` field so the caller can echo it.
+    Returns the standard ``{"ok": bool, ...}`` dict; on failure the dict
+    carries a ``manual_command`` field so the caller can echo it.
     """
-    tag = state.engine_model_tag
-    model_path = state.profile.get("llamacpp_model_path") or ""
-
-    # Remote endpoint: skip every local-spawn code path (issue #123). The
-    # smoke test just hits the remote /v1/chat/completions; if the remote
-    # /health probe failed we cannot recover by spawning a local server.
-    info_dict = pb.llamacpp_info()
-    if info_dict.get("remote"):
-        base_url = info_dict.get("base_url") or pb.llamacpp_base_url()
-        if info_dict.get("server_running"):
-            ok(f"Using remote llama.cpp server at {base_url}")
-            return pb.smoke_test_llamacpp_model(tag)
-        return {
-            "ok": False,
-            "error": (
-                f"remote llama.cpp server at {base_url} is not reachable "
-                f"(GET /health failed); check the remote host and "
-                f"LLAMACPP_BASE_URL before re-running"
-            ),
-        }
-
-    # Phase 1 — handle a server that is already running on our port.
-    if info_dict.get("server_running"):
-        running_model = (info_dict.get("model") or "").strip()
-        if _llamacpp_models_match(running_model, tag):
-            ok(
-                f"Reusing running llama-server on "
-                f"{pb.LLAMACPP_SERVER_HOST}:{info_dict['server_port']} "
-                f"(model: {running_model or tag})"
-            )
-            return pb.smoke_test_llamacpp_model(tag)
-
-        # Different model on our port — refuse to kill it. Ask interactively.
-        warn(
-            f"A different llama.cpp model is already loaded on port "
-            f"{info_dict['server_port']}: '{running_model or 'unknown'}'.\n"
-            f"  Wanted: '{tag}'."
-        )
-        if non_interactive:
-            return {
-                "ok": False,
-                "error": (
-                    f"port {info_dict['server_port']} is serving a different model "
-                    f"('{running_model or 'unknown'}'); aborting in non-interactive mode"
-                ),
-            }
-        try:
-            use_running = questionary.confirm(
-                f"Use the already-running model ({running_model or 'unknown'}) for the smoke test?",
-                default=True,
-            ).ask()
-        except KeyboardInterrupt:
-            return {"ok": False, "error": "user cancelled at server-conflict prompt"}
-        if not use_running:
-            return {
-                "ok": False,
-                "error": (
-                    f"port {info_dict['server_port']} is busy with another model; "
-                    f"stop it (kill the running llama-server) and re-run with --resume"
-                ),
-            }
-        # User opted in: run the smoke test against whatever is loaded.
-        # Do NOT mutate state.engine_model_tag here — Step 6 wires the
-        # harness from the persisted HF repo id; clobbering it with the
-        # running server's basename would break that downstream config.
-        # llama-server ignores the `model` field and uses whatever is
-        # loaded, so passing ``running_model`` only affects this request.
-        smoke_target = running_model or tag
-        return pb.smoke_test_llamacpp_model(smoke_target)
-
     # Phase 2 — no server running. We need a real GGUF path to spawn one.
     if not model_path or not Path(model_path).is_file():
         warn(
@@ -2944,6 +2872,111 @@ def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[s
     return smoke
 
 
+def _llamacpp_smoke_test(state: WizardState, *, non_interactive: bool) -> dict[str, Any]:
+    """
+    Auto-start llama-server with the just-downloaded GGUF (issue #53), wait
+    for the /health endpoint, then run the actual smoke test against
+    /v1/chat/completions.
+
+    Returns the standard ``{"ok": bool, ...}`` dict that
+    ``step_2_5_smoke_test`` already understands. On failure, the dict carries
+    a ``manual_command`` field so the caller can echo it.
+    """
+    tag = state.engine_model_tag
+    model_path = state.profile.get("llamacpp_model_path") or ""
+
+    # Remote endpoint: skip every local-spawn code path (issue #123). The
+    # smoke test just hits the remote /v1/chat/completions; if the remote
+    # /health probe failed we cannot recover by spawning a local server.
+    info_dict = pb.llamacpp_info()
+    if info_dict.get("remote"):
+        base_url = info_dict.get("base_url") or pb.llamacpp_base_url()
+        if info_dict.get("server_running"):
+            ok(f"Using remote llama.cpp server at {base_url}")
+            return pb.smoke_test_llamacpp_model(tag)
+        return {
+            "ok": False,
+            "error": (
+                f"remote llama.cpp server at {base_url} is not reachable "
+                f"(GET /health failed); check the remote host and "
+                f"LLAMACPP_BASE_URL before re-running"
+            ),
+        }
+
+    # Phase 1 — handle a server that is already running on our port.
+    if info_dict.get("server_running"):
+        running_model = (info_dict.get("model") or "").strip()
+        if _llamacpp_models_match(running_model, tag):
+            ok(
+                f"Reusing running llama-server on "
+                f"{pb.LLAMACPP_SERVER_HOST}:{info_dict['server_port']} "
+                f"(model: {running_model or tag})"
+            )
+            return pb.smoke_test_llamacpp_model(tag)
+
+        # Different model on our port. We can stop+restart with the wanted
+        # model, but only if WE started the running server (pid-file gated).
+        warn(
+            f"A different llama.cpp model is already loaded on port "
+            f"{info_dict['server_port']}: '{running_model or 'unknown'}'.\n"
+            f"  Wanted: '{tag}'."
+        )
+
+        def _switch() -> dict[str, Any]:
+            stop_res = pb.llamacpp_stop_server_by_port(info_dict["server_port"])
+            if not stop_res.get("ok"):
+                return {
+                    "ok": False,
+                    "error": (
+                        f"could not stop the running llama-server on port "
+                        f"{info_dict['server_port']}: {stop_res.get('error')}; "
+                        f"stop it manually and re-run with --resume"
+                    ),
+                }
+            info(
+                f"Stopped the previous llama-server on port "
+                f"{info_dict['server_port']} (was '{running_model or 'unknown'}')."
+            )
+            return _llamacpp_spawn_and_smoke(state, tag=tag, model_path=model_path)
+
+        if non_interactive:
+            return _switch()
+        try:
+            switch = questionary.confirm(
+                f"Stop it and start '{tag}' instead?",
+                default=True,
+            ).ask()
+        except KeyboardInterrupt:
+            return {"ok": False, "error": "user cancelled at server-conflict prompt"}
+        if switch:
+            return _switch()
+
+        try:
+            use_running = questionary.confirm(
+                f"Use the already-running model ({running_model or 'unknown'}) for the smoke test?",
+                default=True,
+            ).ask()
+        except KeyboardInterrupt:
+            return {"ok": False, "error": "user cancelled at server-conflict prompt"}
+        if not use_running:
+            return {
+                "ok": False,
+                "error": (
+                    f"port {info_dict['server_port']} is busy with another model; "
+                    f"stop it (kill the running llama-server) and re-run with --resume"
+                ),
+            }
+        # User opted in: run the smoke test against whatever is loaded.
+        # Do NOT mutate state.engine_model_tag here — Step 6 wires the
+        # harness from the persisted HF repo id; clobbering it with the
+        # running server's basename would break that downstream config.
+        # llama-server ignores the `model` field and uses whatever is
+        # loaded, so passing ``running_model`` only affects this request.
+        return pb.smoke_test_llamacpp_model(running_model or tag)
+
+    return _llamacpp_spawn_and_smoke(state, tag=tag, model_path=model_path)
+
+
 def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
     """
     Make sure a llama-server is up and serving the wizard's chosen model.
@@ -2980,13 +3013,24 @@ def _ensure_llamacpp_server_running(state: WizardState) -> dict[str, Any]:
         running_model = (info_dict.get("model") or "").strip()
         if not running_model or _llamacpp_models_match(running_model, tag):
             return {"ok": True, "reused": True}
-        return {
-            "ok": False,
-            "error": (
-                f"port {info_dict['server_port']} is serving a different model "
-                f"('{running_model}'); wanted '{tag}'"
-            ),
-        }
+        # Different model on our port — try a ccl-managed stop so we can
+        # restart with the wanted model. If the running server was not
+        # started by ccl (no pid file), the stop fails and we surface the
+        # original "different model" error rather than killing it.
+        stop_res = pb.llamacpp_stop_server_by_port(info_dict["server_port"])
+        if not stop_res.get("ok"):
+            return {
+                "ok": False,
+                "error": (
+                    f"port {info_dict['server_port']} is serving a different model "
+                    f"('{running_model}'); wanted '{tag}'"
+                ),
+            }
+        info(
+            f"Stopped the previous llama-server on port "
+            f"{info_dict['server_port']} (was '{running_model}')."
+        )
+        # Fall through to the spawn block below to restart with the wanted model.
     model_path = state.profile.get("llamacpp_model_path") or ""
     if not model_path or not Path(model_path).is_file():
         return {
