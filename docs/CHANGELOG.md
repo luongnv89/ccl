@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] — 2026-06-12
+
+### Features
+
+- **Always fetch Hugging Face model card in llamacpp-tuner Step 3** (#151): the tuner now fetches the model card from Hugging Face during Step 3, ensuring up-to-date model metadata is available for tuning decisions.
+- **Optional Step 5.5 benchmark for first-token latency and throughput** (#148): a new intermediate benchmark step measures first-token latency and throughput, giving users concrete performance data before committing to a model.
+- **Fetch 9router models during setup** (#142, #143): the wizard now discovers available models from the 9router backend during the initial setup flow, so users can pick from the full catalog without a separate lookup step.
+
+### Bug Fixes
+
+- **Stop and restart llama-server when switching models** (#149, #150): the wizard now properly stops the running llama-server instance before switching to a different model, preventing stale server state and model conflicts.
+- **Reset base URL when Local picked after remote env export** (#145): selecting "Local" as the engine type after a remote environment has been exported now correctly resets the base URL, avoiding accidental connections to the previous remote endpoint.
+
+### Other Changes
+
+- **Split engine lifecycle scripts by engine** (#144): the engine lifecycle management scripts have been refactored to separate concerns by engine type (llamacpp, vllm, ollama), improving maintainability and making it easier to add new engine adapters.
+
+**Full Changelog**: https://github.com/luongnv89/ccl/compare/v0.16.0...v0.17.0
+
 ## [0.16.0] — 2026-05-22
 
 ### Added
