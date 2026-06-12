@@ -12,5 +12,6 @@ coverage.xml
 .test-model-cache/
 *.egg-info/
 dist/
+start-llama-server.sh
 .gstack/
 .asm-improver/
