@@ -3,7 +3,7 @@ name: llamacpp-tuner
 description: "Analyze and tune a running llama.cpp server for local coding agents: propose config (ctx, prompt cache, MTP), benchmark before/after, report deltas. Use to optimize llama-server for Claude Code or Aider. Don't use for vLLM, ollama, or non-llama.cpp."
 effort: high
 metadata:
-  version: 1.2.0
+  version: 1.3.0
   author: "Luong NGUYEN <luongnv89@gmail.com>"
 ---
 
@@ -26,7 +26,7 @@ The skill runs as a single sequential workflow. Each step gates the next.
 ```
 0. remote pre-flight ← STOP if LLAMACPP_BASE_URL is remote
                                    ↓
-1. discover machine    →  2. discover running server  →  3. research model
+1. discover machine    →  2. discover running server  →  3. research model (fetch HF card)
         ↓                          ↓                           ↓
         └──────────────────────────┴───────────────────────────┘
                                    ↓
@@ -110,29 +110,34 @@ Record:
 - **Free GPU memory at server start** (vs total) — exposes memory pressure.
 - **MTP draft acceptance rate** if speculative decoding is on. <30% = poorly matched, >50% = excellent.
 
-### Step 3 — Research the model
+### Step 3 — Research the model (always fetch the model card)
 
-Identify the model from the loaded GGUF filename. Pull the HF repo metadata for ground truth (the GGUF filename and the user's mental model can disagree):
+Identify the model from the loaded GGUF filename, then **always try to fetch its Hugging Face model card**. The card is the source of truth that the GGUF filename can't carry: native context length, OOM/ctx-size guidance, MoE expert counts, MTP support, and — on quantizer repos like Unsloth — the launch flags the model author actually recommends. Use this to keep Step 4 current with the model instead of relying on stale assumptions.
+
+Run the bundled fetcher. It resolves the repo from the running server's model path (the HF cache encodes it as `models--org--repo`), pulls both the structured API metadata **and** the README *prose*, extracts only the perf-relevant lines, and deliberately drops sampling params (this skill never tunes the sampler):
 
 ```bash
-curl -s "https://huggingface.co/api/models/<org>/<repo>" \
-  | python3 -c "import json,sys;d=json.load(sys.stdin);
-print('id:',d['id']);
-print('tags:',d.get('tags'));
-[print(' ',s['rfilename']) for s in d.get('siblings',[]) if s['rfilename'].endswith('.gguf')]"
+# Preferred: let the path resolve the repo id (model path comes from Step 2's `pgrep -fa`)
+python3 scripts/fetch_model_card.py --model "<path-to-loaded-.gguf>"
+
+# Or pass the repo id explicitly (read it from /v1/models or /props if the path isn't an HF cache path)
+python3 scripts/fetch_model_card.py --repo <org>/<repo>
 ```
 
-Or via the model's own context if `llama-server` exposes it:
+The script is **best-effort by design**: a 404, a private/gated repo, or no network prints a one-line note and exits `0` — it never blocks the workflow. If it can't fetch the card, fall back to the server's own metadata and the GGUF filename, and mark Step 3 **PARTIAL** (not FAIL):
 
 ```bash
 curl -s http://<host>:<port>/props 2>/dev/null | python3 -m json.tool | head -40
 ```
 
-Record:
-- **Total vs active params** (MoE: e.g. 35B-A3B = 35B total, ~3B active per token). Tells you whether decode is bandwidth-bound or compute-bound.
-- **n_ctx_train** (native max context). Is the current `--ctx-size` leaving headroom on the table, or already at the ceiling?
-- **MTP / multi-token prediction support** — the GGUF metadata or repo name will tell you.
+If the card resolves to a *quantizer* repo (Unsloth, bartowski, lmstudio-community) whose card is thin on architecture facts, the fetcher prints the upstream `base_model` repo — re-run with `--repo <base_model>` to get `n_ctx_train`, expert counts, and MTP support from the source.
+
+Record (prefer the card; the GGUF filename and the user's mental model can disagree):
+- **Total vs active params** (MoE: e.g. 35B-A3B = 35B total, ~3B active per token). Tells you whether decode is bandwidth-bound or compute-bound. The card's expert counts (`Number of Experts` / `Number of Activated Experts`) confirm this.
+- **n_ctx_train** (native max context, from the card's `context_length` / "Context Length: … natively"). Is the current `--ctx-size` leaving headroom on the table, or already at the ceiling? Note any author OOM guidance (e.g. "reduce to 32,768").
+- **MTP / multi-token prediction support** — the card, GGUF metadata, or repo name will tell you.
 - **Quant**: Q4_K_M, Q5_K_M, UD-Q*, IQ*, Q8_0. Decode speed and memory cost scale with this.
+- **Author config recommendations** — any `llama-server` flags, output-length, or context advice the card publishes. Carry these into Step 4 as **candidate experiments to benchmark**, not silent overrides — see Step 4.
 
 ### Step 4 — Propose the optimized configuration
 
@@ -150,6 +155,8 @@ Read `references/agent-tuning-knobs.md` for the full knob-by-knob rationale. App
 10. **`--spec-draft-n-max`** at 5–6 for code (higher acceptance than prose). Sweep 3/5/8 once stable.
 
 Do **not** apply on unified-memory systems: `-cmoe`, `-ncmoe` (no benefit — same memory pool).
+
+**Folding in the model card (from Step 3):** treat the card as ground truth for model *facts* (n_ctx_train, MTP support, quant, expert counts) — let those constrain your numbers (e.g. never propose `--ctx-size` above the card's native context). But treat author-recommended *flags* as **candidate experiments to benchmark**, not silent overrides. The skill's opinionated, workload-specific knobs (`--parallel 1`, `--cache-ram`, perf-core pinning) win on conflict because they encode the *coding-agent* profile the card author didn't assume — but **surface any conflict** to the user in one line rather than discarding it silently (e.g. "card suggests output length 65536; benchmark uses 256 — your agent's real output length should drive `--n-predict`"). Ignore card sampling params entirely; this skill never tunes the sampler.
 
 Output a config diff table: column 1 current flag value, column 2 proposed, column 3 one-line rationale per row. Don't bury the user in prose.
 
@@ -217,6 +224,7 @@ A run is complete when **all** of the following hold:
 
 - [ ] Step Completion Report emitted for each of the 9 workflow steps (10 with Step 0); none ended `FAIL`.
 - [ ] Step 0 ran first; if `LLAMACPP_BASE_URL` was remote the skill exited cleanly with the documented skip message and did **not** touch any of Steps 1–9.
+- [ ] Step 3 **attempted** a model-card fetch (`scripts/fetch_model_card.py`). This is best-effort: if the card was fetched, its facts (n_ctx_train, quant, MTP) informed Step 4 and any author flag recommendations were carried in as labelled experiments; if the fetch missed (404 / gated / offline), Step 3 was marked PARTIAL with the note and the run continued. A failed fetch is **not** grounds to FAIL the run.
 - [ ] `/tmp/bench-before.json` and `/tmp/bench-after.json` exist and cover the same five prompt sizes (256 / 2k / 8k / 32k / 64k), both cold and warm.
 - [ ] The final report contains: machine+model paragraph, before→after flag diff table, benchmark table with cold/warm/delta columns, verdict line, caveats, optional next experiments.
 - [ ] User approval was captured at Step 5 before any destructive action (server restart).
@@ -264,6 +272,7 @@ The exact numbers will differ per machine and model; the *shape* (flag diff → 
 ## Resources
 
 - `scripts/tuner_preflight.py` — Step 0 gate. Exits 0 with a skip message when `LLAMACPP_BASE_URL` is remote, exits 0 silently when local. Imports `_is_local_base_url` / `llamacpp_base_url` from `claude_codex_local.core`.
+- `scripts/fetch_model_card.py` — Step 3 model-card fetcher. Resolves the HF repo from the GGUF path (or `--repo`), pulls structured metadata + README prose, extracts perf-relevant config notes (dropping sampling params), and resolves the upstream `base_model`. Best-effort: a 404 / offline / gated repo prints a note and exits 0 without blocking. `--json` for machine-readable output.
 - `scripts/bench_agent.py` — coding-agent shaped benchmark. Sends five prompt sizes, both cold and warm, parses the server's `timings` field, writes machine-readable JSON.
 - `references/agent-tuning-knobs.md` — every flag this skill might recommend, why, and what it costs.
 - `references/report-format.md` — the final-report template (full version).
