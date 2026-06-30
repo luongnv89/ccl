@@ -208,7 +208,7 @@ HF_TO_LMS_HUB: list[tuple[re.Pattern[str], str]] = [
 
 
 # ---------------------------------------------------------------------------
-# Runtime adapter contract (Task 1.1)
+# Shared runtime adapter contract
 # ---------------------------------------------------------------------------
 
 
