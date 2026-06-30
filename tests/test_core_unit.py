@@ -1283,6 +1283,83 @@ class TestRouter9Adapter:
         assert adapter.run_test("kr/anything") == sentinel
 
 
+class _MalformedResp:
+    status = 200
+    headers: dict[str, str] = {}
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+
+class TestEndpointProbeDiagnostics:
+    def test_network_failure_has_structured_diagnostic(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(urllib.error.URLError("refused")),
+        )
+        result = pb.smoke_test_router9_models()
+        assert result["ok"] is False
+        assert result["error_type"] == "network_error"
+        assert "url" in result
+
+    def test_auth_failure_is_distinct_from_network_failure(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        def fake_urlopen(*a, **kw):
+            raise urllib.error.HTTPError(
+                url="http://localhost/v1/models",
+                code=401,
+                msg="unauthorized",
+                hdrs={},
+                fp=None,
+            )
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        result = pb.smoke_test_openrouter_models()
+        assert result["ok"] is False
+        assert result["error_type"] == "auth_failed"
+        assert result["status"] == 401
+
+    def test_malformed_json_is_reported(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _MalformedResp(b"not-json"),
+        )
+        result = pb.smoke_test_router9_models()
+        assert result["ok"] is False
+        assert result["error_type"] == "malformed_json"
+
+    def test_unexpected_programming_errors_are_not_swallowed(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: (_ for _ in ()).throw(TypeError("bad fake")),
+        )
+        import pytest
+
+        with pytest.raises(TypeError, match="bad fake"):
+            pb.smoke_test_router9_models()
+
+
 class TestSmokeTestRouter9Models:
     def test_returns_ok_with_model_ids(self, monkeypatch):
         import urllib.request

@@ -16,6 +16,7 @@ import sys
 import time
 import warnings
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -210,6 +211,95 @@ HF_TO_LMS_HUB: list[tuple[re.Pattern[str], str]] = [
 # ---------------------------------------------------------------------------
 # Runtime adapter contract (Task 1.1)
 # ---------------------------------------------------------------------------
+
+
+def _probe_openai_models_endpoint(
+    base_url: str,
+    *,
+    service_name: str,
+    timeout: int = 15,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Probe an OpenAI-compatible `/models` endpoint with structured diagnostics.
+
+    Expected endpoint failures return a stable diagnostic shape so callers can
+    distinguish network reachability, authentication/HTTP status, and malformed
+    responses. Unexpected programming errors intentionally propagate instead of
+    being hidden as generic "unreachable" results.
+    """
+    import urllib.error
+    import urllib.request
+
+    base = base_url.rstrip("/")
+    url = f"{base}/models"
+    req = urllib.request.Request(
+        url,
+        headers=headers or {"Content-Type": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            raw_body = resp.read()
+            response_headers = getattr(resp, "headers", {})
+    except urllib.error.HTTPError as exc:
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} endpoint returned HTTP {exc.code} at {url}",
+            "error_type": "auth_failed" if exc.code in (401, 403) else "http_error",
+            "status": exc.code,
+            "url": url,
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} unreachable at {url}: {exc}",
+            "error_type": "network_error",
+            "url": url,
+        }
+
+    if not 200 <= status < 300:
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} endpoint returned HTTP {status} at {url}",
+            "error_type": "http_error",
+            "status": status,
+            "url": url,
+        }
+    try:
+        body = json.loads(raw_body)
+    except (JSONDecodeError, UnicodeDecodeError) as exc:
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} returned malformed JSON at {url}: {exc}",
+            "error_type": "malformed_json",
+            "status": status,
+            "url": url,
+        }
+
+    raw_models = body.get("data")
+    if not isinstance(raw_models, list):
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} returned malformed models payload at {url}",
+            "error_type": "malformed_response",
+            "status": status,
+            "url": url,
+        }
+    models = [m.get("id", "") for m in raw_models if isinstance(m, dict)]
+    return {
+        "ok": True,
+        "models": models,
+        "response": f"{len(models)} models",
+        "status": status,
+        "url": url,
+        "headers": response_headers,
+    }
 
 
 class RuntimeAdapter(Protocol):
@@ -421,23 +511,33 @@ class VLLMAdapter:
         Uses a short fixed timeout (not VLLM_TIMEOUT) so the wizard's discover
         step doesn't hang for a full minute when the server is down.
         """
-        import urllib.request
-
         try:
-            url = self._full_url("/v1/models")
-            req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if resp.status == 200:
-                    return {
-                        "present": True,
-                        "version": resp.headers.get("X-VLLM-Version", "unknown"),
-                        "base_url": self._base_url,
-                    }
-        except urllib.error.URLError:
-            pass
-        except Exception:
-            pass
-        return {"present": False, "version": ""}
+            result = _probe_openai_models_endpoint(
+                f"{self._base_url}/v1",
+                service_name="vLLM",
+                timeout=5,
+                headers=self._build_headers(),
+            )
+        except Exception as exc:
+            return {
+                "present": False,
+                "version": "",
+                "error": f"vLLM probe failed unexpectedly: {exc}",
+                "error_type": "unexpected_exception",
+            }
+        if result.get("ok"):
+            headers = result.get("headers", {})
+            return {
+                "present": True,
+                "version": headers.get("X-VLLM-Version", "unknown"),
+                "base_url": self._base_url,
+            }
+        return {
+            "present": False,
+            "version": "",
+            "error": result.get("error", "vLLM server not reachable"),
+            "error_type": result.get("error_type", "unknown"),
+        }
 
     def healthcheck(self) -> dict[str, Any]:
         """Check vLLM server health and report status."""
@@ -449,6 +549,7 @@ class VLLMAdapter:
                 "Start vLLM server: vllm server --model <model_path>",
             }
         try:
+            import urllib.error
             import urllib.request
 
             url = self._full_url("/v1/models")
@@ -474,24 +575,25 @@ class VLLMAdapter:
         Same short-timeout reasoning as detect(): this is a metadata probe,
         not an inference call, so it shouldn't share VLLM_TIMEOUT.
         """
-        import urllib.request
-
         try:
-            url = self._full_url("/v1/models")
-            req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                body = json.loads(resp.read())
-                models = body.get("data", [])
-                return [
-                    {
-                        "name": m["id"],
-                        "format": "unknown",
-                        "local": _is_local_base_url(self._base_url or ""),
-                    }
-                    for m in models
-                ]
+            result = _probe_openai_models_endpoint(
+                f"{self._base_url}/v1",
+                service_name="vLLM",
+                timeout=5,
+                headers=self._build_headers(),
+            )
         except Exception:
             return []
+        if not result.get("ok"):
+            return []
+        return [
+            {
+                "name": model_id,
+                "format": "unknown",
+                "local": _is_local_base_url(self._base_url or ""),
+            }
+            for model_id in result.get("models", [])
+        ]
 
     def run_test(self, model: str) -> dict[str, Any]:
         """Smoke-test a model via vLLM's chat API."""
@@ -522,22 +624,20 @@ class Router9Adapter:
     name: str = "9router"
 
     def detect(self) -> dict[str, Any]:
-        import urllib.error
-        import urllib.request
-
-        url = f"{ROUTER9_BASE_URL.rstrip('/')}/models"
-        req = urllib.request.Request(
-            url, headers={"Content-Type": "application/json"}, method="GET"
+        result = _probe_openai_models_endpoint(
+            ROUTER9_BASE_URL,
+            service_name="9router",
+            timeout=5,
+            headers={"Content-Type": "application/json"},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if 200 <= resp.status < 300:
-                    return {"present": True, "version": "", "base_url": ROUTER9_BASE_URL}
-        except urllib.error.URLError:
-            pass
-        except Exception:
-            pass
-        return {"present": False, "version": ""}
+        if result.get("ok"):
+            return {"present": True, "version": "", "base_url": ROUTER9_BASE_URL}
+        return {
+            "present": False,
+            "version": "",
+            "error": result.get("error", "9router endpoint not reachable"),
+            "error_type": result.get("error_type", "unknown"),
+        }
 
     def healthcheck(self) -> dict[str, Any]:
         result = smoke_test_router9_models()
@@ -586,22 +686,20 @@ class OpenRouterAdapter:
     name: str = "openrouter"
 
     def detect(self) -> dict[str, Any]:
-        import urllib.error
-        import urllib.request
-
-        url = f"{OPENROUTER_BASE_URL.rstrip('/')}/models"
-        req = urllib.request.Request(
-            url, headers={"Content-Type": "application/json"}, method="GET"
+        result = _probe_openai_models_endpoint(
+            OPENROUTER_BASE_URL,
+            service_name="OpenRouter",
+            timeout=5,
+            headers={"Content-Type": "application/json"},
         )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                if 200 <= resp.status < 300:
-                    return {"present": True, "version": "", "base_url": OPENROUTER_BASE_URL}
-        except urllib.error.URLError:
-            pass
-        except Exception:
-            pass
-        return {"present": False, "version": ""}
+        if result.get("ok"):
+            return {"present": True, "version": "", "base_url": OPENROUTER_BASE_URL}
+        return {
+            "present": False,
+            "version": "",
+            "error": result.get("error", "OpenRouter endpoint not reachable"),
+            "error_type": result.get("error_type", "unknown"),
+        }
 
     def healthcheck(self) -> dict[str, Any]:
         result = smoke_test_openrouter_models()
@@ -1176,21 +1274,12 @@ def smoke_test_router9_models(base_url: str | None = None) -> dict[str, Any]:
 
     Returns: {"ok": bool, "models": list[str], "response"?: str, "error"?: str}
     """
-    import urllib.error
-    import urllib.request
-
-    base = (base_url or ROUTER9_BASE_URL).rstrip("/")
-    url = f"{base}/models"
-    req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read())
-        models = [m.get("id", "") for m in body.get("data", [])]
-        return {"ok": True, "models": models, "response": f"{len(models)} models"}
-    except urllib.error.URLError as exc:
-        return {"ok": False, "error": f"9router unreachable at {url}: {exc}"}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+    return _probe_openai_models_endpoint(
+        base_url or ROUTER9_BASE_URL,
+        service_name="9router",
+        timeout=15,
+        headers={"Content-Type": "application/json"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1211,21 +1300,12 @@ def smoke_test_openrouter_models(base_url: str | None = None) -> dict[str, Any]:
 
     Returns: {"ok": bool, "models": list[str], "response"?: str, "error"?: str}
     """
-    import urllib.error
-    import urllib.request
-
-    base = (base_url or OPENROUTER_BASE_URL).rstrip("/")
-    url = f"{base}/models"
-    req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read())
-        models = [m.get("id", "") for m in body.get("data", [])]
-        return {"ok": True, "models": models, "response": f"{len(models)} models"}
-    except urllib.error.URLError as exc:
-        return {"ok": False, "error": f"OpenRouter unreachable at {url}: {exc}"}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+    return _probe_openai_models_endpoint(
+        base_url or OPENROUTER_BASE_URL,
+        service_name="OpenRouter",
+        timeout=15,
+        headers={"Content-Type": "application/json"},
+    )
 
 
 def smoke_test_openrouter_model(
@@ -3241,35 +3321,52 @@ def _compute_machine_fingerprint(profile: dict) -> str:
     return hashlib.sha256(fingerprint_input.encode()).hexdigest()[:16]
 
 
-def _load_machine_profile_cache() -> dict | None:
-    """Load a cached machine profile if it exists and is not expired."""
-    try:
-        if not MACHINE_PROFILE_CACHE_FILE.exists():
+@dataclass(frozen=True)
+class MachineProfileCache:
+    """Disk cache service for machine_profile() payloads."""
+
+    path: Path = MACHINE_PROFILE_CACHE_FILE
+    ttl_seconds: int = MACHINE_PROFILE_TTL_SECONDS
+
+    def load(self) -> dict[str, Any] | None:
+        """Load a cached machine profile if it exists and is not expired."""
+        try:
+            if not self.path.exists():
+                return None
+            with open(self.path) as f:
+                data = json.load(f)
+            cached_ts = data.get("_cached_at", 0)
+            if time.time() - cached_ts > self.ttl_seconds:
+                return None
+            return data
+        except (json.JSONDecodeError, OSError):
             return None
-        with open(MACHINE_PROFILE_CACHE_FILE) as f:
-            data = json.load(f)
-        # Check TTL
-        cached_ts = data.get("_cached_at", 0)
-        if time.time() - cached_ts > MACHINE_PROFILE_TTL_SECONDS:
-            return None  # Expired
-        return data
-    except (json.JSONDecodeError, OSError):
-        return None
+
+    def save(self, profile: dict[str, Any], fingerprint: str) -> None:
+        """Persist machine profile to cache file with fingerprint and timestamp."""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            cache_data = {
+                **profile,
+                "_cached_at": time.time(),
+                "_fingerprint": fingerprint,
+            }
+            with open(self.path, "w") as f:
+                json.dump(cache_data, f, indent=2)
+        except OSError:
+            pass  # Silently fail — a cache miss is not a failure
+
+
+def _machine_profile_cache_service() -> MachineProfileCache:
+    return MachineProfileCache(MACHINE_PROFILE_CACHE_FILE, MACHINE_PROFILE_TTL_SECONDS)
+
+
+def _load_machine_profile_cache() -> dict | None:
+    return _machine_profile_cache_service().load()
 
 
 def _save_machine_profile_cache(profile: dict, fingerprint: str) -> None:
-    """Persist machine profile to cache file with fingerprint and timestamp."""
-    try:
-        MACHINE_PROFILE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        cache_data = {
-            **profile,
-            "_cached_at": time.time(),
-            "_fingerprint": fingerprint,
-        }
-        with open(MACHINE_PROFILE_CACHE_FILE, "w") as f:
-            json.dump(cache_data, f, indent=2)
-    except OSError:
-        pass  # Silently fail — a cache miss is not a failure
+    _machine_profile_cache_service().save(profile, fingerprint)
 
 
 def _machine_profile_in_process_cache() -> dict | None:
@@ -3351,6 +3448,175 @@ def _endpoint_config_matches(cache: dict[str, Any], current: dict[str, Any]) -> 
     return cached == current
 
 
+@dataclass(frozen=True)
+class MachineProfileProbeResults:
+    """Environment probe results used to assemble a machine profile."""
+
+    llmfit_system: dict[str, Any] | None
+    lms: dict[str, Any]
+    llamacpp: dict[str, Any]
+    hf_cli: dict[str, Any]
+    vllm: dict[str, Any]
+    ollama: dict[str, Any]
+    claude: dict[str, Any]
+    codex: dict[str, Any]
+    pi: dict[str, Any]
+    llmfit: dict[str, Any]
+    router9_info: dict[str, Any]
+    router9_health: dict[str, Any]
+    openrouter_info: dict[str, Any]
+    openrouter_health: dict[str, Any]
+
+
+def _probe_machine_profile_inputs(run_llmfit: bool) -> MachineProfileProbeResults:
+    """Run tool and endpoint probes; no cache decisions or profile assembly."""
+    llmfit_sys = llmfit_system() if run_llmfit else None
+    lms = lms_info()
+    llamacpp = llamacpp_info()
+    hf_cli = huggingface_cli_detect()
+    vllm = vllm_info()
+    ollama = ollama_info()
+    claude_info = command_version("claude")
+    codex_info = command_version("codex")
+    pi_info = command_version("pi")
+    llmfit_info = command_version("llmfit")
+
+    router9_adapter = Router9Adapter()
+    router9_info = router9_adapter.detect()
+    router9_health = (
+        router9_adapter.healthcheck()
+        if router9_info.get("present")
+        else {"ok": False, "detail": router9_info.get("error", "9router endpoint not reachable")}
+    )
+    openrouter_adapter = OpenRouterAdapter()
+    openrouter_info = openrouter_adapter.detect()
+    openrouter_health = (
+        openrouter_adapter.healthcheck()
+        if openrouter_info.get("present")
+        else {
+            "ok": False,
+            "detail": openrouter_info.get("error", "OpenRouter endpoint not reachable"),
+        }
+    )
+    return MachineProfileProbeResults(
+        llmfit_system=llmfit_sys,
+        lms=lms,
+        llamacpp=llamacpp,
+        hf_cli=hf_cli,
+        vllm=vllm,
+        ollama=ollama,
+        claude=claude_info,
+        codex=codex_info,
+        pi=pi_info,
+        llmfit=llmfit_info,
+        router9_info=router9_info,
+        router9_health=router9_health,
+        openrouter_info=openrouter_info,
+        openrouter_health=openrouter_health,
+    )
+
+
+def _assemble_machine_profile(
+    probes: MachineProfileProbeResults, *, run_llmfit: bool
+) -> dict[str, Any]:
+    """Assemble the public machine_profile dict from supplied probe results."""
+    harnesses_present = [
+        name
+        for name, info in (("claude", probes.claude), ("codex", probes.codex), ("pi", probes.pi))
+        if info.get("present")
+    ]
+    engines_present = []
+    if probes.ollama.get("present"):
+        engines_present.append("ollama")
+    if probes.lms.get("present"):
+        engines_present.append("lmstudio")
+    if probes.llamacpp.get("present"):
+        engines_present.append("llamacpp")
+    if probes.vllm.get("present"):
+        engines_present.append("vllm")
+    if probes.router9_info.get("present"):
+        engines_present.append("9router")
+    if probes.openrouter_info.get("present"):
+        engines_present.append("openrouter")
+
+    profile: dict[str, Any] = {
+        "host": {
+            "platform": platform.platform(),
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "tools": {
+            "ollama": {
+                "present": bool(probes.ollama.get("present")),
+                "version": probes.ollama.get("version", ""),
+                "base_url": probes.ollama.get("base_url", ollama_base_url()),
+                "error": probes.ollama.get("error", ""),
+            },
+            "lmstudio": {
+                "present": probes.lms["present"],
+                "version": command_version("lms")["version"] if probes.lms["present"] else "",
+            },
+            "llamacpp": probes.llamacpp,
+            "vllm": {
+                "present": probes.vllm["present"],
+                "version": probes.vllm.get("version", ""),
+                "base_url": probes.vllm["base_url"],
+                "error": probes.vllm.get("error", ""),
+                "error_type": probes.vllm.get("error_type", ""),
+            },
+            "huggingface_cli": probes.hf_cli,
+            "claude": probes.claude,
+            "codex": probes.codex,
+            "pi": probes.pi,
+            "llmfit": probes.llmfit,
+            "9router": {
+                "present": bool(probes.router9_info.get("present")),
+                "version": probes.router9_info.get("version", ""),
+                "base_url": ROUTER9_BASE_URL,
+                "error": probes.router9_info.get("error", ""),
+                "error_type": probes.router9_info.get("error_type", ""),
+            },
+            "openrouter": {
+                "present": bool(probes.openrouter_info.get("present")),
+                "version": probes.openrouter_info.get("version", ""),
+                "base_url": OPENROUTER_BASE_URL,
+                "error": probes.openrouter_info.get("error", ""),
+                "error_type": probes.openrouter_info.get("error_type", ""),
+            },
+        },
+        "presence": {
+            "harnesses": harnesses_present,
+            "engines": engines_present,
+            "llmfit": probes.llmfit.get("present", False),
+            "has_minimum": bool(harnesses_present) and bool(engines_present),
+        },
+        "ollama": probes.ollama,
+        "lmstudio": probes.lms,
+        "llamacpp": probes.llamacpp,
+        "vllm": probes.vllm,
+        "9router": {
+            "present": bool(probes.router9_info.get("present")),
+            "base_url": ROUTER9_BASE_URL,
+            "healthcheck": probes.router9_health,
+            "diagnostic": probes.router9_info.get("error_type", ""),
+        },
+        "openrouter": {
+            "present": bool(probes.openrouter_info.get("present")),
+            "base_url": OPENROUTER_BASE_URL,
+            "healthcheck": probes.openrouter_health,
+            "diagnostic": probes.openrouter_info.get("error_type", ""),
+        },
+        "disk": disk_usage_for(STATE_DIR),
+        "state_dir": str(STATE_DIR),
+    }
+    if probes.llmfit_system:
+        profile["llmfit_system"] = probes.llmfit_system
+    elif not run_llmfit:
+        profile["llmfit_system"] = LLMFIT_SKIPPED_SENTINEL
+    return profile
+
+
 def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     """
     Build (or fetch from cache) the machine profile.
@@ -3366,11 +3632,10 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
     # Check in-process cache first
     cached = _machine_profile_in_process_cache()
     if cached is not None and _endpoint_config_matches(cached, endpoint_signature):
-        # If caller insists on llmfit and the in-proc cache lacks it, fall
-        # through to the disk-cache / scan path so we can refresh.
-        if run_llmfit and _is_llmfit_skipped(cached.get("llmfit_system")):
-            pass
-        else:
+        needs_deferred_llmfit_refresh = run_llmfit and _is_llmfit_skipped(
+            cached.get("llmfit_system")
+        )
+        if not needs_deferred_llmfit_refresh:
             return cached
 
     # Check file-based cache
@@ -3393,128 +3658,9 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
         _set_machine_profile_in_process_cache(file_cache)
         return file_cache
 
-    # Full scan — build profile
-    llmfit_sys = llmfit_system() if run_llmfit else None
-    lms = lms_info()
-    llamacpp = llamacpp_info()
-    hf_cli = huggingface_cli_detect()
-    vllm = vllm_info()
-
-    ollama = ollama_info()
-    claude_info = command_version("claude")
-    codex_info = command_version("codex")
-    pi_info = command_version("pi")
-    llmfit_info = command_version("llmfit")
-
-    # Presence summary used by the wizard's discover step.
-    harnesses_present = [
-        name
-        for name, info in (("claude", claude_info), ("codex", codex_info), ("pi", pi_info))
-        if info.get("present")
-    ]
-    engines_present = []
-    if ollama.get("present"):
-        engines_present.append("ollama")
-    if lms.get("present"):
-        engines_present.append("lmstudio")
-    if llamacpp.get("present"):
-        engines_present.append("llamacpp")
-    if vllm.get("present"):
-        engines_present.append("vllm")
-    router9_info = Router9Adapter().detect()
-    router9_health = (
-        Router9Adapter().healthcheck()
-        if router9_info.get("present")
-        else {
-            "ok": False,
-            "detail": "9router endpoint not reachable",
-        }
-    )
-    if router9_info.get("present"):
-        engines_present.append("9router")
-    openrouter_info = OpenRouterAdapter().detect()
-    openrouter_health = (
-        OpenRouterAdapter().healthcheck()
-        if openrouter_info.get("present")
-        else {
-            "ok": False,
-            "detail": "OpenRouter endpoint not reachable",
-        }
-    )
-    if openrouter_info.get("present"):
-        engines_present.append("openrouter")
-
-    profile: dict[str, Any] = {
-        "host": {
-            "platform": platform.platform(),
-            "system": platform.system(),
-            "release": platform.release(),
-            "machine": platform.machine(),
-        },
-        "tools": {
-            "ollama": {
-                "present": bool(ollama.get("present")),
-                "version": ollama.get("version", ""),
-                "base_url": ollama.get("base_url", ollama_base_url()),
-                "error": ollama.get("error", ""),
-            },
-            "lmstudio": {
-                "present": lms["present"],
-                "version": command_version("lms")["version"] if lms["present"] else "",
-            },
-            "llamacpp": llamacpp,
-            "vllm": {
-                "present": vllm["present"],
-                "version": vllm.get("version", ""),
-                "base_url": vllm["base_url"],
-            },
-            "huggingface_cli": hf_cli,
-            "claude": claude_info,
-            "codex": codex_info,
-            "pi": pi_info,
-            "llmfit": llmfit_info,
-            "9router": {
-                "present": bool(router9_info.get("present")),
-                "version": router9_info.get("version", ""),
-                "base_url": ROUTER9_BASE_URL,
-            },
-            "openrouter": {
-                "present": bool(openrouter_info.get("present")),
-                "version": openrouter_info.get("version", ""),
-                "base_url": OPENROUTER_BASE_URL,
-            },
-        },
-        "presence": {
-            "harnesses": harnesses_present,
-            "engines": engines_present,
-            "llmfit": llmfit_info.get("present", False),
-            "has_minimum": bool(harnesses_present) and bool(engines_present),
-        },
-        "ollama": ollama,
-        "lmstudio": lms,
-        "llamacpp": llamacpp,
-        "vllm": vllm,
-        "9router": {
-            "present": bool(router9_info.get("present")),
-            "base_url": ROUTER9_BASE_URL,
-            "healthcheck": router9_health,
-        },
-        "openrouter": {
-            "present": bool(openrouter_info.get("present")),
-            "base_url": OPENROUTER_BASE_URL,
-            "healthcheck": openrouter_health,
-        },
-        "disk": disk_usage_for(STATE_DIR),
-        "state_dir": str(STATE_DIR),
-    }
-    if llmfit_sys:
-        profile["llmfit_system"] = llmfit_sys
-    elif not run_llmfit:
-        # Caller explicitly deferred the hardware capability scan. Persist a
-        # sentinel so a later call with run_llmfit=True can detect this state
-        # and refresh the cache in place. Without this, the second call would
-        # see a normal-looking cache hit and never re-run llmfit.
-        profile["llmfit_system"] = LLMFIT_SKIPPED_SENTINEL
+    # Full scan — probe inputs and assemble profile through separate seams.
+    probes = _probe_machine_profile_inputs(run_llmfit)
+    profile = _assemble_machine_profile(probes, run_llmfit=run_llmfit)
 
     # Persist to file cache for future runs
     fingerprint = _compute_machine_fingerprint(profile)
