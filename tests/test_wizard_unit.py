@@ -62,6 +62,19 @@ class TestWizardState:
         assert len(backups) == 1
         assert backups[0].read_text() == invalid_content
 
+    def test_load_backs_up_undecodable_state_file(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+        invalid_content = b"\xff\xfe\x00"
+        wiz.STATE_FILE.write_bytes(invalid_content)
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.completed_steps == []
+        assert "Invalid wizard state could not be loaded" in cap.get()
+        backups = list(state_dir.glob("wizard-state.json.invalid-*.bak"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == invalid_content
+
     def test_load_missing_state_file_stays_silent(self, isolated_state):
         _, wiz, _ = isolated_state
         with wiz.console.capture() as cap:
