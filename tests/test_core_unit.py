@@ -1346,6 +1346,18 @@ class TestEndpointProbeDiagnostics:
         assert result["ok"] is False
         assert result["error_type"] == "malformed_json"
 
+    def test_valid_json_wrong_shape_is_reported(self, monkeypatch):
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request,
+            "urlopen",
+            lambda *a, **kw: _MalformedResp(b"[]"),
+        )
+        result = pb.smoke_test_router9_models()
+        assert result["ok"] is False
+        assert result["error_type"] == "malformed_response"
+
     def test_unexpected_programming_errors_are_not_swallowed(self, monkeypatch):
         import urllib.request
 

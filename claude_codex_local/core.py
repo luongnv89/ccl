@@ -281,6 +281,15 @@ def _probe_openai_models_endpoint(
             "url": url,
         }
 
+    if not isinstance(body, dict):
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} returned malformed models payload at {url}",
+            "error_type": "malformed_response",
+            "status": status,
+            "url": url,
+        }
     raw_models = body.get("data")
     if not isinstance(raw_models, list):
         return {
