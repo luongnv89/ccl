@@ -14,11 +14,18 @@ Key ideas:
 from __future__ import annotations
 
 import importlib
+import json
+import os
 import shutil
 import stat
+import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # State isolation — every test gets its own STATE_DIR under tmp_path.
@@ -129,6 +136,116 @@ esac""",
         _write_stub(bdir / name, body)
 
     return bdir, put_stub
+
+
+# ---------------------------------------------------------------------------
+# CLI subprocess runner — shared real-process setup for E2E command tests.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CliRunner:
+    tmp_path: Path
+    fake_bin: tuple[Path, object]
+
+    def _env(self, extra_env: dict[str, str] | None = None) -> dict[str, str]:
+        bdir, _ = self.fake_bin
+        env = os.environ.copy()
+        env["PATH"] = f"{bdir}:/usr/bin:/bin"
+        env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(self.tmp_path / "state")
+        env["HOME"] = str(self.tmp_path / "home")
+        # Keep subprocess smoke tests hermetic even when the developer shell
+        # points CCL at real remote engines.
+        for key in (
+            "OLLAMA_HOST",
+            "LLAMACPP_BASE_URL",
+            "VLLM_BASE_URL",
+            "LMS_BASE_URL",
+        ):
+            env.pop(key, None)
+        (self.tmp_path / "home").mkdir(exist_ok=True)
+        if extra_env:
+            env.update(extra_env)
+        return env
+
+    def spawn_ccl(
+        self, extra_args: list[str] | None = None, extra_env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        """Invoke the ccl entry point in a hermetic subprocess."""
+        return subprocess.run(
+            [sys.executable, "-m", "claude_codex_local.wizard", *(extra_args or [])],
+            capture_output=True,
+            text=True,
+            env=self._env(extra_env),
+            timeout=60,
+            cwd=str(REPO_ROOT),
+        )
+
+    def spawn_core(
+        self,
+        subcommand: str,
+        extra_args: list[str] | None = None,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Invoke claude_codex_local.core as a module in a hermetic subprocess."""
+        return subprocess.run(
+            [sys.executable, "-m", "claude_codex_local.core", subcommand, *(extra_args or [])],
+            capture_output=True,
+            text=True,
+            env=self._env(extra_env),
+            timeout=60,
+            cwd=str(REPO_ROOT),
+        )
+
+    def seed_state(self, harness: str, engine: str, tag: str, *, raw_env=None) -> Path:
+        """Write a minimal wizard-state.json so `ccl run` has wired state to load."""
+        state_dir = self.tmp_path / "state"
+        state_dir.mkdir(exist_ok=True)
+        # Argv mirrors what step 6 wires for each backend; only the shape that
+        # `_build_oneshot_cmd` reads back matters here.
+        if harness == "claude" and engine == "ollama":
+            argv = ["ollama", "launch", "claude", "--model", tag, "--"]
+        elif harness == "claude":
+            argv = ["claude", "--model", tag]
+        elif harness == "codex" and engine == "ollama":
+            argv = [
+                "ollama",
+                "launch",
+                "codex",
+                "--model",
+                tag,
+                "--",
+                "--oss",
+                "--local-provider=ollama",
+            ]
+        else:
+            argv = ["codex", "-m", tag]
+        wire_result = {
+            "argv": argv,
+            "env": {"FAKE_BACKEND_ENV": "1"},
+            "effective_tag": tag,
+            "raw_env": raw_env or {},
+        }
+        state_payload = {
+            "completed_steps": ["1", "2", "3", "4", "5", "6", "6.5", "7", "8"],
+            "primary_harness": harness,
+            "primary_engine": engine,
+            "engine_model_tag": tag,
+            "wire_result": wire_result,
+            "helper_script_path": str(state_dir / "bin" / ("cc" if harness == "claude" else "cx")),
+        }
+        (state_dir / "wizard-state.json").write_text(json.dumps(state_payload) + "\n")
+        return state_dir
+
+
+@pytest.fixture
+def cli_runner(tmp_path, fake_bin):
+    return CliRunner(tmp_path=tmp_path, fake_bin=fake_bin)
+
+
+@pytest.fixture
+def put_stub(fake_bin):
+    return fake_bin[1]
 
 
 # ---------------------------------------------------------------------------
