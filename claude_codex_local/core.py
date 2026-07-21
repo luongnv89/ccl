@@ -4182,55 +4182,81 @@ def merge_models_for_engine(profile: dict[str, Any], engine: str) -> list[dict[s
     return merged
 
 
-def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[str, Any]:
+def select_model_decision(
+    profile: dict[str, Any],
+    mode: str = "balanced",
+    *,
+    candidates: list[dict[str, Any]] | None = None,
+    _lms_responses_api_ok: Callable[[str], bool] | None = None,
+) -> dict[str, Any]:
     """
-    Use llmfit to pick the best coding model for the requested mode.
+    Pure model-selection decision — no side effects, no network calls.
 
-    mode:
-      "balanced" (default) — best score within comfortable memory headroom
-      "fast"               — smallest model that still fits; prioritises tok/s
-      "quality"            — highest-score model regardless of size
+    Given a pre-computed list of llmfit coding candidates (or fetching them
+    via ``llmfit_coding_candidates`` when *candidates* is None), rank them
+    according to the requested mode, then walk the same multi-pass selection
+    logic that ``select_best_model`` uses — **except** smoke tests, model
+    loads, and any other runtime side effects are omitted.
 
-    Priority:
-      1. Already-installed LM Studio MLX model that matches a top llmfit pick.
-      2. Already-installed Ollama model that matches a top llmfit pick.
-      3. Recommend the top llmfit MLX pick for download via lms (if LM Studio present).
-      4. Recommend the top llmfit Ollama pick for download via ollama pull.
-      5. Safe hardcoded fallback if llmfit is unavailable.
+    This function is designed to be unit-testable with supplied input data
+    only (AC1).  The caller may pass mock candidates and a mock
+    ``_lms_responses_api_ok`` to fully isolate the decision path.
+
+    Parameters
+    ----------
+    profile :
+        Machine / tool profile dict (same shape as ``machine_profile()``).
+    mode :
+        ``"balanced"``, ``"fast"``, or ``"quality"``.
+    candidates :
+        Pre-computed llmfit coding candidates.  When ``None`` the function
+        calls ``llmfit_coding_candidates()`` internally (still no side
+        effects — llmfit itself is a subprocess call, not a network call).
+    _lms_responses_api_ok :
+        Optional callable(str) -> bool used to replace the live
+        ``lms_responses_api_ok`` check during testing.  When provided the
+        decision logic uses this function instead of hitting the LM Studio
+        HTTP endpoint.
+
+    Returns
+    -------
+    dict with keys:
+        runtime, selected_model, selected_candidate, rationale, caveats,
+        next_steps, status, modes, model_source ("llmfit" | "fallback")
     """
     mode = mode if mode in ("balanced", "fast", "quality") else "balanced"
 
-    ollama_installed = {
-        m["name"]: m for m in profile.get("ollama", {}).get("models", []) if m.get("local")
-    }
-    lms_data: dict[str, Any] = profile.get("lmstudio", {})
-    lms_present = lms_data.get("present", False)
-    lms_installed = {m["path"]: m for m in lms_data.get("models", [])}
-    lms_usable = lms_present  # set to False if Responses API check fails
-
-    candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
+    if candidates is None:
+        candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
 
     # Re-rank candidates according to mode before any selection pass.
     if mode == "fast" and candidates:
-        # Sort by estimated_tps descending (fastest first), then score as tiebreak.
         candidates = sorted(
             candidates,
             key=lambda c: (-(c.get("estimated_tps") or 0), -(c.get("score") or 0)),
         )
     elif mode == "quality" and candidates:
-        # Sort by score descending (highest quality first).
         candidates = sorted(candidates, key=lambda c: -(c.get("score") or 0))
 
     rationale: list[str] = []
     caveats: list[str] = []
     next_steps: list[str] = []
-    smoke: dict[str, Any] | None = None
     selected_candidate: dict[str, Any] | None = None
     runtime = "ollama"
     status = "ready"
     selected_tag: str = ""
+    model_source: str = "fallback"
 
-    # --- Pass 1: installed LM Studio MLX match ---
+    # Derived local state — extracted from profile, no side effects.
+    ollama_installed: dict[str, dict[str, Any]] = {
+        m["name"]: m for m in profile.get("ollama", {}).get("models", []) if m.get("local")
+    }
+    lms_data: dict[str, Any] = profile.get("lmstudio", {})
+    lms_present = lms_data.get("present", False)
+    lms_installed: dict[str, dict[str, Any]] = {m["path"]: m for m in lms_data.get("models", [])}
+    lms_usable = lms_present  # may be set to False in Pass 1
+
+    # --- Pass 1: installed LM Studio MLX match (decision only, no side effects) ---
     # lms ls can report models under two naming schemes:
     #   lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit  (old/community)
     #   qwen/qwen3-coder-30b                                        (hub short name)
@@ -4248,7 +4274,6 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                 server_up = lms_data.get("server_running", False)
 
                 if not server_up:
-                    # Model is on disk but server is not running — can't use it right now.
                     caveats.append(
                         f"LM Studio has '{matched_key}' installed but the server is not running. "
                         "Falling back to Ollama. Start LM Studio server with: lms server start"
@@ -4258,7 +4283,10 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
 
                 # Verify streaming Responses API works — Codex requires it.
                 # LM Studio may return HTTP 200 for non-streaming but nothing for streaming.
-                if not lms_responses_api_ok(matched_key):
+                # Use the injectable _lms_responses_api_ok when provided (for testability),
+                # otherwise fall back to the live check.
+                api_ok_fn = _lms_responses_api_ok or lms_responses_api_ok
+                if not api_ok_fn(matched_key):
                     caveats.append(
                         f"LM Studio server is running but its /v1/responses streaming endpoint "
                         f"returned no data for '{matched_key}'. "
@@ -4270,27 +4298,17 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                 selected_candidate = c
                 selected_tag = matched_key
                 runtime = "lmstudio"
+                model_source = "llmfit"
                 rationale.append(
                     f"LM Studio is installed and '{matched_key}' is already on disk — "
                     f"using it (score={c.get('score')}, fit={c.get('fit_level')}, "
                     f"~{c.get('estimated_tps')} tok/s, MLX)."
                 )
-                load_result = lms_load_model(matched_key)
-                if load_result.get("ok"):
-                    smoke = smoke_test_lmstudio_model(matched_key)
-                    if smoke.get("ok"):
-                        rationale.append("LM Studio server smoke test passed.")
-                    else:
-                        caveats.append(
-                            f"LM Studio smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
-                        )
-                else:
-                    caveats.append(
-                        f"Could not load model in LM Studio: {load_result.get('error', '')}"
-                    )
+                # NOTE: No lms_load_model() or smoke_test_lmstudio_model() call here.
+                # Those are side effects handled by the orchestrator.
                 break
 
-    # --- Pass 2: installed Ollama match ---
+    # --- Pass 2: installed Ollama match (decision only) ---
     if not selected_tag:
         for c in candidates:
             tag = c.get("ollama_tag")
@@ -4298,26 +4316,17 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                 selected_candidate = c
                 selected_tag = tag
                 runtime = "ollama"
+                model_source = "llmfit"
                 rationale.append(
                     f"llmfit ranked '{c['name']}' as the best-fit coding model "
                     f"(score={c.get('score')}, fit={c.get('fit_level')}, ~{c.get('estimated_tps')} tok/s). "
                     f"Ollama tag '{tag}' is already installed."
                 )
-                smoke = smoke_test_ollama_model(tag)
-                if smoke.get("ok"):
-                    rationale.append("Live ollama smoke test passed.")
-                else:
-                    caveats.append(
-                        f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
-                    )
+                # NOTE: No smoke_test_ollama_model() call here.
                 break
 
     # --- Pass 2b: any installed Ollama model as a best-effort fallback ---
-    # If llmfit candidates don't match any installed tag (e.g. user has a general-purpose
-    # model like qwen3.5:27b), use the largest installed local model rather than requiring
-    # a fresh download.
     if not selected_tag and ollama_installed:
-        # Prefer models with a numeric size suffix (larger = higher quality heuristic).
         def _ollama_size_key(name: str) -> float:
             m = re.search(r"(\d+(?:\.\d+)?)[bB]", name)
             return float(m.group(1)) if m else 0.0
@@ -4325,17 +4334,12 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
         best_installed = max(ollama_installed.keys(), key=_ollama_size_key)
         selected_tag = best_installed
         runtime = "ollama"
+        model_source = "installed-fallback"
         rationale.append(
             f"No llmfit coding model is installed in Ollama. "
             f"Using the largest installed model '{best_installed}' as a best-effort fallback."
         )
-        smoke = smoke_test_ollama_model(best_installed)
-        if smoke.get("ok"):
-            rationale.append("Live ollama smoke test passed.")
-        else:
-            caveats.append(
-                f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
-            )
+        # NOTE: No smoke_test_ollama_model() call here.
 
     # --- Pass 3: LM Studio present and usable but model not installed → recommend MLX download ---
     if not selected_tag and lms_usable and candidates:
@@ -4345,10 +4349,9 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
         if lms_hub or lms_path:
             status = "download-required"
             selected_candidate = best
-            # Use the lmstudio-community path as the selected_model identifier;
-            # the download command uses the Hub name.
             selected_tag = lms_path or lms_hub or best["name"]
             runtime = "lmstudio"
+            model_source = "llmfit"
             rationale.append(
                 f"LM Studio is installed. llmfit recommends '{best['name']}' "
                 f"(score={best.get('score')}, fit={best.get('fit_level')}, "
@@ -4357,8 +4360,6 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
             rationale.append(
                 "MLX runs natively on Apple Silicon — faster and lower power than GGUF/Ollama."
             )
-            # `lms get <hub_name> -y` lets lms pick the right quant automatically.
-            # Do not pass --mlx here; it is only valid for search terms, not exact paths.
             dl_cmd = f"lms get {lms_hub} -y" if lms_hub else f"lms get {lms_path} -y"
             next_steps.append(dl_cmd)
             next_steps.append("lms server start")
@@ -4375,6 +4376,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
             selected_candidate = best
             selected_tag = tag
             runtime = "ollama"
+            model_source = "llmfit"
             rationale.append(
                 f"llmfit recommends '{best['name']}' as the best coding model for this hardware "
                 f"(score={best.get('score')}, fit={best.get('fit_level')}, "
@@ -4409,6 +4411,96 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
         "mode": mode,
         "status": status,
         "selected_model": selected_tag,
+        "selected_candidate": selected_candidate,
+        "modes": modes,
+        "rationale": rationale,
+        "caveats": list(dict.fromkeys(caveats)),
+        "next_steps": next_steps,
+        "model_source": model_source,
+        "candidates_evaluated": len(candidates),
+    }
+
+
+# ---------------------------------------------------------------------------
+# select_best_model — orchestrator that adds side effects on top of the
+# pure decision function.
+# ---------------------------------------------------------------------------
+
+
+def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[str, Any]:
+    """
+    Use llmfit to pick the best coding model for the requested mode.
+
+    This is the **orchestrator**: it delegates the pure ranking/selection
+    decision to :func:`select_model_decision` and then layers runtime side
+    effects (smoke tests, model loads) on top.
+
+    mode:
+      "balanced" (default) — best score within comfortable memory headroom
+      "fast"               — smallest model that still fits; prioritises tok/s
+      "quality"            — highest-score model regardless of size
+
+    Priority:
+      1. Already-installed LM Studio MLX model that matches a top llmfit pick.
+      2. Already-installed Ollama model that matches a top llmfit pick.
+      3. Recommend the top llmfit MLX pick for download via lms (if LM Studio present).
+      4. Recommend the top llmfit Ollama pick for download via ollama pull.
+      5. Safe hardcoded fallback if llmfit is unavailable.
+    """
+    mode = mode if mode in ("balanced", "fast", "quality") else "balanced"
+
+    # Run the pure decision path.
+    decision = select_model_decision(profile, mode)
+
+    rationale: list[str] = list(decision["rationale"])
+    caveats: list[str] = list(decision["caveats"])
+    next_steps: list[str] = list(decision["next_steps"])
+    smoke: dict[str, Any] | None = None
+    selected_candidate = decision.get("selected_candidate")
+    selected_tag = decision["selected_model"]
+    runtime = decision["runtime"]
+    status = decision["status"]
+
+    # --- Side-effect layer: smoke tests and model loads ---
+    # These only run when the decision identified a ready model (not
+    # "download-required"), because there is nothing to smoke-test otherwise.
+    if status == "ready" and selected_tag:
+        if runtime == "lmstudio":
+            load_result = lms_load_model(selected_tag)
+            if load_result.get("ok"):
+                smoke = smoke_test_lmstudio_model(selected_tag)
+                if smoke.get("ok"):
+                    rationale.append("LM Studio server smoke test passed.")
+                else:
+                    caveats.append(
+                        f"LM Studio smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
+                    )
+            else:
+                caveats.append(
+                    f"Could not load model in LM Studio: {load_result.get('error', '')}"
+                )
+        elif runtime == "ollama":
+            smoke = smoke_test_ollama_model(selected_tag)
+            if smoke.get("ok"):
+                rationale.append("Live ollama smoke test passed.")
+            else:
+                caveats.append(
+                    f"Ollama smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
+                )
+
+    modes: dict[str, str | None] = {
+        "balanced": selected_tag,
+        "fast": selected_tag,
+        "quality": selected_tag
+        if (selected_candidate and selected_candidate.get("fit_level") in ("Perfect", "Good"))
+        else None,
+    }
+
+    return {
+        "runtime": runtime,
+        "mode": mode,
+        "status": status,
+        "selected_model": selected_tag,
         "modes": modes,
         "rationale": rationale,
         "caveats": list(dict.fromkeys(caveats)),
@@ -4425,7 +4517,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
             else None,
             "hf_name": selected_candidate.get("name") if selected_candidate else None,
             "best_quant": selected_candidate.get("best_quant") if selected_candidate else None,
-            "candidates_evaluated": len(candidates),
+            "candidates_evaluated": decision["candidates_evaluated"],
         },
         "state_dir": str(STATE_DIR),
     }
