@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
@@ -4401,6 +4402,7 @@ def select_model_decision(
 
     # --- Pass 2b: any installed Ollama model as a best-effort fallback ---
     if not selected_tag and ollama_installed:
+
         def _ollama_size_key(name: str) -> float:
             m = re.search(r"(\d+(?:\.\d+)?)[bB]", name)
             return float(m.group(1)) if m else 0.0
@@ -4550,9 +4552,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                         f"LM Studio smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
                     )
             else:
-                caveats.append(
-                    f"Could not load model in LM Studio: {load_result.get('error', '')}"
-                )
+                caveats.append(f"Could not load model in LM Studio: {load_result.get('error', '')}")
         elif runtime == "ollama":
             smoke = smoke_test_ollama_model(selected_tag)
             if smoke.get("ok"):

@@ -10,14 +10,12 @@ Acceptance criteria:
 
 from __future__ import annotations
 
-import pytest
-
 from claude_codex_local import core as pb
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
 
 def _empty_profile() -> dict:
     return {
@@ -138,9 +136,7 @@ class TestSelectModelDecisionPureInput:
         profile = _empty_profile()
         profile["lmstudio"]["present"] = True
         profile["lmstudio"]["server_running"] = True
-        profile["lmstudio"]["models"] = [
-            {"path": "qwen/qwen3-coder-30b", "local": True}
-        ]
+        profile["lmstudio"]["models"] = [{"path": "qwen/qwen3-coder-30b", "local": True}]
         cands = [
             _make_candidate(
                 score=90,
@@ -267,9 +263,7 @@ class TestSideEffectsInOrchestrator:
         """The orchestrator result includes smoke_test (the pure decision does not)."""
         # Use empty candidates to trigger the hardcoded fallback, which has
         # status="download-required" — smoke tests are only run for ready models.
-        decision = pb.select_model_decision(
-            _empty_profile(), "balanced", candidates=[]
-        )
+        decision = pb.select_model_decision(_empty_profile(), "balanced", candidates=[])
         assert "smoke_test" not in decision
 
         # The orchestrator also won't smoke-test a download-required model,
@@ -285,7 +279,12 @@ class TestSideEffectsInOrchestrator:
             "mode": "balanced",
             "status": "ready",
             "selected_model": "test-model",
-            "selected_candidate": {"score": 80, "fit_level": "Good", "estimated_tps": 50, "name": "Test"},
+            "selected_candidate": {
+                "score": 80,
+                "fit_level": "Good",
+                "estimated_tps": 50,
+                "name": "Test",
+            },
             "modes": {"balanced": "test-model", "fast": "test-model", "quality": "test-model"},
             "rationale": ["test rationale"],
             "caveats": [],
@@ -308,7 +307,12 @@ class TestSideEffectsInOrchestrator:
             "mode": "balanced",
             "status": "download-required",
             "selected_model": "qwen3-coder:30b",
-            "selected_candidate": {"score": 90, "fit_level": "Good", "estimated_tps": 30, "name": "Test"},
+            "selected_candidate": {
+                "score": 90,
+                "fit_level": "Good",
+                "estimated_tps": 30,
+                "name": "Test",
+            },
             "modes": {"balanced": "qwen3-coder:30b", "fast": "qwen3-coder:30b", "quality": None},
             "rationale": ["recommend download"],
             "caveats": [],
@@ -332,7 +336,12 @@ class TestSideEffectsInOrchestrator:
             "mode": "balanced",
             "status": "ready",
             "selected_model": "test-model",
-            "selected_candidate": {"score": 80, "fit_level": "Good", "estimated_tps": 50, "name": "Test"},
+            "selected_candidate": {
+                "score": 80,
+                "fit_level": "Good",
+                "estimated_tps": 50,
+                "name": "Test",
+            },
             "modes": {"balanced": "test-model", "fast": "test-model", "quality": "test-model"},
             "rationale": ["custom rationale from decision"],
             "caveats": [],
@@ -352,7 +361,12 @@ class TestSideEffectsInOrchestrator:
             "mode": "balanced",
             "status": "ready",
             "selected_model": "test-model",
-            "selected_candidate": {"score": 80, "fit_level": "Good", "estimated_tps": 50, "name": "Test"},
+            "selected_candidate": {
+                "score": 80,
+                "fit_level": "Good",
+                "estimated_tps": 50,
+                "name": "Test",
+            },
             "modes": {"balanced": "test-model", "fast": "test-model", "quality": "test-model"},
             "rationale": [],
             "caveats": ["pre-existing caveat"],
@@ -372,8 +386,17 @@ class TestSideEffectsInOrchestrator:
             "mode": "balanced",
             "status": "ready",
             "selected_model": "qwen/qwen3-coder-30b",
-            "selected_candidate": {"score": 80, "fit_level": "Good", "estimated_tps": 50, "name": "Test"},
-            "modes": {"balanced": "qwen/qwen3-coder-30b", "fast": "qwen/qwen3-coder-30b", "quality": "qwen/qwen3-coder-30b"},
+            "selected_candidate": {
+                "score": 80,
+                "fit_level": "Good",
+                "estimated_tps": 50,
+                "name": "Test",
+            },
+            "modes": {
+                "balanced": "qwen/qwen3-coder-30b",
+                "fast": "qwen/qwen3-coder-30b",
+                "quality": "qwen/qwen3-coder-30b",
+            },
             "rationale": ["lmstudio rationale"],
             "caveats": [],
             "next_steps": [],
@@ -389,7 +412,7 @@ class TestSideEffectsInOrchestrator:
         monkeypatch.setattr(
             pb, "smoke_test_lmstudio_model", lambda tag: (smoke_called.append(tag), {"ok": True})[1]
         )
-        result = pb.select_best_model({})
+        pb.select_best_model({})
         assert load_called == ["qwen/qwen3-coder-30b"]
         assert smoke_called == ["qwen/qwen3-coder-30b"]
 
@@ -496,8 +519,17 @@ class TestBackwardCompatibility:
         monkeypatch.setattr(pb, "smoke_test_ollama_model", lambda tag: {"ok": True})
         result = pb.select_best_model(_empty_profile())
         expected_keys = {
-            "runtime", "mode", "status", "selected_model", "modes",
-            "rationale", "caveats", "next_steps", "smoke_test", "llmfit", "state_dir",
+            "runtime",
+            "mode",
+            "status",
+            "selected_model",
+            "modes",
+            "rationale",
+            "caveats",
+            "next_steps",
+            "smoke_test",
+            "llmfit",
+            "state_dir",
         }
         assert expected_keys.issubset(set(result.keys()))
 
@@ -557,7 +589,9 @@ class TestCoverageBothPaths:
             return True
 
         cands = [_make_candidate(lms_hub_name="test/model", ollama_tag="fallback:1b")]
-        pb.select_model_decision(profile, "balanced", candidates=cands, _lms_responses_api_ok=mock_api_ok)
+        pb.select_model_decision(
+            profile, "balanced", candidates=cands, _lms_responses_api_ok=mock_api_ok
+        )
         assert call_log == ["test/model"], "Only the mock should be called"
 
     def test_orchestrator_path_runs_smoke_tests(self, monkeypatch):
@@ -567,7 +601,12 @@ class TestCoverageBothPaths:
             "mode": "balanced",
             "status": "ready",
             "selected_model": "test-model",
-            "selected_candidate": {"score": 80, "fit_level": "Good", "estimated_tps": 50, "name": "Test"},
+            "selected_candidate": {
+                "score": 80,
+                "fit_level": "Good",
+                "estimated_tps": 50,
+                "name": "Test",
+            },
             "modes": {"balanced": "test-model", "fast": "test-model", "quality": "test-model"},
             "rationale": [],
             "caveats": [],
@@ -598,7 +637,12 @@ class TestCoverageBothPaths:
             "mode": "balanced",
             "status": "ready",
             "selected_model": "test-model",
-            "selected_candidate": {"score": 80, "fit_level": "Good", "estimated_tps": 50, "name": "Test"},
+            "selected_candidate": {
+                "score": 80,
+                "fit_level": "Good",
+                "estimated_tps": 50,
+                "name": "Test",
+            },
             "modes": {"balanced": "test-model", "fast": "test-model", "quality": "test-model"},
             "rationale": ["selected"],
             "caveats": [],
