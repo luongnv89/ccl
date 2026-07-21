@@ -10,8 +10,6 @@ Verifies that:
 
 from __future__ import annotations
 
-import pytest
-
 from claude_codex_local.engines import (
     ALL_ENGINES,
     engine_capabilities,
@@ -48,6 +46,7 @@ class TestWizardDerivesFromRegistry:
     def test_wizard_all_engines_not_hardcoded(self):
         """_ALL_ENGINES should not be a literal list (it should be derived)."""
         import inspect
+
         import claude_codex_local.wizard as wiz_module
 
         source = inspect.getsource(wiz_module)
@@ -58,6 +57,7 @@ class TestWizardDerivesFromRegistry:
     def test_wizard_imports_registry(self):
         """Wizard must import ALL_ENGINES from the registry."""
         import inspect
+
         import claude_codex_local.wizard as wiz_module
 
         source = inspect.getsource(wiz_module)
@@ -91,6 +91,7 @@ class TestCoreAdaptersFromRegistry:
     def test_core_no_hardcoded_engine_list(self):
         """core.py must not contain a hardcoded engine list literal."""
         import inspect
+
         import claude_codex_local.core as core_module
 
         source = inspect.getsource(core_module)
@@ -101,6 +102,7 @@ class TestCoreAdaptersFromRegistry:
     def test_core_imports_registry(self):
         """core.py must reference the engine registry."""
         import inspect
+
         import claude_codex_local.core as core_module
 
         source = inspect.getsource(core_module)

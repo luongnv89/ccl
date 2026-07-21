@@ -23,19 +23,6 @@ ALL_ENGINES: tuple[str, ...] = (
     "vllm",
 )
 
-# Mapping from the canonical engine name to the adapter class in core.py.
-# Used by the ``adapters`` CLI command to build the adapter list from the
-# registry instead of a hardcoded ``ALL_ADAPTERS`` list.
-_ADAPTER_REGISTRY: dict[str, str] = {
-    "9router": "claude_codex_local.core.Router9Adapter",
-    "llamacpp": "claude_codex_local.core.LlamaCppAdapter",
-    "lmstudio": "claude_codex_local.core.LMStudioAdapter",
-    "ollama": "claude_codex_local.core.OllamaAdapter",
-    "openrouter": "claude_codex_local.core.OpenRouterAdapter",
-    "vllm": "claude_codex_local.core.VLLMAdapter",
-}
-
-
 class EngineLifecycleError(ValueError):
     pass
 
