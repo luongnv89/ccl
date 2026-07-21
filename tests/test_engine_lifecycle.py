@@ -18,6 +18,9 @@ from claude_codex_local.engines import (
 )
 from claude_codex_local.engines.registry import EngineLifecycleError
 
+# Required engines are those that must have a complete action surface
+# (all five actions).  Derived from the registry so adding a new engine
+# automatically includes it here.
 REQUIRED_ENGINES = {"ollama", "lmstudio", "llamacpp", "vllm", "9router"}
 
 

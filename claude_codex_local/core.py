@@ -738,22 +738,61 @@ class OpenRouterAdapter:
         return {"provider": "openrouter", "extra_flags": []}
 
 
+# Mapping from canonical engine name to its adapter class.
+# Kept alongside ALL_ADAPTERS so the registry stays in sync with core.py.
+_ENGINE_ADAPTER_MAP: dict[str, type] = {
+    "llamacpp": LlamaCppAdapter,
+    "lmstudio": LMStudioAdapter,
+    "ollama": OllamaAdapter,
+    "openrouter": OpenRouterAdapter,
+    "9router": Router9Adapter,
+    "vllm": VLLMAdapter,
+}
+
+# Preference order for adapters (LM Studio MLX first on Apple Silicon).
+# This ordering is preserved from the original hardcoded list.
+_ADAPTER_PREFERENCE_ORDER: tuple[str, ...] = (
+    "lmstudio",
+    "ollama",
+    "llamacpp",
+    "vllm",
+    "9router",
+    "openrouter",
+)
+
+
+def _build_adapters() -> list:
+    """Build the adapter list from the engine registry.
+
+    This replaces the previous hardcoded ``ALL_ADAPTERS`` list so that
+    adapter discovery stays in sync with the engine registry.  The adapter
+    list is built once at import time and cached in ``ALL_ADAPTERS``.
+    """
+    from claude_codex_local.engines import ALL_ENGINES
+
+    # Build a set of engines that are actually registered, so we can
+    # include any new engine in the preference order.
+    registered = set(ALL_ENGINES)
+
+    adapters: list = []
+    # First, emit adapters in the explicit preference order.
+    for engine_name in _ADAPTER_PREFERENCE_ORDER:
+        if engine_name in registered:
+            adapter_cls = _ENGINE_ADAPTER_MAP.get(engine_name)
+            if adapter_cls is not None:
+                adapters.append(adapter_cls())
+    # Then, emit any newly registered engines not in the preference list.
+    seen = set(_ADAPTER_PREFERENCE_ORDER)
+    for engine_name in ALL_ENGINES:
+        if engine_name not in seen:
+            adapter_cls = _ENGINE_ADAPTER_MAP.get(engine_name)
+            if adapter_cls is not None:
+                adapters.append(adapter_cls())
+    return adapters
+
+
 # Registry of adapters in preference order (LM Studio MLX first on Apple Silicon).
-ALL_ADAPTERS: list[
-    OllamaAdapter
-    | LMStudioAdapter
-    | LlamaCppAdapter
-    | VLLMAdapter
-    | Router9Adapter
-    | OpenRouterAdapter
-] = [
-    LMStudioAdapter(),
-    OllamaAdapter(),
-    LlamaCppAdapter(),
-    VLLMAdapter(),
-    Router9Adapter(),
-    OpenRouterAdapter(),
-]
+ALL_ADAPTERS: list = _build_adapters()
 
 
 # ---------------------------------------------------------------------------
