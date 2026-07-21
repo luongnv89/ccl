@@ -393,6 +393,528 @@ class TestSelectBestModel:
 
 
 # ---------------------------------------------------------------------------
+# select_best_model_decision — pure decision without side effects.
+# ---------------------------------------------------------------------------
+
+
+class TestSelectBestModelDecision:
+    """
+    Tests for select_best_model_decision — the pure model-selection decision
+    function that can be tested with supplied input data only (no network,
+    no subprocess, no model loads).
+
+    Covers AC1 (decision-only testing) and AC3 (equivalent recommendations).
+    """
+
+    def _candidates(self, extra: dict | None = None) -> list[dict[str, Any]]:
+        base: dict[str, Any] = {
+            "name": "Qwen/Qwen3-Coder-30B",
+            "score": 90,
+            "fit_level": "Perfect",
+            "estimated_tps": 35,
+            "memory_required_gb": 18,
+            "ollama_tag": "qwen3-coder:30b",
+            "lms_hub_name": "qwen/qwen3-coder-30b",
+            "lms_mlx_path": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",
+            "best_quant": "mlx-4bit",
+        }
+        if extra:
+            base.update(extra)
+        return [base]
+
+    def _empty_profile(self) -> dict[str, Any]:
+        return {"ollama": {"models": []}, "lmstudio": {"models": []}}
+
+    # --- AC1: decision-only — no side effects ---
+
+    def test_returns_selected_model_and_runtime(self, monkeypatch):
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {
+                "present": True,
+                "server_running": True,
+                "models": [{"path": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit"}],
+            },
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["selected_model"] == "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit"
+        assert result["runtime"] == "lmstudio"
+        assert result["status"] == "ready"
+
+    def test_no_side_effects_from_decision_function(self, monkeypatch):
+        """
+        AC1 proof: calling select_best_model_decision must NOT invoke any
+        side-effect functions (smoke_test_*, lms_load_model, etc.).
+        """
+        call_log: list[str] = []
+
+        def fake_smoke_ollama(tag: str) -> dict[str, Any]:
+            call_log.append(f"smoke_ollama:{tag}")
+            return {"ok": True}
+
+        def fake_smoke_lmstudio(tag: str) -> dict[str, Any]:
+            call_log.append(f"smoke_lmstudio:{tag}")
+            return {"ok": True}
+
+        def fake_lms_load(tag: str) -> dict[str, Any]:
+            call_log.append(f"lms_load:{tag}")
+            return {"ok": True}
+
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: self._candidates())
+        monkeypatch.setattr(pb, "smoke_test_ollama_model", fake_smoke_ollama)
+        monkeypatch.setattr(pb, "smoke_test_lmstudio_model", fake_smoke_lmstudio)
+        monkeypatch.setattr(pb, "lms_load_model", fake_lms_load)
+
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        pb.select_best_model_decision(profile, "balanced")
+
+        assert call_log == [], (
+            f"select_best_model_decision called side effects: {call_log}"
+        )
+
+    def test_no_side_effects_ollama_path(self, monkeypatch):
+        """Even when an Ollama model matches, decision() must not smoke-test."""
+        call_log: list[str] = []
+
+        def fake_smoke_ollama(tag: str) -> dict[str, Any]:
+            call_log.append(f"smoke_ollama:{tag}")
+            return {"ok": True}
+
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 90,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 35,
+                    "memory_required_gb": 18,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_hub_name": "qwen/qwen3-coder-30b",
+                    "lms_mlx_path": "lmstudio-community/Qwen3-Coder-30B-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                }
+            ],
+        )
+        monkeypatch.setattr(pb, "smoke_test_ollama_model", fake_smoke_ollama)
+        monkeypatch.setattr(pb, "smoke_test_lmstudio_model", lambda t: {"ok": True})
+        monkeypatch.setattr(pb, "lms_load_model", lambda t: {"ok": True})
+
+        profile = {
+            "ollama": {"models": [{"name": "qwen3-coder:30b", "local": True}]},
+            "lmstudio": {"present": False, "server_running": False, "models": []},
+        }
+        pb.select_best_model_decision(profile, "balanced")
+
+        assert call_log == [], (
+            f"select_best_model_decision called side effects in ollama path: {call_log}"
+        )
+
+    # --- Ranking modes ---
+
+    def test_balanced_mode_picks_by_score(self, monkeypatch):
+        """Balanced mode selects the highest-score candidate."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Model-A",
+                    "score": 95,
+                    "fit_level": "Good",
+                    "estimated_tps": 20,
+                    "memory_required_gb": 20,
+                    "ollama_tag": "model-a",
+                    "lms_hub_name": "model-a",
+                    "lms_mlx_path": "lmstudio-community/model-a-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                },
+                {
+                    "name": "Model-B",
+                    "score": 80,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 50,
+                    "memory_required_gb": 8,
+                    "ollama_tag": "model-b",
+                    "lms_hub_name": "model-b",
+                    "lms_mlx_path": "lmstudio-community/model-b-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                },
+            ],
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["selected_candidate"]["score"] == 95
+        assert result["selected_candidate"]["name"] == "Model-A"
+
+    def test_fast_mode_picks_by_tps(self, monkeypatch):
+        """Fast mode selects the highest-TPS candidate."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Model-Slow",
+                    "score": 95,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 10,
+                    "memory_required_gb": 20,
+                    "ollama_tag": "model-slow",
+                    "lms_hub_name": "model-slow",
+                    "lms_mlx_path": "lmstudio-community/model-slow-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                },
+                {
+                    "name": "Model-Fast",
+                    "score": 80,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 100,
+                    "memory_required_gb": 8,
+                    "ollama_tag": "model-fast",
+                    "lms_hub_name": "model-fast",
+                    "lms_mlx_path": "lmstudio-community/model-fast-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                },
+            ],
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "fast")
+        assert result["selected_candidate"]["name"] == "Model-Fast"
+        assert result["selected_candidate"]["estimated_tps"] == 100
+
+    def test_quality_mode_picks_by_score(self, monkeypatch):
+        """Quality mode selects the highest-score candidate (same as balanced for selection)."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Model-A",
+                    "score": 95,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 20,
+                    "memory_required_gb": 20,
+                    "ollama_tag": "model-a",
+                    "lms_hub_name": "model-a",
+                    "lms_mlx_path": "lmstudio-community/model-a-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                },
+            ],
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "quality")
+        assert result["selected_candidate"]["score"] == 95
+
+    # --- Installed model matching ---
+
+    def test_prefers_installed_lmstudio_over_ollama(self, monkeypatch):
+        """When both LM Studio and Ollama have matching models, LM Studio wins."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": [{"name": "qwen3-coder:30b", "local": True}]},
+            "lmstudio": {
+                "present": True,
+                "server_running": True,
+                "models": [{"path": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit"}],
+            },
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["runtime"] == "lmstudio"
+        assert "lmstudio-community" in result["selected_model"]
+
+    def test_installed_ollama_when_lmstudio_not_present(self, monkeypatch):
+        """When LM Studio is not present, Ollama is used."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": [{"name": "qwen3-coder:30b", "local": True}]},
+            "lmstudio": {"present": False, "server_running": False, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["runtime"] == "ollama"
+        assert result["selected_model"] == "qwen3-coder:30b"
+
+    def test_lmstudio_server_not_running_skips_lmstudio(self, monkeypatch):
+        """LM Studio server not running → falls through to Ollama."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": [{"name": "qwen3-coder:30b", "local": True}]},
+            "lmstudio": {
+                "present": True,
+                "server_running": False,
+                "models": [{"path": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit"}],
+            },
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["runtime"] == "ollama"
+        assert result["selected_model"] == "qwen3-coder:30b"
+
+    # --- Fallback paths ---
+
+    def test_download_required_for_lmstudio_no_installed_model(self, monkeypatch):
+        """LM Studio present but no matching model → download-required."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {
+                "present": True,
+                "server_running": True,
+                "models": [],
+            },
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["status"] == "download-required"
+        assert result["runtime"] == "lmstudio"
+        assert "lmstudio-community" in result["selected_model"]
+
+    def test_download_required_for_ollama_no_installed_model(self, monkeypatch):
+        """No LM Studio, Ollama not installed → download-required with ollama tag."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {"ollama": {"models": []}, "lmstudio": {"present": False, "models": []}}
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["status"] == "download-required"
+        assert result["runtime"] == "ollama"
+        assert result["selected_model"] == "qwen3-coder:30b"
+
+    def test_default_fallback_no_candidates(self, monkeypatch):
+        """No llmfit candidates → safe default qwen2.5-coder:7b."""
+        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
+        profile = {"ollama": {"models": []}, "lmstudio": {"present": False, "models": []}}
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["selected_model"] == "qwen2.5-coder:7b"
+        assert result["runtime"] == "ollama"
+        assert result["selected_candidate"] is None
+
+    def test_best_effort_ollama_fallback(self, monkeypatch):
+        """No llmfit match but installed Ollama model → best-effort fallback."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 90,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 35,
+                    "memory_required_gb": 18,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_hub_name": "qwen/qwen3-coder-30b",
+                    "lms_mlx_path": "lmstudio-community/Qwen3-Coder-30B-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                }
+            ],
+        )
+        profile = {
+            "ollama": {"models": [{"name": "qwen3.5:27b", "local": True}]},
+            "lmstudio": {"present": False, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["runtime"] == "ollama"
+        assert result["selected_model"] == "qwen3.5:27b"
+        assert result["selected_candidate"] is None
+
+    # --- Return shape ---
+
+    def test_returns_all_required_keys(self, monkeypatch):
+        """Decision result must contain all expected keys."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        expected_keys = {
+            "selected_model", "runtime", "mode", "status",
+            "selected_candidate", "candidates_evaluated",
+            "rationale", "caveats", "modes",
+        }
+        assert set(result.keys()) == expected_keys
+
+    def test_modes_dict_includes_all_three_modes(self, monkeypatch):
+        """The modes dict must have balanced, fast, and quality keys."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert set(result["modes"].keys()) == {"balanced", "fast", "quality"}
+        # With Perfect fit, all modes should point to the same model.
+        for m in ("balanced", "fast", "quality"):
+            assert result["modes"][m] == result["selected_model"]
+
+    def test_quality_mode_rejects_low_fit_level(self, monkeypatch):
+        """Quality mode returns None for selected_model when fit is not Perfect/Good."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Model-X",
+                    "score": 95,
+                    "fit_level": "Fair",
+                    "estimated_tps": 5,
+                    "memory_required_gb": 60,
+                    "ollama_tag": "model-x",
+                    "lms_hub_name": "model-x",
+                    "lms_mlx_path": "lmstudio-community/model-x-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                }
+            ],
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "quality")
+        assert result["modes"]["quality"] is None
+        # But balanced/fast should still select it.
+        assert result["modes"]["balanced"] is not None
+        assert result["modes"]["fast"] is not None
+
+    def test_invalid_mode_coerced_to_balanced(self, monkeypatch):
+        """Invalid mode is coerced to 'balanced' in the decision."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "bogus")
+        assert result["mode"] == "balanced"
+
+    def test_rationale_contains_explanation(self, monkeypatch):
+        """The rationale list must contain a human-readable explanation."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: self._candidates(),
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert len(result["rationale"]) > 0
+        assert "LM Studio" in result["rationale"][0]
+
+    def test_candidates_evaluated_count(self, monkeypatch):
+        """candidates_evaluated must equal the number of candidates."""
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {"name": "A", "score": 90, "ollama_tag": "a",
+                 "lms_hub_name": "a", "lms_mlx_path": "lm/a", "best_quant": "q4"},
+                {"name": "B", "score": 80, "ollama_tag": "b",
+                 "lms_hub_name": "b", "lms_mlx_path": "lm/b", "best_quant": "q4"},
+            ],
+        )
+        profile = {
+            "ollama": {"models": []},
+            "lmstudio": {"present": True, "server_running": True, "models": []},
+        }
+        result = pb.select_best_model_decision(profile, "balanced")
+        assert result["candidates_evaluated"] == 2
+
+    def test_orchestrator_calls_side_effects_while_decision_does_not(self, monkeypatch):
+        """
+        AC1 + AC3 proof: select_best_model_decision is pure (no side effects),
+        while select_best_model (the orchestrator) adds smoke tests.
+        """
+        side_effect_log: list[str] = []
+
+        def fake_smoke_ollama(tag: str) -> dict[str, Any]:
+            side_effect_log.append(f"smoke_ollama:{tag}")
+            return {"ok": True, "response": "READY"}
+
+        monkeypatch.setattr(
+            pb,
+            "llmfit_coding_candidates",
+            lambda *a, **k: [
+                {
+                    "name": "Qwen/Qwen3-Coder-30B",
+                    "score": 90,
+                    "fit_level": "Perfect",
+                    "estimated_tps": 35,
+                    "memory_required_gb": 18,
+                    "ollama_tag": "qwen3-coder:30b",
+                    "lms_hub_name": "qwen/qwen3-coder-30b",
+                    "lms_mlx_path": "lmstudio-community/Qwen3-Coder-30B-MLX-4bit",
+                    "best_quant": "mlx-4bit",
+                }
+            ],
+        )
+        monkeypatch.setattr(pb, "smoke_test_ollama_model", fake_smoke_ollama)
+        monkeypatch.setattr(pb, "smoke_test_lmstudio_model", lambda t: {"ok": True})
+        monkeypatch.setattr(pb, "lms_load_model", lambda t: {"ok": True})
+
+        profile = {
+            "ollama": {"models": [{"name": "qwen3-coder:30b", "local": True}]},
+            "lmstudio": {"present": False, "server_running": False, "models": []},
+        }
+
+        # Decision function: no side effects
+        pb.select_best_model_decision(profile, "balanced")
+        assert side_effect_log == [], "decision() should not call smoke tests"
+
+        # Orchestrator: DOES call smoke tests
+        side_effect_log.clear()
+        pb.select_best_model(profile, "balanced")
+        assert "smoke_ollama:qwen3-coder:30b" in side_effect_log, (
+            "select_best_model should call smoke_test_ollama_model"
+        )
+
+
+# ---------------------------------------------------------------------------
 # rank_candidates_for_mode — pure helper used by the wizard profile picker.
 # ---------------------------------------------------------------------------
 
