@@ -9,6 +9,32 @@ from typing import Any
 ACTIONS: tuple[str, ...] = ("install", "config", "optimize", "test", "benchmark")
 _PACKAGE = __package__ or "claude_codex_local.engines"
 
+# Canonical list of every known engine.  New engine packages are discovered
+# automatically by ``engine_names()``, but user-facing UIs (wizard, CLI help)
+# still need a stable, importable list so they can render choices and help
+# text without side-effects.  Keep this in sync with the packages under
+# ``claude_codex_local/engines/``.
+ALL_ENGINES: tuple[str, ...] = (
+    "9router",
+    "llamacpp",
+    "lmstudio",
+    "ollama",
+    "openrouter",
+    "vllm",
+)
+
+# Mapping from the canonical engine name to the adapter class in core.py.
+# Used by the ``adapters`` CLI command to build the adapter list from the
+# registry instead of a hardcoded ``ALL_ADAPTERS`` list.
+_ADAPTER_REGISTRY: dict[str, str] = {
+    "9router": "claude_codex_local.core.Router9Adapter",
+    "llamacpp": "claude_codex_local.core.LlamaCppAdapter",
+    "lmstudio": "claude_codex_local.core.LMStudioAdapter",
+    "ollama": "claude_codex_local.core.OllamaAdapter",
+    "openrouter": "claude_codex_local.core.OpenRouterAdapter",
+    "vllm": "claude_codex_local.core.VLLMAdapter",
+}
+
 
 class EngineLifecycleError(ValueError):
     pass
@@ -29,7 +55,30 @@ def _engine_packages() -> dict[str, str]:
 
 
 def engine_names() -> tuple[str, ...]:
+    """Return every engine package discovered under the engines directory.
+
+    This is the *authoritative* source of engine discovery — any engine
+    package that exports an ``ENGINE_NAME`` (or uses its directory name) is
+    automatically included.  ``ALL_ENGINES`` is the stable, importable list
+    used by user-facing code.
+    """
     return tuple(_engine_packages())
+
+
+def engine_capabilities(engine: str) -> dict[str, Any]:
+    """Return the set of supported actions for a given engine.
+
+    Returns a dict with keys from ``ACTIONS`` mapped to booleans indicating
+    whether the engine provides that action module.
+    """
+    capabilities: dict[str, Any] = {}
+    for action in ACTIONS:
+        try:
+            load_engine_action(engine, action)
+            capabilities[action] = True
+        except EngineLifecycleError:
+            capabilities[action] = False
+    return capabilities
 
 
 def _engine_package(engine: str) -> str:

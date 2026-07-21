@@ -47,6 +47,7 @@ from rich.table import Table
 
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
+from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 
 console = Console()
 
@@ -633,7 +634,9 @@ def _ensure_llmfit() -> bool:
 
 
 _ALL_HARNESSES = ["claude", "codex", "pi"]
-_ALL_ENGINES = ["ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"]
+# Derive the engine list from the registry so adding a new engine package
+# automatically surfaces it in the wizard without touching this file.
+_ALL_ENGINES = list(_REGISTRY_ENGINES)
 
 
 def _persist_targeted_profile_update(profile: dict[str, Any]) -> None:
