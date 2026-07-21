@@ -1723,6 +1723,83 @@ class TestLooksLikeMissingRepoSearchApiError:
 class TestMachineProfileCache:
     """Verify file-based and in-process caching behaviour of machine_profile()."""
 
+    def test_cache_service_load_save_independently(self, isolated_state):
+        """MachineProfileCache is a focused disk-cache seam independent of probes."""
+        pb, _, state_dir = isolated_state
+        cache = pb.MachineProfileCache(state_dir / "profile-cache.json", ttl_seconds=60)
+        cache.save({"host": {"platform": "unit"}, "presence": {}}, "fp-cache")
+
+        loaded = cache.load()
+        assert loaded is not None
+        assert loaded["host"]["platform"] == "unit"
+        assert loaded["_fingerprint"] == "fp-cache"
+
+    def test_profile_assembly_from_supplied_probe_results(self, isolated_state, monkeypatch):
+        """Profile assembly is testable without running any environment probes."""
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "disk_usage_for", lambda path: {"free_bytes": 42})
+        monkeypatch.setattr(pb, "command_version", lambda name, args=None: {"version": "lms-v"})
+        probes = pb.MachineProfileProbeResults(
+            llmfit_system=None,
+            lms={"present": True, "server_running": True, "server_port": 1234, "models": []},
+            llamacpp={"present": False},
+            hf_cli={"present": False},
+            vllm={"present": False, "base_url": "http://localhost:8000"},
+            ollama={"present": True, "version": "0.5", "base_url": "http://localhost:11434"},
+            claude={"present": True},
+            codex={"present": False},
+            pi={"present": False},
+            llmfit={"present": False},
+            router9_info={"present": False, "error_type": "network_error"},
+            router9_health={"ok": False, "detail": "offline"},
+            openrouter_info={"present": True},
+            openrouter_health={"ok": True, "detail": "online"},
+        )
+
+        profile = pb._assemble_machine_profile(probes, run_llmfit=False)
+        assert profile["presence"]["harnesses"] == ["claude"]
+        assert profile["presence"]["engines"] == ["ollama", "lmstudio", "openrouter"]
+        assert profile["tools"]["9router"]["error_type"] == "network_error"
+        assert profile["llmfit_system"] == pb.LLMFIT_SKIPPED_SENTINEL
+
+    def test_probe_inputs_are_separate_from_profile_assembly(self, isolated_state, monkeypatch):
+        """Tool and endpoint probes can be validated as their own service seam."""
+        pb, _, _ = isolated_state
+        monkeypatch.setattr(pb, "llmfit_system", lambda: {"system": {"ram_gb": 64}})
+        monkeypatch.setattr(pb, "lms_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "llamacpp_info", lambda: {"present": False})
+        monkeypatch.setattr(pb, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(pb, "vllm_info", lambda: {"present": False, "base_url": "http://vllm"})
+        monkeypatch.setattr(
+            pb, "ollama_info", lambda: {"present": True, "base_url": "http://ollama"}
+        )
+        monkeypatch.setattr(
+            pb, "command_version", lambda name, args=None: {"present": name == "claude"}
+        )
+
+        class _FakeRouter9:
+            def detect(self):
+                return {"present": False, "error_type": "network_error", "error": "offline"}
+
+            def healthcheck(self):
+                raise AssertionError("healthcheck should not run when absent")
+
+        class _FakeOpenRouter:
+            def detect(self):
+                return {"present": True}
+
+            def healthcheck(self):
+                return {"ok": True, "detail": "ok"}
+
+        monkeypatch.setattr(pb, "Router9Adapter", lambda: _FakeRouter9())
+        monkeypatch.setattr(pb, "OpenRouterAdapter", lambda: _FakeOpenRouter())
+
+        probes = pb._probe_machine_profile_inputs(run_llmfit=True)
+        assert probes.llmfit_system == {"system": {"ram_gb": 64}}
+        assert probes.ollama["present"] is True
+        assert probes.router9_health["detail"] == "offline"
+        assert probes.openrouter_health["ok"] is True
+
     def test_cache_save_load_roundtrip(self, isolated_state, monkeypatch):
         """_save_machine_profile_cache / _load_machine_profile_cache preserve data."""
         import time
