@@ -115,8 +115,9 @@ class WizardState:
     def load(cls) -> WizardState:
         if not STATE_FILE.exists():
             return cls()
+        raw_state = STATE_FILE.read_bytes()
         try:
-            data = json.loads(STATE_FILE.read_text())
+            data = json.loads(raw_state.decode())
             # Migrate pre-rename step IDs (2.1–2.8, 2.65) to the new sequential scheme.
             legacy_to_new = {
                 "2.1": "1",
@@ -138,7 +139,13 @@ class WizardState:
             if data.get("launch_command") == ["cp"]:
                 data["launch_command"] = []
             return cls(**data)
-        except Exception:
+        except Exception as exc:
+            backup_path = _backup_invalid_wizard_state(raw_state)
+            warn(
+                "Invalid wizard state could not be loaded; starting with a blank state. "
+                f"Previous content was backed up to {backup_path} for recovery. "
+                f"Reason: {exc}"
+            )
             return cls()
 
     def mark(self, step: str) -> None:
@@ -196,6 +203,19 @@ def fail(msg: str) -> None:
 
 def info(msg: str) -> None:
     console.print(f"[dim]·[/dim] {msg}")
+
+
+def _backup_invalid_wizard_state(raw_state: bytes) -> Path:
+    """Preserve unreadable wizard state so users can inspect or recover it."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_path = STATE_FILE.with_name(f"{STATE_FILE.name}.invalid-{timestamp}.bak")
+    counter = 1
+    while backup_path.exists():
+        backup_path = STATE_FILE.with_name(f"{STATE_FILE.name}.invalid-{timestamp}-{counter}.bak")
+        counter += 1
+    backup_path.write_bytes(raw_state)
+    return backup_path
 
 
 # ---------------------------------------------------------------------------

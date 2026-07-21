@@ -52,9 +52,48 @@ class TestWizardState:
     def test_load_handles_corrupt_state_file(self, isolated_state):
         _, wiz, state_dir = isolated_state
         state_dir.mkdir(parents=True, exist_ok=True)
-        wiz.STATE_FILE.write_text("this is not json {")
-        state = wiz.WizardState.load()
+        invalid_content = "this is not json {"
+        wiz.STATE_FILE.write_text(invalid_content)
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
         assert state.completed_steps == []
+        assert "Invalid wizard state could not be loaded" in cap.get()
+        backups = list(state_dir.glob("wizard-state.json.invalid-*.bak"))
+        assert len(backups) == 1
+        assert backups[0].read_text() == invalid_content
+
+    def test_load_backs_up_undecodable_state_file(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+        invalid_content = b"\xff\xfe\x00"
+        wiz.STATE_FILE.write_bytes(invalid_content)
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.completed_steps == []
+        assert "Invalid wizard state could not be loaded" in cap.get()
+        backups = list(state_dir.glob("wizard-state.json.invalid-*.bak"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == invalid_content
+
+    def test_load_missing_state_file_stays_silent(self, isolated_state):
+        _, wiz, _ = isolated_state
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.completed_steps == []
+        assert cap.get() == ""
+
+    def test_load_backs_up_migration_errors(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True, exist_ok=True)
+        invalid_content = json.dumps({"unknown_future_field": True})
+        wiz.STATE_FILE.write_text(invalid_content)
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.completed_steps == []
+        assert "Previous content was backed up" in cap.get()
+        backups = list(state_dir.glob("wizard-state.json.invalid-*.bak"))
+        assert len(backups) == 1
+        assert backups[0].read_text() == invalid_content
 
 
 # ---------------------------------------------------------------------------
