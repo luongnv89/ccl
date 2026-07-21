@@ -21,9 +21,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
 # ---------------------------------------------------------------------------
 # Helpers — install a synthetic profile + candidate list into core.
 # ---------------------------------------------------------------------------
@@ -252,8 +249,6 @@ class TestWizardFullFlow:
         assert os.access(helper, os.X_OK)
 
         # Verifies the shell rc was updated with the alias block.
-        from pathlib import Path
-
         rc_path = Path.home() / ".zshrc"
         assert rc_path.exists()
         rc_body = rc_path.read_text()
@@ -319,346 +314,180 @@ class TestWizardFullFlow:
 # ---------------------------------------------------------------------------
 
 
-class TestCliSubprocesses:
-    def _spawn_ccl(self, extra_args=None, tmp_path=None, fake_bin=None, extra_env=None):
-        """Invoke the `ccl` entry point (via `python -m claude_codex_local.wizard`)
-        with an isolated STATE_DIR and a fake PATH."""
-        bdir, _ = fake_bin
-        env = os.environ.copy()
-        env["PATH"] = f"{bdir}:/usr/bin:/bin"
-        env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
-        env["HOME"] = str(tmp_path / "home")
-        # Keep subprocess smoke tests hermetic even when the developer shell
-        # points CCL at real remote engines.
-        for key in (
-            "OLLAMA_HOST",
-            "LLAMACPP_BASE_URL",
-            "VLLM_BASE_URL",
-            "LMS_BASE_URL",
-        ):
-            env.pop(key, None)
-        (tmp_path / "home").mkdir(exist_ok=True)
-        if extra_env:
-            env.update(extra_env)
-        return subprocess.run(
-            [sys.executable, "-m", "claude_codex_local.wizard", *(extra_args or [])],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=60,
-            cwd=str(REPO_ROOT),
-        )
-
-    def _spawn_core(
-        self, subcommand, extra_env=None, tmp_path=None, fake_bin=None, extra_args=None
-    ):
-        """Invoke claude_codex_local.core as a module with isolated STATE_DIR + a fake PATH."""
-        bdir, _ = fake_bin
-        env = os.environ.copy()
-        env["PATH"] = f"{bdir}:/usr/bin:/bin"
-        env["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(tmp_path / "state")
-        env["HOME"] = str(tmp_path / "home")
-        # Keep subprocess smoke tests hermetic even when the developer shell
-        # points CCL at real remote engines.
-        for key in (
-            "OLLAMA_HOST",
-            "LLAMACPP_BASE_URL",
-            "VLLM_BASE_URL",
-            "LMS_BASE_URL",
-        ):
-            env.pop(key, None)
-        (tmp_path / "home").mkdir(exist_ok=True)
-        if extra_env:
-            env.update(extra_env)
-        return subprocess.run(
-            [sys.executable, "-m", "claude_codex_local.core", subcommand, *(extra_args or [])],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=60,
-            cwd=str(REPO_ROOT),
-        )
-
-    def test_core_profile_emits_json(self, fake_bin, tmp_path):
-        result = self._spawn_core("profile", tmp_path=tmp_path, fake_bin=fake_bin)
+class TestCoreSubprocessCommands:
+    def test_core_profile_emits_json(self, cli_runner):
+        result = cli_runner.spawn_core("profile")
         assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert "tools" in data
         assert "presence" in data
 
-    def test_core_recommend_returns_fallback_when_no_candidates(self, fake_bin, tmp_path):
+    def test_core_recommend_returns_fallback_when_no_candidates(self, cli_runner):
         # Default llmfit stub returns {"models": []}, so we should hit pass 5 fallback.
-        result = self._spawn_core("recommend", tmp_path=tmp_path, fake_bin=fake_bin)
+        result = cli_runner.spawn_core("recommend")
         assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert data["status"] == "download-required"
         assert data["selected_model"] == "qwen2.5-coder:7b"
 
-    def test_ccl_doctor_no_state(self, fake_bin, tmp_path):
-        result = self._spawn_ccl(
-            extra_args=["doctor"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+    def test_ccl_doctor_no_state(self, cli_runner):
+        result = cli_runner.spawn_ccl(["doctor"])
         # Without a prior setup, doctor exits 1 and says so on stderr/stdout.
         assert result.returncode == 1
-        combined = result.stdout + result.stderr
-        assert "wizard" in combined.lower() or "setup" in combined.lower()
+        combined = (result.stdout + result.stderr).lower()
+        assert "no wizard state" in combined
+        assert "ccl setup" in combined
 
-    # ----- Tests for ccl setup command -----
 
-    def test_ccl_setup_non_interactive_success(self, fake_bin, tmp_path, monkeypatch):
+class TestCclSetupSubprocessCommand:
+    def test_ccl_setup_non_interactive_success(self, cli_runner, fake_bin, tmp_path):
         """Test ccl setup --non-interactive completes successfully with mocked tools."""
-        # Stub ollama to report the model is ready
-        monkeypatch.setenv(
-            "PATH",
-            f"{fake_bin[0].as_posix()}:fake-ollama-ready",
+        _, put_stub = fake_bin
+        put_stub(
+            "ollama",
+            'case "$1" in\n'
+            '  --version) echo "ollama version 0.1.99" ;;\n'
+            '  list) printf "NAME  ID  SIZE  MODIFIED\\nqwen3-coder:30b  abc  19 GB  now\\n" ;;\n'
+            '  *) echo "READY" ;;\n'
+            "esac\n"
+            "exit 0",
         )
-        result = self._spawn_ccl(
-            extra_args=["setup", "--non-interactive"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-            extra_env={
-                "CLAUDE_CODEX_LOCAL_STATE_DIR": str(tmp_path / "state"),
-                "HOME": str(tmp_path / "home"),
-            },
-        )
-        # Should return 0 on success in non-interactive mode
-        assert result.returncode == 0 or result.returncode in [
-            1,
-            2,
-        ], f"Setup failed: {result.stderr}"
+        result = cli_runner.spawn_ccl(["setup", "--non-interactive"])
+        assert result.returncode == 0, result.stderr
+        state_file = tmp_path / "state" / "wizard-state.json"
+        assert state_file.exists()
+        data = json.loads(state_file.read_text())
+        assert set(data["completed_steps"]) >= {"1", "3", "4", "5", "6", "6.5", "7", "8"}
 
-    def test_ccl_setup_help(self, fake_bin, tmp_path):
+    def test_ccl_setup_help(self, cli_runner):
         """Test ccl setup --help shows usage information."""
-        result = self._spawn_ccl(
-            extra_args=["setup", "--help"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["setup", "--help"])
         assert result.returncode == 0
-        assert "usage" in result.stdout.lower() or "setup" in result.stdout.lower()
+        out = result.stdout.lower()
+        assert "usage:" in out and "setup" in out
 
-    def test_ccl_doctor_help(self, fake_bin, tmp_path):
+
+class TestCclHelpSubprocessCommands:
+    def test_ccl_doctor_help(self, cli_runner):
         """Test ccl doctor --help shows usage information."""
-        result = self._spawn_ccl(
-            extra_args=["doctor", "--help"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["doctor", "--help"])
         assert result.returncode == 0
-        assert "usage" in result.stdout.lower() or "doctor" in result.stdout.lower()
+        out = result.stdout.lower()
+        assert "usage:" in out and "doctor" in out
 
-    def test_ccl_find_model_help(self, fake_bin, tmp_path):
+    def test_ccl_find_model_help(self, cli_runner):
         """Test ccl find-model --help shows usage information."""
-        result = self._spawn_ccl(
-            extra_args=["find-model", "--help"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["find-model", "--help"])
         assert result.returncode == 0
-        assert (
-            "usage" in result.stdout.lower()
-            or "find-model" in result.stdout.lower()
-            or "find" in result.stdout.lower()
-        )
+        out = result.stdout.lower()
+        assert "usage:" in out and "find-model" in out
 
-    def test_ccl_find_model_non_interactive(self, fake_bin, tmp_path, monkeypatch):
-        """Test ccl find-model runs in non-interactive mode."""
-        # Stub llmfit to return a coding model
-        monkeypatch.setenv(
-            "PATH",
-            f"{fake_bin[0].as_posix()}:fake-coding-model",
-        )
-        result = self._spawn_ccl(
-            extra_args=["--non-interactive", "find-model"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-            extra_env={
-                "CLAUDE_CODEX_LOCAL_STATE_DIR": str(tmp_path / "state"),
-                "HOME": str(tmp_path / "home"),
-            },
-        )
-        # Should succeed even with minimal output
-        assert result.returncode == 0 or result.returncode == 1, (
-            f"find-model failed: {result.stderr}"
-        )
 
-    # ----- Edge cases for ccl doctor command -----
+class TestCclFindModelSubprocessCommand:
+    def test_ccl_find_model_non_interactive_reports_no_pick(self, cli_runner):
+        """Test ccl find-model returns its documented no-recommendation failure."""
+        result = cli_runner.spawn_ccl(["--non-interactive", "find-model"])
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "find-model" in combined and "ranking models" in combined
 
-    def test_ccl_doctor_with_existing_state(self, fake_bin, tmp_path, monkeypatch, capsys):
-        """Test ccl doctor after a successful setup shows clean state."""
-        # First, run setup to create state
-        monkeypatch.setattr(
-            sys, "argv", ["claude_codex_local.wizard", "setup", "--non-interactive"]
-        )
 
-        result = self._spawn_ccl(
-            extra_args=["doctor"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Doctor should return 0 or 1 (0 if clean, 1 if issues found)
-        assert result.returncode in [0, 1]
+class TestCclDoctorSubprocessCommand:
+    def test_ccl_doctor_with_existing_state_reports_missing_helper(self, cli_runner):
+        """Doctor with incomplete state reports specific setup drift."""
+        cli_runner.seed_state("claude", "lmstudio", "qwen3-coder:30b")
+        result = cli_runner.spawn_ccl(["doctor"])
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "helper script" in combined and "missing" in combined
 
-    def test_ccl_doctor_no_state_returns_2(self, fake_bin, tmp_path):
+    def test_ccl_doctor_no_state_returns_1(self, cli_runner):
         """Test ccl doctor with no state file returns error."""
-        result = self._spawn_ccl(
-            extra_args=["doctor"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Should fail when no state exists
-        assert result.returncode != 0 or "no state" in (result.stdout + result.stderr).lower()
+        result = cli_runner.spawn_ccl(["doctor"])
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "no wizard state" in combined
+        assert "ccl setup" in combined
 
-    # ----- Edge cases for ccl setup command -----
 
-    def test_ccl_setup_resume_flag(self, fake_bin, tmp_path, monkeypatch):
+class TestCclSetupFlagSubprocessCommand:
+    def test_ccl_setup_resume_flag(self, cli_runner, tmp_path):
         """Test ccl setup --resume flag is recognized."""
-        result = self._spawn_ccl(
-            extra_args=["--resume", "setup", "--non-interactive"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Should recognize the flag (may fail for other reasons but not unrecognized flag)
-        assert "unrecognized arguments: --resume" not in result.stderr
+        result = cli_runner.spawn_ccl(["--resume", "setup", "--non-interactive"])
+        assert result.returncode == 1
+        assert "non-interactive find-model failed" in result.stdout.lower()
 
-    def test_ccl_setup_force_harness(self, fake_bin, tmp_path, monkeypatch):
+    def test_ccl_setup_force_harness(self, cli_runner, tmp_path):
         """Test ccl setup --harness flag is recognized."""
-        result = self._spawn_ccl(
-            extra_args=["--harness", "claude", "setup", "--non-interactive"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Should recognize the flag
-        assert "unrecognized arguments: --harness" not in result.stderr
+        result = cli_runner.spawn_ccl(["setup", "--harness", "claude", "--non-interactive"])
+        assert result.returncode == 1
+        assert "non-interactive find-model failed" in result.stdout.lower()
 
-    def test_ccl_setup_force_engine(self, fake_bin, tmp_path, monkeypatch):
+    def test_ccl_setup_force_engine(self, cli_runner, tmp_path):
         """Test ccl setup --engine flag is recognized."""
-        result = self._spawn_ccl(
-            extra_args=["--engine", "ollama", "setup", "--non-interactive"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Should recognize the flag
-        assert "unrecognized arguments: --engine" not in result.stderr
+        result = cli_runner.spawn_ccl(["setup", "--engine", "ollama", "--non-interactive"])
+        assert result.returncode == 1
+        assert "non-interactive find-model failed" in result.stdout.lower()
 
-    # ----- Comprehensive test for ccl find-model command -----
 
-    def test_ccl_find_model_standalone_with_models(self, fake_bin, tmp_path, monkeypatch):
-        """Test ccl find-model returns model candidates when available."""
+class TestCclFindModelScenarios:
+    def test_ccl_find_model_standalone_with_models_requires_tty(self, cli_runner, fake_bin):
+        """Interactive ccl find-model surfaces candidates before failing without a TTY."""
 
         # Configure llmfit stub to return coding models
         def custom_llmfit():
             return """case "$1" in
   --version) echo "llmfit 1.2.3" ;;
   system) echo '{"system": {"ram_gb": 32, "gpu": "apple-m2"}}' ;;
-  fit) echo '{"models": [{"name": "test-model", "score": 90}]}' ;;
-  info) echo '{"models": [{"name": "test-model", "score": 90}]}' ;;
-  coding) echo '{"models": [{"name": "coding-model", "score": 95}]}' ;;
+  --ram) echo '{"models": [{"name": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "category": "Coding", "score": 95, "best_quant": "mlx-4bit"}]}' ;;
+  fit) echo '{"models": [{"name": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "category": "Coding", "score": 95, "best_quant": "mlx-4bit"}]}' ;;
+  info) echo '{"models": [{"name": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "category": "Coding", "score": 95, "best_quant": "mlx-4bit"}]}' ;;
+  coding) echo '{"models": [{"name": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "category": "Coding", "score": 95, "best_quant": "mlx-4bit"}]}' ;;
   *) exit 0 ;;
 esac"""
 
-        monkeypatch.setenv("PATH", f"{fake_bin[0].as_posix()}")
-        (fake_bin[0] / "llmfit").write_text(custom_llmfit(), encoding="utf-8")
-        (fake_bin[0] / "llmfit").chmod(0o755)
+        _, put_stub = fake_bin
+        put_stub("llmfit", custom_llmfit())
 
-        result = self._spawn_ccl(
-            extra_args=["find-model"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Should at least not error on argument parsing
-        assert "unrecognized arguments" not in result.stderr.lower()
+        result = cli_runner.spawn_ccl(["find-model"])
+        assert result.returncode == 1
+        assert "Input is not a terminal" in result.stderr
+        assert "Running llmfit to rank coding models" in result.stdout
 
-    def test_ccl_find_model_no_models(self, fake_bin, tmp_path, monkeypatch):
+    def test_ccl_find_model_no_models(self, cli_runner):
         """Test ccl find-model handles case with no models found."""
         # llmfit already returns empty models by default
-        result = self._spawn_ccl(
-            extra_args=["find-model", "--non-interactive"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
-        # Should complete without crashing
-        assert result.returncode in [0, 1, 2]
+        result = cli_runner.spawn_ccl(["find-model"])
+        assert result.returncode == 1
+        combined = (result.stdout + result.stderr).lower()
+        assert "find-model" in combined and "ranking models" in combined
 
-    def test_ccl_all_commands_help(self, fake_bin, tmp_path):
+    def test_ccl_all_commands_help(self, cli_runner):
         """Test that all ccl subcommands have help available."""
         commands = ["setup", "doctor", "find-model", "run"]
         for cmd in commands:
-            result = self._spawn_ccl(
-                extra_args=[cmd, "--help"],
-                tmp_path=tmp_path,
-                fake_bin=fake_bin,
-            )
-            # Each command should at least show some help output
-            assert result.returncode in [0, 2], f"{cmd} --help failed"
+            result = cli_runner.spawn_ccl([cmd, "--help"])
+            assert result.returncode == 0, f"{cmd} --help failed: {result.stderr}"
+            assert "usage:" in result.stdout.lower()
 
-    # ----- ccl run subcommand (issue #70) -----
 
-    def _seed_state(self, tmp_path, harness, engine, tag, *, raw_env=None):
-        """Write a minimal wizard-state.json so `ccl run` has wired state to load."""
-        state_dir = tmp_path / "state"
-        state_dir.mkdir(exist_ok=True)
-        # Argv mirrors what step 6 wires for each backend; only the shape that
-        # `_build_oneshot_cmd` reads back matters here.
-        if harness == "claude" and engine == "ollama":
-            argv = ["ollama", "launch", "claude", "--model", tag, "--"]
-        elif harness == "claude":
-            argv = ["claude", "--model", tag]
-        elif harness == "codex" and engine == "ollama":
-            argv = [
-                "ollama",
-                "launch",
-                "codex",
-                "--model",
-                tag,
-                "--",
-                "--oss",
-                "--local-provider=ollama",
-            ]
-        else:
-            argv = ["codex", "-m", tag]
-        wire_result = {
-            "argv": argv,
-            "env": {"FAKE_BACKEND_ENV": "1"},
-            "effective_tag": tag,
-            "raw_env": raw_env or {},
-        }
-        state_payload = {
-            "completed_steps": ["1", "2", "3", "4", "5", "6", "6.5", "7", "8"],
-            "primary_harness": harness,
-            "primary_engine": engine,
-            "engine_model_tag": tag,
-            "wire_result": wire_result,
-            "helper_script_path": str(state_dir / "bin" / ("cc" if harness == "claude" else "cx")),
-        }
-        (state_dir / "wizard-state.json").write_text(json.dumps(state_payload) + "\n")
-        return state_dir
-
-    def test_ccl_run_help(self, fake_bin, tmp_path):
+class TestCclRunSubprocessCommand:
+    def test_ccl_run_help(self, cli_runner):
         """`ccl run --help` should describe the subcommand and -p/--prompt."""
-        result = self._spawn_ccl(
-            extra_args=["run", "--help"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["run", "--help"])
         assert result.returncode == 0
         out = result.stdout.lower()
         assert "prompt" in out and "-p" in result.stdout
 
-    def test_ccl_run_no_state_errors(self, fake_bin, tmp_path):
+    def test_ccl_run_no_state_errors(self, cli_runner):
         """`ccl run -p ...` without prior setup must fail cleanly, not crash."""
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", "hello"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["run", "-p", "hello"])
         assert result.returncode == 1
         combined = (result.stdout + result.stderr).lower()
-        assert "no wizard state" in combined or "ccl setup" in combined
+        assert "no wizard state" in combined
+        assert "ccl setup" in combined
 
-    def test_ccl_run_with_prompt_claude_ollama(self, fake_bin, tmp_path):
+    def test_ccl_run_with_prompt_claude_ollama(self, cli_runner, fake_bin, tmp_path):
         """
         With prompt + Claude/Ollama state seeded, `ccl run` should dispatch to
         `ollama launch claude ... -- -p <prompt> --model <tag>` (mirrors verify
@@ -672,19 +501,15 @@ esac"""
             'case "$1" in --version) echo "ollama version 0.1.99";; esac\n'
             "exit 0",
         )
-        self._seed_state(tmp_path, "claude", "ollama", "qwen3-coder:30b")
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", "test prompt 1"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        cli_runner.seed_state("claude", "ollama", "qwen3-coder:30b")
+        result = cli_runner.spawn_ccl(["run", "-p", "test prompt 1"])
         assert result.returncode == 0, result.stderr
         recorded = argv_log.read_text()
         # The `--` separator + `-p PROMPT` pattern is what makes the prompt
         # land on the claude binary instead of being eaten by `ollama launch`.
         assert "launch claude --model qwen3-coder:30b -- -p test prompt 1" in recorded
 
-    def test_ccl_run_with_prompt_codex_ollama(self, fake_bin, tmp_path):
+    def test_ccl_run_with_prompt_codex_ollama(self, cli_runner, fake_bin, tmp_path):
         """
         Codex+Ollama needs the special exec-after-`--` shape so `--oss` and
         `--local-provider=ollama` land AFTER the `exec` subcommand. Without
@@ -699,17 +524,13 @@ esac"""
             'case "$1" in --version) echo "ollama version 0.1.99";; esac\n'
             "exit 0",
         )
-        self._seed_state(tmp_path, "codex", "ollama", "qwen3-coder:30b")
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", "say hi"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        cli_runner.seed_state("codex", "ollama", "qwen3-coder:30b")
+        result = cli_runner.spawn_ccl(["run", "-p", "say hi"])
         assert result.returncode == 0, result.stderr
         recorded = argv_log.read_text()
         assert "exec --skip-git-repo-check --oss --local-provider=ollama say hi" in recorded
 
-    def test_ccl_run_with_prompt_codex_lmstudio(self, fake_bin, tmp_path):
+    def test_ccl_run_with_prompt_codex_lmstudio(self, cli_runner, fake_bin, tmp_path):
         """Codex+LM Studio path uses `codex exec --skip-git-repo-check -m TAG PROMPT`."""
         bdir, put_stub = fake_bin
         argv_log = tmp_path / "codex-argv.log"
@@ -717,17 +538,13 @@ esac"""
             "codex",
             f'echo "$@" > {shlex.quote(str(argv_log))}\nexit 0',
         )
-        self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", "test prompt 2"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        cli_runner.seed_state("codex", "lmstudio", "qwen3-coder:30b")
+        result = cli_runner.spawn_ccl(["run", "-p", "test prompt 2"])
         assert result.returncode == 0, result.stderr
         recorded = argv_log.read_text()
         assert "exec --skip-git-repo-check -m qwen3-coder:30b test prompt 2" in recorded
 
-    def test_ccl_run_long_form_prompt(self, fake_bin, tmp_path):
+    def test_ccl_run_long_form_prompt(self, cli_runner, fake_bin, tmp_path):
         """Argparse aliasing — `--prompt` must work the same as `-p`."""
         bdir, put_stub = fake_bin
         argv_log = tmp_path / "codex-argv.log"
@@ -735,28 +552,20 @@ esac"""
             "codex",
             f'echo "$@" > {shlex.quote(str(argv_log))}\nexit 0',
         )
-        self._seed_state(tmp_path, "codex", "lmstudio", "qwen3-coder:30b")
-        result = self._spawn_ccl(
-            extra_args=["run", "--prompt", "long form test"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        cli_runner.seed_state("codex", "lmstudio", "qwen3-coder:30b")
+        result = cli_runner.spawn_ccl(["run", "--prompt", "long form test"])
         assert result.returncode == 0, result.stderr
         assert "long form test" in argv_log.read_text()
 
-    def test_ccl_run_empty_prompt_rejected(self, fake_bin, tmp_path):
+    def test_ccl_run_empty_prompt_rejected(self, cli_runner):
         """Empty `-p ""` is a footgun for shell-script callers — reject it."""
-        self._seed_state(tmp_path, "claude", "lmstudio", "qwen3-coder:30b")
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", ""],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        cli_runner.seed_state("claude", "lmstudio", "qwen3-coder:30b")
+        result = cli_runner.spawn_ccl(["run", "-p", ""])
         assert result.returncode == 1
         combined = (result.stdout + result.stderr).lower()
         assert "prompt" in combined and "empty" in combined
 
-    def test_ccl_run_with_raw_env_keyfile(self, fake_bin, tmp_path):
+    def test_ccl_run_with_raw_env_keyfile(self, cli_runner, fake_bin, tmp_path):
         """
         9router/vllm key-on-disk path: `raw_env` shell expressions
         (`"$(cat /path)"`) must be resolved at exec-time without leaking the
@@ -774,18 +583,13 @@ esac"""
             "exit 0",
         )
         key_expr = f'"$(cat {shlex.quote(str(keyfile))})"'
-        self._seed_state(
-            tmp_path,
+        cli_runner.seed_state(
             "claude",
             "9router",
             "kr/claude-sonnet-4.5",
             raw_env={"ANTHROPIC_API_KEY": key_expr, "ANTHROPIC_AUTH_TOKEN": key_expr},
         )
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", "ping"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["run", "-p", "ping"])
         assert result.returncode == 0, result.stderr
         leaked = env_log.read_text()
         assert "ANTHROPIC_API_KEY=sk-router9-test-secret" in leaked
@@ -793,7 +597,7 @@ esac"""
         # Critical: the literal `$(cat ...)` expression must NOT reach the harness.
         assert "$(cat" not in leaked
 
-    def test_ccl_run_with_openrouter_raw_env_keyfile(self, fake_bin, tmp_path):
+    def test_ccl_run_with_openrouter_raw_env_keyfile(self, cli_runner, fake_bin, tmp_path):
         """
         OpenRouter key-on-disk path: same security boundary as 9router. The
         `$(cat ...)` shell expression must be resolved at exec-time so the
@@ -811,18 +615,13 @@ esac"""
             "exit 0",
         )
         key_expr = f'"$(cat {shlex.quote(str(keyfile))})"'
-        self._seed_state(
-            tmp_path,
+        cli_runner.seed_state(
             "claude",
             "openrouter",
             "anthropic/claude-sonnet-4.6",
             raw_env={"ANTHROPIC_API_KEY": key_expr, "ANTHROPIC_AUTH_TOKEN": key_expr},
         )
-        result = self._spawn_ccl(
-            extra_args=["run", "-p", "ping"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["run", "-p", "ping"])
         assert result.returncode == 0, result.stderr
         leaked = env_log.read_text()
         assert "ANTHROPIC_API_KEY=openrouter-test-secret" in leaked
@@ -830,12 +629,12 @@ esac"""
         # Critical: the literal `$(cat ...)` expression must NOT reach the harness.
         assert "$(cat" not in leaked
 
-    def test_ccl_run_no_prompt_execs_helper(self, fake_bin, tmp_path):
+    def test_ccl_run_no_prompt_execs_helper(self, cli_runner, tmp_path):
         """
         Without -p, `ccl run` should defer to the helper script — preserving
         the existing interactive-launch UX (AC #4 of issue #70).
         """
-        state_dir = self._seed_state(tmp_path, "claude", "lmstudio", "qwen3-coder:30b")
+        state_dir = cli_runner.seed_state("claude", "lmstudio", "qwen3-coder:30b")
         helper_dir = state_dir / "bin"
         helper_dir.mkdir(exist_ok=True)
         helper = helper_dir / "cc"
@@ -844,10 +643,6 @@ esac"""
             f"#!/usr/bin/env bash\necho invoked > {shlex.quote(str(marker))}\nexit 0\n"
         )
         helper.chmod(0o755)
-        result = self._spawn_ccl(
-            extra_args=["run"],
-            tmp_path=tmp_path,
-            fake_bin=fake_bin,
-        )
+        result = cli_runner.spawn_ccl(["run"])
         assert result.returncode == 0, result.stderr
         assert marker.exists(), "helper script should have been invoked"
