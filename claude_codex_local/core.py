@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
@@ -2735,19 +2736,71 @@ def detect_llamacpp_mtp(
     }
 
 
+@dataclass
+class LlamaServerConfig:
+    """Configuration object for llama-server launch arguments.
+
+    Groups all server-launch parameters into a single, cohesive value so
+    call sites pass one object instead of a long list of primitives.
+
+    Fields mirror the keyword arguments of :func:`build_llamacpp_server_args`
+    with the same defaults.
+
+    Attributes:
+        binary:       Path to the ``llama-server`` binary.
+        model_path:   Path to the GGUF model file.
+        port:         HTTP listen port (default: ``LLAMACPP_SERVER_PORT``).
+        host:         HTTP listen host (default: ``LLAMACPP_SERVER_HOST``).
+        ctx_size:     Context size in tokens (default: ``LLAMACPP_CTX_SIZE``).
+        n_gpu_layers: Number of layers to offload to GPU (default: ``0``).
+        threads:      CPU thread count (default: ``4``).
+        mtp:          MTP spec-decoding dict or ``None``.
+        extra_argv:   Additional CLI flags to append at the tail.
+    """
+
+    binary: str = ""
+    model_path: str = ""
+    port: int = LLAMACPP_SERVER_PORT
+    host: str = LLAMACPP_SERVER_HOST
+    ctx_size: int = LLAMACPP_CTX_SIZE
+    n_gpu_layers: int = 0
+    threads: int = 4
+    mtp: dict[str, Any] | None = None
+    extra_argv: list[str] | None = None
+
+    def to_kwargs(self) -> dict[str, Any]:
+        """Return a kwargs dict suitable for :func:`build_llamacpp_server_args`."""
+        return {
+            "binary": self.binary,
+            "model_path": self.model_path,
+            "port": self.port,
+            "host": self.host,
+            "ctx_size": self.ctx_size,
+            "n_gpu_layers": self.n_gpu_layers,
+            "threads": self.threads,
+            "mtp": self.mtp,
+            "extra_argv": self.extra_argv,
+        }
+
+
 def build_llamacpp_server_args(
+    config: LlamaServerConfig | None = None,
     *,
-    binary: str,
-    model_path: str,
-    port: int = LLAMACPP_SERVER_PORT,
-    host: str = LLAMACPP_SERVER_HOST,
-    ctx_size: int = LLAMACPP_CTX_SIZE,
-    n_gpu_layers: int = 0,
-    threads: int = 4,
+    binary: str | None = None,
+    model_path: str | None = None,
+    port: int | None = None,
+    host: str | None = None,
+    ctx_size: int | None = None,
+    n_gpu_layers: int | None = None,
+    threads: int | None = None,
     mtp: dict[str, Any] | None = None,
     extra_argv: list[str] | None = None,
 ) -> list[str]:
     """Compose the argv list for llama-server with the wizard's defaults.
+
+    Accepts either a :class:`LlamaServerConfig` object (preferred) or the
+    individual keyword arguments for backward compatibility.  When both are
+    supplied the explicit keyword arguments take precedence.
 
     When ``mtp`` is supplied and ``mtp["enabled"]`` is true, append the MTP
     spec-decoding flags (``--spec-type draft-mtp --spec-draft-n-max N``).
@@ -2755,26 +2808,47 @@ def build_llamacpp_server_args(
     additional flags; the MTP conflict guard in :func:`detect_llamacpp_mtp`
     is expected to have already inspected the same argv.
     """
-    extras = list(extra_argv) if extra_argv else []
+    if config is not None:
+        c_binary = binary if binary is not None else config.binary
+        c_model_path = model_path if model_path is not None else config.model_path
+        c_port = port if port is not None else config.port
+        c_host = host if host is not None else config.host
+        c_ctx_size = ctx_size if ctx_size is not None else config.ctx_size
+        c_n_gpu_layers = n_gpu_layers if n_gpu_layers is not None else config.n_gpu_layers
+        c_threads = threads if threads is not None else config.threads
+        c_mtp = mtp if mtp is not None else config.mtp
+        c_extra_argv = extra_argv if extra_argv is not None else config.extra_argv
+    else:
+        c_binary = binary or ""
+        c_model_path = model_path or ""
+        c_port = port if port is not None else LLAMACPP_SERVER_PORT
+        c_host = host if host is not None else LLAMACPP_SERVER_HOST
+        c_ctx_size = ctx_size if ctx_size is not None else LLAMACPP_CTX_SIZE
+        c_n_gpu_layers = n_gpu_layers if n_gpu_layers is not None else 0
+        c_threads = threads if threads is not None else 4
+        c_mtp = mtp
+        c_extra_argv = extra_argv
+
+    extras = list(c_extra_argv) if c_extra_argv else []
     has_threads = "--threads" in extras
     has_spec_n = "--spec-draft-n-max" in extras
     argv = [
-        binary,
+        c_binary,
         "--model",
-        model_path,
+        c_model_path,
         "--host",
-        host,
+        c_host,
         "--port",
-        str(port),
+        str(c_port),
         "--ctx-size",
-        str(ctx_size),
+        str(c_ctx_size),
         "--n-gpu-layers",
-        str(n_gpu_layers),
+        str(c_n_gpu_layers),
     ]
     if not has_threads:
-        argv += ["--threads", str(threads)]
-    if mtp and mtp.get("enabled"):
-        spec_n = int(mtp.get("spec_draft_n_max", LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX))
+        argv += ["--threads", str(c_threads)]
+    if c_mtp and c_mtp.get("enabled"):
+        spec_n = int(c_mtp.get("spec_draft_n_max", LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX))
         argv += ["--spec-type", "draft-mtp"]
         if not has_spec_n:
             argv += ["--spec-draft-n-max", str(spec_n)]
@@ -2952,7 +3026,7 @@ def llamacpp_start_server(
     gpu = detect_llamacpp_gpu_offload(profile)
     threads = detect_llamacpp_threads(profile)
     mtp = detect_llamacpp_mtp(model_path, extra_argv=extra_argv)
-    argv = build_llamacpp_server_args(
+    server_config = LlamaServerConfig(
         binary=binary,
         model_path=model_path,
         port=port,
@@ -2963,6 +3037,7 @@ def llamacpp_start_server(
         mtp=mtp,
         extra_argv=extra_argv,
     )
+    argv = build_llamacpp_server_args(config=server_config)
 
     LLAMACPP_LOG_DIR.mkdir(parents=True, exist_ok=True)
     LLAMACPP_PID_DIR.mkdir(parents=True, exist_ok=True)
@@ -4327,6 +4402,7 @@ def select_model_decision(
 
     # --- Pass 2b: any installed Ollama model as a best-effort fallback ---
     if not selected_tag and ollama_installed:
+
         def _ollama_size_key(name: str) -> float:
             m = re.search(r"(\d+(?:\.\d+)?)[bB]", name)
             return float(m.group(1)) if m else 0.0
@@ -4476,9 +4552,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                         f"LM Studio smoke test failed: {smoke.get('error') or smoke.get('response', '')}"
                     )
             else:
-                caveats.append(
-                    f"Could not load model in LM Studio: {load_result.get('error', '')}"
-                )
+                caveats.append(f"Could not load model in LM Studio: {load_result.get('error', '')}")
         elif runtime == "ollama":
             smoke = smoke_test_ollama_model(selected_tag)
             if smoke.get("ok"):

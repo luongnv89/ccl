@@ -23,6 +23,7 @@ ALL_ENGINES: tuple[str, ...] = (
     "vllm",
 )
 
+
 class EngineLifecycleError(ValueError):
     pass
 

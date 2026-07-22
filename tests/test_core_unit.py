@@ -2065,6 +2065,99 @@ class TestLlamaCppArgBuilders:
         extra_idx = argv.index("--no-warmup")
         assert mtp_idx < extra_idx
 
+    # -- LlamaServerConfig --------------------------------------------------
+
+    def test_config_defaults(self):
+        cfg = pb.LlamaServerConfig(binary="llama-server", model_path="/tmp/m.gguf")
+        assert cfg.port == pb.LLAMACPP_SERVER_PORT
+        assert cfg.host == pb.LLAMACPP_SERVER_HOST
+        assert cfg.ctx_size == pb.LLAMACPP_CTX_SIZE
+        assert cfg.n_gpu_layers == 0
+        assert cfg.threads == 4
+        assert cfg.mtp is None
+        assert cfg.extra_argv is None
+
+    def test_config_to_kwargs(self):
+        cfg = pb.LlamaServerConfig(
+            binary="/usr/bin/llama-server",
+            model_path="/models/q4.gguf",
+            port=9000,
+            host="0.0.0.0",
+            ctx_size=8192,
+            n_gpu_layers=-1,
+            threads=16,
+            mtp={"enabled": True, "spec_draft_n_max": 5, "source": "test", "warning": None},
+            extra_argv=["--no-mmap"],
+        )
+        kw = cfg.to_kwargs()
+        assert kw["binary"] == "/usr/bin/llama-server"
+        assert kw["model_path"] == "/models/q4.gguf"
+        assert kw["port"] == 9000
+        assert kw["host"] == "0.0.0.0"
+        assert kw["ctx_size"] == 8192
+        assert kw["n_gpu_layers"] == -1
+        assert kw["threads"] == 16
+        assert kw["mtp"]["enabled"] is True
+        assert kw["extra_argv"] == ["--no-mmap"]
+
+    def test_build_argv_with_config_object(self):
+        cfg = pb.LlamaServerConfig(
+            binary="/usr/local/bin/llama-server",
+            model_path="/tmp/model.gguf",
+            port=8001,
+            host="127.0.0.1",
+            ctx_size=4096,
+            n_gpu_layers=-1,
+            threads=8,
+        )
+        argv = pb.build_llamacpp_server_args(config=cfg)
+        assert argv[0] == "/usr/local/bin/llama-server"
+        assert "--model" in argv and argv[argv.index("--model") + 1] == "/tmp/model.gguf"
+        assert "--port" in argv and argv[argv.index("--port") + 1] == "8001"
+        assert "--ctx-size" in argv and argv[argv.index("--ctx-size") + 1] == "4096"
+        assert "--n-gpu-layers" in argv and argv[argv.index("--n-gpu-layers") + 1] == "-1"
+        assert "--threads" in argv and argv[argv.index("--threads") + 1] == "8"
+
+    def test_build_argv_config_with_mtp(self):
+        cfg = pb.LlamaServerConfig(
+            binary="llama-server",
+            model_path="/tmp/m-mtp.gguf",
+            mtp={"enabled": True, "spec_draft_n_max": 6, "source": "test", "warning": None},
+        )
+        argv = pb.build_llamacpp_server_args(config=cfg)
+        assert "--spec-type" in argv
+        assert argv[argv.index("--spec-type") + 1] == "draft-mtp"
+        assert "--spec-draft-n-max" in argv
+        assert argv[argv.index("--spec-draft-n-max") + 1] == "6"
+
+    def test_build_argv_config_with_extra_argv(self):
+        cfg = pb.LlamaServerConfig(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            extra_argv=["--log-prefix", "foo", "--no-warmup"],
+        )
+        argv = pb.build_llamacpp_server_args(config=cfg)
+        assert argv[-3:] == ["--log-prefix", "foo", "--no-warmup"]
+
+    def test_build_argv_kwargs_override_config(self):
+        cfg = pb.LlamaServerConfig(
+            binary="old-binary",
+            model_path="/tmp/old.gguf",
+            port=8001,
+            host="127.0.0.1",
+            ctx_size=4096,
+            n_gpu_layers=0,
+            threads=4,
+        )
+        argv = pb.build_llamacpp_server_args(
+            config=cfg,
+            binary="new-binary",
+            port=9000,
+        )
+        assert argv[0] == "new-binary"
+        assert argv[argv.index("--model") + 1] == "/tmp/old.gguf"
+        assert argv[argv.index("--port") + 1] == "9000"
+
 
 # ---------------------------------------------------------------------------
 # MTP detection — env override, filename heuristic, GGUF probe, conflict.
