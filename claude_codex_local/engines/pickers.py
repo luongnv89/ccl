@@ -14,7 +14,7 @@ Adding a new engine with a custom picker:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from claude_codex_local.wizard import WizardState
@@ -37,8 +37,7 @@ class ModelPickerStrategy(ABC):
         self,
         state: WizardState,
         non_interactive: bool = False,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
 
 # ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ from rich.table import Table
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
 from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
-from claude_codex_local.engines.pickers import get_picker, register_picker
+from claude_codex_local.engines.pickers import get_picker
 
 console = Console()
 
