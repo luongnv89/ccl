@@ -48,6 +48,7 @@ from rich.table import Table
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
 from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
+from claude_codex_local.engines.pickers import get_picker
 
 console = Console()
 
@@ -1368,7 +1369,7 @@ _ROUTER9_DEFAULT_MODEL = "kr/claude-sonnet-4.5"
 _ROUTER9_MODEL_RE = re.compile(r"^[a-z0-9_-]+/[A-Za-z0-9._-]+$")
 
 
-def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False) -> bool:
+def _step_4_pick_model_9router_impl(state: WizardState, non_interactive: bool = False) -> bool:
     """Step 4 specialisation for engine=9router.
 
     Skips llmfit/disk/download entirely — 9router routes to cloud models
@@ -1378,12 +1379,10 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     """
     pb.ensure_state_dirs()
 
-    # --- API key ---
     env_key = os.environ.get("CCL_9ROUTER_API_KEY", "").strip()
     if non_interactive:
         api_key = env_key
         if not api_key and pb.ROUTER9_KEY_FILE.exists():
-            # In non-interactive mode, accept a previously written key file.
             api_key = pb.ROUTER9_KEY_FILE.read_text().strip()
         if not api_key:
             fail(
@@ -1409,7 +1408,6 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     pb.ROUTER9_KEY_FILE.chmod(0o600)
     ok(f"Wrote 9router API key to [bold]{pb.ROUTER9_KEY_FILE}[/bold] (chmod 0600).")
 
-    # --- Model name ---
     env_model = os.environ.get("CCL_9ROUTER_MODEL", "").strip()
     if non_interactive:
         model_name = env_model or _ROUTER9_DEFAULT_MODEL
@@ -1433,6 +1431,11 @@ def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False
     ok(f"Picked 9router model: [bold]{model_name}[/bold]")
     state.mark("4")
     return True
+
+
+def _step_4_pick_model_9router(state: WizardState, non_interactive: bool = False) -> bool:
+    """Backward-compatible wrapper — delegates to the implementation."""
+    return _step_4_pick_model_9router_impl(state, non_interactive)
 
 
 def _step_4_pick_9router_model_interactive(env_model: str) -> str | None:
@@ -1493,7 +1496,7 @@ def _format_context_length(ctx_len: int) -> str:
     return str(ctx_len)
 
 
-def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = False) -> bool:
+def _step_4_pick_model_openrouter_impl(state: WizardState, non_interactive: bool = False) -> bool:
     """Step 4 specialisation for engine=openrouter.
 
     Skips llmfit/disk/download entirely — OpenRouter routes to cloud models
@@ -1507,12 +1510,10 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
     """
     pb.ensure_state_dirs()
 
-    # --- API key ---
     env_key = os.environ.get("CCL_OPENROUTER_API_KEY", "").strip()
     if non_interactive:
         api_key = env_key
         if not api_key and pb.OPENROUTER_KEY_FILE.exists():
-            # In non-interactive mode, accept a previously written key file.
             api_key = pb.OPENROUTER_KEY_FILE.read_text().strip()
         if not api_key:
             fail(
@@ -1538,14 +1539,12 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
     pb.OPENROUTER_KEY_FILE.chmod(0o600)
     ok(f"Wrote OpenRouter API key to [bold]{pb.OPENROUTER_KEY_FILE}[/bold] (chmod 0600).")
 
-    # --- Model selection ---
     env_model = os.environ.get("CCL_OPENROUTER_MODEL", "").strip()
     if non_interactive:
         model_name = env_model or _OPENROUTER_DEFAULT_MODEL
     else:
         browser_result = _step_4_openrouter_model_browser(env_model)
         if browser_result is None:
-            # Browser was declined or failed — fall through to text input.
             prompt_default = env_model or _OPENROUTER_DEFAULT_MODEL
             model_input = questionary.text(
                 "OpenRouter model name:",
@@ -1573,6 +1572,11 @@ def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = Fa
     ok(f"Picked OpenRouter model: [bold]{model_name}[/bold]")
     state.mark("4")
     return True
+
+
+def _step_4_pick_model_openrouter(state: WizardState, non_interactive: bool = False) -> bool:
+    """Backward-compatible wrapper — delegates to the implementation."""
+    return _step_4_pick_model_openrouter_impl(state, non_interactive)
 
 
 def _step_4_openrouter_model_browser(env_model: str) -> str | None:
@@ -1648,13 +1652,13 @@ def _step_4_openrouter_model_browser(env_model: str) -> str | None:
     return free_models[selected]["id"]
 
 
-def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -> bool:
+def _step_4_pick_model_vllm_impl(state: WizardState, non_interactive: bool = False) -> bool:
     """Step 4 specialisation for engine=vllm.
 
     A running vLLM server already has its model loaded (`vllm serve <id>`),
     so there's nothing to download and no llmfit/disk math to do — we just
     confirm which loaded model to talk to. /v1/models is queried via
-    vllm_info() and the user picks one. With a single loaded model (the
+    vllm_info() and the user picks one.  With a single loaded model (the
     common case) we skip the prompt.
     """
     profile_vllm = state.profile.get("vllm", {})
@@ -1706,8 +1710,13 @@ def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -
     return True
 
 
-def _step_4_pick_model_remote(
-    state: WizardState, engine: str, non_interactive: bool = False
+def _step_4_pick_model_vllm(state: WizardState, non_interactive: bool = False) -> bool:
+    """Backward-compatible wrapper — delegates to the implementation."""
+    return _step_4_pick_model_vllm_impl(state, non_interactive)
+
+
+def _step_4_pick_model_remote_impl(
+    engine: str, state: WizardState, non_interactive: bool = False
 ) -> bool:
     """Step 4 specialisation for engine=ollama or engine=llamacpp with a
     remote endpoint.
@@ -1791,40 +1800,23 @@ def _step_4_pick_model_remote(
     return True
 
 
-def step_2_4_pick_model(
+def _step_4_pick_model_remote(
+    state: WizardState, engine: str, non_interactive: bool = False
+) -> bool:
+    """Backward-compatible wrapper — delegates to the implementation."""
+    return _step_4_pick_model_remote_impl(engine, state, non_interactive)
+
+
+def _step_4_pick_model_local_impl(
     state: WizardState,
     non_interactive: bool = False,
-    run_llmfit_flag: bool = False,
 ) -> bool:
-    header("Step 4 — Pick a model")
+    """Local model picker for ollama / lmstudio / llama.cpp.
+
+    Handles llmfit profiles, merged model lists, running-server detection
+    for llama.cpp, and interactive / non-interactive model selection.
+    """
     engine = state.primary_engine
-
-    # 9router is a cloud-routing engine — no local models, no llmfit, no
-    # disk-based size checks. Branch to a dedicated picker.
-    if engine == "9router":
-        return _step_4_pick_model_9router(state, non_interactive)
-
-    # OpenRouter is a hosted-SaaS cloud-routing engine — same shape as
-    # 9router (key on disk + provider/model slug), no local models.
-    if engine == "openrouter":
-        return _step_4_pick_model_openrouter(state, non_interactive)
-
-    # vLLM hosts exactly one model per `vllm serve` process; we read it
-    # from /v1/models rather than llmfit / disk.
-    if engine == "vllm":
-        return _step_4_pick_model_vllm(state, non_interactive)
-
-    # Remote engine branch: when Ollama or llama.cpp has a remote endpoint
-    # configured, fetch models from the server instead of showing static
-    # suggestions / llmfit profiles (which are only meaningful for local).
-    if engine == "ollama" and pb._is_local_base_url(pb.ollama_base_url()) is False:
-        return _step_4_pick_model_remote(state, "ollama", non_interactive)
-
-    if engine == "llamacpp" and pb._is_local_base_url(pb.llamacpp_base_url()) is False:
-        return _step_4_pick_model_remote(state, "llamacpp", non_interactive)
-
-    # If llamacpp is primary and a server is already running with a model loaded,
-    # offer to use that model directly — the user clearly already has it set up.
     running_llamacpp_model: str | None = None
     if engine == "llamacpp":
         status = pb.llamacpp_info()
@@ -1846,7 +1838,6 @@ def step_2_4_pick_model(
             )
             state.mark("4")
             return True
-        # Non-interactive: go straight through find-model (prefers installed models).
         candidate = _find_model_auto(engine, state.profile)
         if not candidate:
             fail("Non-interactive find-model failed and no direct model was provided.")
@@ -1857,10 +1848,6 @@ def step_2_4_pick_model(
         state.model_candidate = candidate.get("candidate") or {}
         ok(f"Non-interactive pick: [bold]{state.engine_model_tag}[/bold]")
     else:
-        # Pre-populate the merged installed-or-cached model list for the chosen
-        # engine (issue #79). Live entries win over cached duplicates. Per-mode
-        # llmfit recommendations (issue #35) still come from the cached profile
-        # — we never re-probe unless the user explicitly chooses "refresh".
         merged_models = pb.merge_models_for_engine(state.profile, engine)
         profile_recommendations = _build_profile_recommendations(engine, state.profile)
         _show_profile_recommendations_preview(profile_recommendations)
@@ -1877,7 +1864,6 @@ def step_2_4_pick_model(
                     )
                 )
 
-            # --- Recommendation profiles (Speed / Balanced / Quality) ---
             profile_entries: list[questionary.Choice] = []
             for pmode in pb.RECOMMENDATION_MODES:
                 rec = profile_recommendations.get(pmode)
@@ -1899,11 +1885,9 @@ def step_2_4_pick_model(
                     f"for your {engine} engine."
                 )
 
-            # --- Merged model list (installed + cached recommendations) ---
             merged_entries: list[questionary.Choice] = []
             for idx, entry in enumerate(merged_models):
                 if running_llamacpp_model and entry.get("running"):
-                    # Already surfaced as the top "running llama-server" choice.
                     continue
                 key = f"merged:{idx}"
                 items[key] = entry
@@ -1915,12 +1899,9 @@ def step_2_4_pick_model(
                     label = f"Cached — not yet downloaded: {entry['display']}{size_suffix}"
                 merged_entries.append(questionary.Choice(label, value=key))
             if merged_entries:
-                # Show installed-first ordering (already done by merge_models_for_engine
-                # via installed_models_for_engine's coder-first sort).
                 choices.append(questionary.Separator("── Installed or recommended ──"))
                 choices.extend(merged_entries)
             else:
-                # Empty state — no installed models, llmfit either absent or skipped.
                 llmfit_skipped = pb._is_llmfit_skipped(state.profile.get("llmfit_system"))
                 if llmfit_skipped:
                     info(
@@ -1934,7 +1915,6 @@ def step_2_4_pick_model(
                         "pick' or type a model name directly."
                     )
 
-            # --- Refresh recommendations on demand (issue #79) ---
             llmfit_skipped = pb._is_llmfit_skipped(state.profile.get("llmfit_system"))
             if llmfit_skipped:
                 choices.append(questionary.Separator("── Refresh ──"))
@@ -1963,9 +1943,6 @@ def step_2_4_pick_model(
                 fail("Setup cancelled by user.")
                 return False
             if mode == "refresh-llmfit":
-                # User asked for a fresh llmfit scan. Drop the in-process
-                # cache so machine_profile() goes back to the disk cache and
-                # detects the skip-sentinel, then re-runs llmfit.
                 pb.invalidate_machine_profile_inproc_cache()
                 refreshed = pb.machine_profile(run_llmfit=True)
                 state.profile = refreshed
@@ -2007,13 +1984,6 @@ def step_2_4_pick_model(
                 entry = items[mode]
                 state.model_name = entry["display"]
                 state.engine_model_tag = entry["tag"]
-                # Map to the existing model_source vocabulary that downstream
-                # steps (5/6/7) and run_doctor already understand:
-                #   installed model → "installed"
-                #   cached llmfit recommendation needing download → "find-model"
-                # (semantically identical to the "Help me pick" llmfit path —
-                # we still went through llmfit ranking, the user just picked
-                # from the merged inline list).
                 if entry.get("source") == "cached":
                     state.model_source = "find-model"
                     state.model_candidate = entry.get("candidate") or {}
@@ -2048,6 +2018,32 @@ def step_2_4_pick_model(
 
     state.mark("4")
     return True
+
+
+def step_2_4_pick_model(
+    state: WizardState,
+    non_interactive: bool = False,
+    run_llmfit_flag: bool = False,
+) -> bool:
+    header("Step 4 — Pick a model")
+    engine = state.primary_engine
+
+    # Remote engine branch: when Ollama or llama.cpp has a remote endpoint
+    # configured, fetch models from the server instead of showing static
+    # suggestions / llmfit profiles (which are only meaningful for local).
+    if engine == "ollama" and pb._is_local_base_url(pb.ollama_base_url()) is False:
+        return _step_4_pick_model_remote_impl("ollama", state, non_interactive)
+
+    if engine == "llamacpp" and pb._is_local_base_url(pb.llamacpp_base_url()) is False:
+        return _step_4_pick_model_remote_impl("llamacpp", state, non_interactive)
+
+    # Delegate to the engine-specific picker strategy.
+    picker = get_picker(engine)
+    if picker is not None:
+        return picker.pick_model(state, non_interactive)
+
+    fail(f"No model picker registered for engine '{engine}'.")
+    return False
 
 
 def _build_profile_recommendations(
