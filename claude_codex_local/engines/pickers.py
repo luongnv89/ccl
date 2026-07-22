@@ -90,18 +90,6 @@ class VLLMPicker(ModelPickerStrategy):
         return _step_4_pick_model_vllm_impl(state, non_interactive)
 
 
-class RemotePicker(ModelPickerStrategy):
-    """Model picker for engines with a remote endpoint (ollama, llama.cpp)."""
-
-    def __init__(self, engine: str) -> None:
-        self._engine = engine
-
-    def pick_model(self, state: WizardState, non_interactive: bool = False) -> bool:
-        from claude_codex_local.wizard import _step_4_pick_model_remote_impl
-
-        return _step_4_pick_model_remote_impl(self._engine, state, non_interactive)
-
-
 class LocalPicker(ModelPickerStrategy):
     """Model picker for local engines (ollama, LM Studio, llama.cpp).
 
