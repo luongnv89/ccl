@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+import claude_codex_local._vllm
 import claude_codex_local.core as pb
 
 # ---------------------------------------------------------------------------
@@ -322,7 +323,7 @@ class TestVLLMAdapterRunTest:
                 "duration_seconds": 0.25,
             }
 
-        monkeypatch.setattr(pb, "smoke_test_vllm_model", mock_smoke_test)
+        monkeypatch.setattr(claude_codex_local._vllm, "smoke_test_vllm_model", mock_smoke_test)
 
         adapter = pb.VLLMAdapter()
         result = adapter.run_test("test-model")

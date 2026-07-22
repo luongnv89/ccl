@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
+import claude_codex_local._config
+import claude_codex_local._model_selection
 import claude_codex_local.core as core
 
 
@@ -25,7 +27,8 @@ def _isolate_state_dir(tmp_path, monkeypatch):
     walk the real `~/.claude-codex-local/models` directory once we wired
     STATE_DIR scanning into it.
     """
-    monkeypatch.setattr(core, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", tmp_path / "state")
     for fn in (core.scan_huggingface_gguf_cache, core.scan_state_dir_gguf_models):
         for attr in ("_gguf_cache", "_state_dir_gguf_cache"):
             if hasattr(fn, attr):
@@ -395,7 +398,8 @@ class TestInstalledModelsForEngineLlamacpp:
         gguf_file = slug_dir / "Qwen3-Coder-Next-Q4_K_M.gguf"
         gguf_file.write_bytes(b"x" * (4 * 1024**2))  # 4 MB
 
-        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", state_dir)
         # Empty HF cache so only STATE_DIR contributes.
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path / "empty-hf")}):
             profile = {"llamacpp": {"present": True, "server_running": False}}
@@ -423,7 +427,8 @@ class TestInstalledModelsForEngineLlamacpp:
         link = slug_dir / "model-Q4_K_M.gguf"
         link.symlink_to(real_gguf)
 
-        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", state_dir)
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             profile = {"llamacpp": {"present": True, "server_running": False}}
             result = core.installed_models_for_engine(profile, "llamacpp")
@@ -436,7 +441,8 @@ class TestScanStateDirGgufModels:
     """Unit tests for scan_state_dir_gguf_models()."""
 
     def test_missing_state_dir_returns_empty(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(core, "STATE_DIR", tmp_path / "does-not-exist")
+        monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", tmp_path / "does-not-exist")
+        monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", tmp_path / "does-not-exist")
         assert core.scan_state_dir_gguf_models() == []
 
     def test_finds_wizard_layout(self, tmp_path, monkeypatch):
@@ -447,7 +453,8 @@ class TestScanStateDirGgufModels:
         gguf = slug_dir / "Qwen3-Coder-Next-Q4_K_M.gguf"
         gguf.write_bytes(b"x" * (2 * 1024**2))
 
-        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", state_dir)
         result = core.scan_state_dir_gguf_models()
         assert len(result) == 1
         assert result[0]["path"] == str(gguf.resolve())
@@ -462,7 +469,8 @@ class TestScanStateDirGgufModels:
         gguf = nested / "weights.gguf"
         gguf.write_bytes(b"x" * (1024**2))
 
-        monkeypatch.setattr(core, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", state_dir)
+        monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", state_dir)
         result = core.scan_state_dir_gguf_models()
         assert len(result) == 1
         assert result[0]["path"] == str(gguf.resolve())

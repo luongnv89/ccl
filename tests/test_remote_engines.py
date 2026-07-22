@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import sys
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,28 @@ import pytest
 
 import claude_codex_local.core as core
 import claude_codex_local.wizard as wizard
+
+
+def _mod(name: str):
+    """Get the current (possibly reloaded) sub-module by short name via sys.modules."""
+    return sys.modules[f"claude_codex_local.{name}"]
+
+
+def _patch_cmd_ver(monkeypatch, func):
+    """Patch command_version in every namespace that imports it."""
+    for suffix in (
+        "_shell",
+        "_adapters",
+        "_llamacpp_lifecycle",
+        "_ollama",
+        "_vllm",
+        "_llmfit",
+        "_lmstudio",
+        "_machine_profile",
+    ):
+        mod = sys.modules.get(f"claude_codex_local.{suffix}")
+        if mod is not None:
+            monkeypatch.setattr(mod, "command_version", func)
 
 
 class _StubAsk:
@@ -51,6 +74,27 @@ class FakeResponse:
 
 
 def reload_modules():
+    _CONFIG_MODULES = [
+        "claude_codex_local._config",
+        "claude_codex_local._shell",
+        "claude_codex_local._ollama",
+        "claude_codex_local._lmstudio",
+        "claude_codex_local._router9",
+        "claude_codex_local._openrouter",
+        "claude_codex_local._vllm",
+        "claude_codex_local._adapters",
+        "claude_codex_local._hf_api",
+        "claude_codex_local._llmfit",
+        "claude_codex_local._llamacpp_lifecycle",
+        "claude_codex_local._machine_profile",
+        "claude_codex_local._model_selection",
+        "claude_codex_local._doctor",
+    ]
+    for name in _CONFIG_MODULES:
+        importlib.invalidate_caches()
+        mod = sys.modules.get(name)
+        if mod is not None:
+            importlib.reload(mod)
     pb = importlib.reload(core)
     wz = importlib.reload(wizard)
     return pb, wz

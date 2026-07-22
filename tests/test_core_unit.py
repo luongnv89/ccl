@@ -15,6 +15,48 @@ from unittest.mock import patch
 import claude_codex_local.core as pb
 
 # ---------------------------------------------------------------------------
+# Sub-module references for monkeypatching — the refactored sub-modules import
+# ``run``, ``command_version``, and config constants directly from ``_shell``
+# and ``_config``, so patches must target the sub-module that actually *uses*
+# the symbol rather than (only) ``pb``.
+# ---------------------------------------------------------------------------
+import claude_codex_local._adapters as _adapters_mod
+import claude_codex_local._config as _cfg_mod
+import claude_codex_local._doctor as _doctor_mod
+import claude_codex_local._hf_api as _hf_api_mod
+import claude_codex_local._llamacpp_lifecycle as _llamacpp_mod
+import claude_codex_local._llmfit as _llmfit_mod
+import claude_codex_local._lmstudio as _lmstudio_mod
+import claude_codex_local._machine_profile as _mp_mod
+import claude_codex_local._model_selection as _ms_mod
+import claude_codex_local._ollama as _ollama_mod
+import claude_codex_local._openrouter as _openrouter_mod
+import claude_codex_local._router9 as _router9_mod
+import claude_codex_local._shell as _shell_mod
+import claude_codex_local._vllm as _vllm_mod
+
+
+def _patch_ollama_run(monkeypatch, mock):
+    monkeypatch.setattr(_ollama_mod, "run", mock)
+
+
+def _patch_llmfit_run(monkeypatch, mock):
+    monkeypatch.setattr(_llmfit_mod, "run", mock)
+
+
+def _patch_llmfit_cmd_ver(monkeypatch, mock):
+    monkeypatch.setattr(_llmfit_mod, "command_version", mock)
+
+
+def _patch_llamacpp_cmd_ver(monkeypatch, mock):
+    monkeypatch.setattr(_llamacpp_mod, "command_version", mock)
+
+
+def _patch_adapters_cmd_ver(monkeypatch, mock):
+    monkeypatch.setattr(_adapters_mod, "command_version", mock)
+
+
+# ---------------------------------------------------------------------------
 # HF → Ollama / LM Studio tag mapping (pure regex lookups).
 # ---------------------------------------------------------------------------
 
@@ -71,7 +113,7 @@ class TestParseOllamaList:
         ``_ollama_http_models`` reads ``OLLAMA_HOST`` and hits the real server if set.
         We clear that env var in conftest, but for double-safety we also mock it here.
         """
-        monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
+        monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
 
     def test_parses_multiple_rows(self, monkeypatch):
         sample = (
@@ -80,7 +122,7 @@ class TestParseOllamaList:
             "qwen2.5-coder:7b      def456          4.1 GB    1 week ago\n"
         )
         self._block_http(monkeypatch)
-        monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
+        monkeypatch.setattr(_ollama_mod, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
         assert len(models) == 2
         assert models[0]["name"] == "qwen3-coder:30b"
@@ -92,7 +134,7 @@ class TestParseOllamaList:
     def test_only_header_returns_empty(self, monkeypatch):
         self._block_http(monkeypatch)
         monkeypatch.setattr(
-            pb, "run", lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n")
+            _ollama_mod, "run", lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n")
         )
         assert pb.parse_ollama_list() == []
 
@@ -102,13 +144,13 @@ class TestParseOllamaList:
         def boom(*a, **kw):
             raise FileNotFoundError("ollama")
 
-        monkeypatch.setattr(pb, "run", boom)
+        monkeypatch.setattr(_ollama_mod, "run", boom)
         assert pb.parse_ollama_list() == []
 
     def test_marks_unsized_rows_nonlocal(self, monkeypatch):
         self._block_http(monkeypatch)
         sample = "NAME  ID  SIZE  MODIFIED\nphantom:latest  xxx  -  never\n"
-        monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
+        monkeypatch.setattr(_ollama_mod, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
         assert models[0]["local"] is False
 
@@ -141,6 +183,7 @@ class TestEnsurePath:
     def test_keeps_path_when_extras_missing(self, monkeypatch, tmp_path):
         # Point ORIG_HOME at a dir with no .lmstudio/.local — no extras to prepend.
         monkeypatch.setattr(pb, "ORIG_HOME", tmp_path)
+        monkeypatch.setattr(_shell_mod, "ORIG_HOME", tmp_path)
         env = pb.ensure_path({"PATH": "/usr/bin"})
         assert env["PATH"] == "/usr/bin"
 
@@ -148,6 +191,7 @@ class TestEnsurePath:
         lms_bin = tmp_path / ".lmstudio" / "bin"
         lms_bin.mkdir(parents=True)
         monkeypatch.setattr(pb, "ORIG_HOME", tmp_path)
+        monkeypatch.setattr(_shell_mod, "ORIG_HOME", tmp_path)
         env = pb.ensure_path({"PATH": "/usr/bin"})
         assert env["PATH"].startswith(str(lms_bin))
         assert "/usr/bin" in env["PATH"]
@@ -156,6 +200,7 @@ class TestEnsurePath:
         lms_bin = tmp_path / ".lmstudio" / "bin"
         lms_bin.mkdir(parents=True)
         monkeypatch.setattr(pb, "ORIG_HOME", tmp_path)
+        monkeypatch.setattr(_shell_mod, "ORIG_HOME", tmp_path)
         env = pb.ensure_path({"PATH": f"{lms_bin}:/usr/bin"})
         # No duplicate
         assert env["PATH"].count(str(lms_bin)) == 1
@@ -189,13 +234,11 @@ def _fake_cp_json(payload):
 
 class TestLlmfitCodingCandidates:
     def test_returns_empty_when_llmfit_absent(self, monkeypatch):
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        _patch_llmfit_cmd_ver(monkeypatch, lambda *a, **kw: {"present": False})
         assert pb.llmfit_coding_candidates() == []
 
     def test_filters_and_sorts_by_score(self, monkeypatch):
-        monkeypatch.setattr(
-            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
-        )
+        _patch_llmfit_cmd_ver(monkeypatch, lambda *a, **kw: {"present": True, "version": "1.0"})
         payload = {
             "models": [
                 {
@@ -215,7 +258,7 @@ class TestLlmfitCodingCandidates:
                 },
             ]
         }
-        monkeypatch.setattr(pb, "run", lambda *a, **kw: _fake_cp_json(payload))
+        _patch_llmfit_run(monkeypatch, lambda *a, **kw: _fake_cp_json(payload))
         cands = pb.llmfit_coding_candidates()
         names = [c["name"] for c in cands]
         assert "meta-llama/Llama-3-8B" not in names
@@ -224,9 +267,7 @@ class TestLlmfitCodingCandidates:
         assert cands[0]["lms_hub_name"] == "qwen/qwen3-coder-30b"
 
     def test_dedupes_by_canonical_key_keeps_higher_score(self, monkeypatch):
-        monkeypatch.setattr(
-            pb, "command_version", lambda *a, **kw: {"present": True, "version": "1.0"}
-        )
+        _patch_llmfit_cmd_ver(monkeypatch, lambda *a, **kw: {"present": True, "version": "1.0"})
         payload = {
             "models": [
                 {
@@ -243,7 +284,7 @@ class TestLlmfitCodingCandidates:
                 },
             ]
         }
-        monkeypatch.setattr(pb, "run", lambda *a, **kw: _fake_cp_json(payload))
+        _patch_llmfit_run(monkeypatch, lambda *a, **kw: _fake_cp_json(payload))
         cands = pb.llmfit_coding_candidates()
         assert len(cands) == 1
         assert cands[0]["score"] == 92
@@ -279,8 +320,8 @@ def _empty_profile():
 
 class TestSelectBestModel:
     def test_hardcoded_fallback_when_no_candidates(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
-        monkeypatch.setattr(pb, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", lambda *a, **k: [])
+        monkeypatch.setattr(_ollama_mod, "smoke_test_ollama_model", lambda tag: {"ok": True})
         rec = pb.select_best_model(_empty_profile(), mode="balanced")
         assert rec["selected_model"] == "qwen2.5-coder:7b"
         assert rec["status"] == "download-required"
@@ -288,14 +329,14 @@ class TestSelectBestModel:
 
     def test_picks_installed_ollama_model_matching_candidate(self, monkeypatch):
         monkeypatch.setattr(
-            pb, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
+            _ollama_mod, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
         )
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda *a, **k: [
                 {
-                    "name": "Qwen/Qwen3-Coder-30B",
+                "name": "Qwen/Qwen3-Coder-30B",
                     "score": 90,
                     "ollama_tag": "qwen3-coder:30b",
                     "lms_mlx_path": None,
@@ -313,9 +354,9 @@ class TestSelectBestModel:
         assert rec["status"] == "ready"
 
     def test_ollama_fallback_to_largest_installed_when_no_candidate_match(self, monkeypatch):
-        monkeypatch.setattr(pb, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(_ollama_mod, "smoke_test_ollama_model", lambda tag: {"ok": True})
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda *a, **k: [
                 {
@@ -337,7 +378,7 @@ class TestSelectBestModel:
 
     def test_recommends_download_when_candidates_but_none_installed(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda *a, **k: [
                 {
@@ -359,7 +400,7 @@ class TestSelectBestModel:
 
     def test_mode_fast_sorts_by_tps(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda *a, **k: [
                 {
@@ -387,7 +428,7 @@ class TestSelectBestModel:
         assert rec["mode"] == "fast"
 
     def test_invalid_mode_coerced_to_balanced(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", lambda *a, **k: [])
         rec = pb.select_best_model(_empty_profile(), mode="bogus")
         assert rec["mode"] == "balanced"
 
@@ -475,14 +516,14 @@ class TestRecommendForMode:
         ]
 
     def test_fast_picks_fastest_for_ollama(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", self._candidates)
         rec = pb.recommend_for_mode(_empty_profile(), "fast", "ollama")
         assert rec is not None
         assert rec["engine_tag"] == "qwen2.5-coder:7b"
         assert rec["mode"] == "fast"
 
     def test_quality_picks_highest_score_for_lmstudio(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", self._candidates)
         rec = pb.recommend_for_mode(_empty_profile(), "quality", "lmstudio")
         assert rec is not None
         assert rec["engine_tag"] == "qwen/qwen3-coder-30b"
@@ -493,11 +534,11 @@ class TestRecommendForMode:
         # repo that actually contains GGUF files (#58). The picker silently
         # drops candidates with no GGUF mirror — this test verifies the top
         # candidate's resolved tag wins when a mirror exists.
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", self._candidates)
         # Clear the mirror cache so the test sees fresh resolution.
         pb._GGUF_MIRROR_CACHE.clear()
         monkeypatch.setattr(
-            pb,
+            _hf_api_mod,
             "resolve_gguf_mirror",
             lambda name: "bartowski/Qwen3-Coder-30B-GGUF" if name else None,
         )
@@ -508,24 +549,24 @@ class TestRecommendForMode:
     def test_llamacpp_skips_when_no_gguf_mirror(self, monkeypatch):
         # When no GGUF mirror is found for *any* candidate, recommend_for_mode
         # must return None instead of falsely surfacing an MLX-only repo (#58).
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", self._candidates)
         pb._GGUF_MIRROR_CACHE.clear()
-        monkeypatch.setattr(pb, "resolve_gguf_mirror", lambda name: None)
+        monkeypatch.setattr(_hf_api_mod, "resolve_gguf_mirror", lambda name: None)
         assert pb.recommend_for_mode(_empty_profile(), "balanced", "llamacpp") is None
 
     def test_returns_none_when_no_candidates(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda *a, **k: [])
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", lambda *a, **k: [])
         assert pb.recommend_for_mode(_empty_profile(), "balanced", "ollama") is None
 
     def test_returns_none_for_unknown_engine(self, monkeypatch):
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", self._candidates)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", self._candidates)
         assert pb.recommend_for_mode(_empty_profile(), "balanced", "vllm") is None
 
     def test_skips_candidates_without_engine_tag(self, monkeypatch):
         # A candidate with no ollama_tag must be skipped; the next matching
         # candidate must be picked instead.
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda *a, **k: [
                 {
@@ -597,7 +638,9 @@ class TestInstalledModelsForEngine:
         assert tags[0] == "qwen/qwen3-coder-30b"
 
     def test_llamacpp_surfaces_running_server_model(self):
-        with patch("claude_codex_local.core.scan_huggingface_gguf_cache", return_value=[]):
+        with patch.object(_ms_mod, "scan_huggingface_gguf_cache", return_value=[]), patch.object(
+            _ms_mod, "scan_state_dir_gguf_models", return_value=[]
+        ):
             profile = {
                 "llamacpp": {
                     "present": True,
@@ -612,7 +655,9 @@ class TestInstalledModelsForEngine:
             assert out[0]["running"] is True
 
     def test_llamacpp_returns_empty_when_server_not_running(self):
-        with patch("claude_codex_local.core.scan_huggingface_gguf_cache", return_value=[]):
+        with patch.object(_ms_mod, "scan_huggingface_gguf_cache", return_value=[]), patch.object(
+            _ms_mod, "scan_state_dir_gguf_models", return_value=[]
+        ):
             profile = {
                 "llamacpp": {
                     "present": True,
@@ -647,21 +692,23 @@ class TestAdapters:
         assert adapter.recommend_params("fast") == {"provider": "lmstudio", "extra_flags": []}
 
     def test_ollama_adapter_healthcheck_when_missing(self, monkeypatch):
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        _patch_adapters_cmd_ver(monkeypatch, lambda *a, **kw: {"present": False})
+        monkeypatch.setattr(_llmfit_mod, "command_version", lambda *a, **kw: {"present": False})
+        monkeypatch.setattr(_ollama_mod, "command_version", lambda *a, **kw: {"present": False})
         # Block HTTP so ollama_info() falls through to parse_ollama_list.
-        monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
-        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [])
+        monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
+        monkeypatch.setattr(_ollama_mod, "parse_ollama_list", lambda: [])
         adapter = pb.OllamaAdapter()
         result = adapter.healthcheck()
         assert result["ok"] is False
 
     def test_ollama_adapter_healthcheck_reports_model_count(self, monkeypatch):
-        monkeypatch.setattr(
-            pb, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
-        )
+        _patch_adapters_cmd_ver(monkeypatch, lambda *a, **kw: {"present": True, "version": "0.1"})
+        monkeypatch.setattr(_llmfit_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"})
+        monkeypatch.setattr(_ollama_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"})
         # Block HTTP so parse_ollama_list mock is reached.
-        monkeypatch.setattr(pb, "_ollama_http_models", lambda timeout=5: None)
-        monkeypatch.setattr(pb, "parse_ollama_list", lambda: [{"name": "a"}, {"name": "b"}])
+        monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
+        monkeypatch.setattr(_ollama_mod, "parse_ollama_list", lambda: [{"name": "a"}, {"name": "b"}])
         adapter = pb.OllamaAdapter()
         result = adapter.healthcheck()
         assert result["ok"] is True
@@ -680,7 +727,7 @@ class TestAdapters:
 class TestLlamaCppDetect:
     def test_returns_present_for_llama_server(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "command_version",
             lambda name, *a, **kw: (
                 {"present": True, "version": "b1234"}
@@ -699,13 +746,13 @@ class TestLlamaCppDetect:
                 return {"present": True, "version": "b5678"}
             return {"present": False}
 
-        monkeypatch.setattr(pb, "command_version", fake_version)
+        monkeypatch.setattr(_llamacpp_mod, "command_version", fake_version)
         result = pb.llamacpp_detect()
         assert result["present"] is True
         assert result["binary"] == "llama-cpp-server"
 
     def test_returns_not_present_when_all_missing(self, monkeypatch):
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        monkeypatch.setattr(_llamacpp_mod, "command_version", lambda *a, **kw: {"present": False})
         result = pb.llamacpp_detect()
         assert result["present"] is False
 
@@ -716,7 +763,7 @@ class TestLlamaCppDetect:
                 return {"present": True, "version": "Apache/2.4.57"}
             return {"present": False}
 
-        monkeypatch.setattr(pb, "command_version", fake_version)
+        monkeypatch.setattr(_llamacpp_mod, "command_version", fake_version)
         result = pb.llamacpp_detect()
         assert result["present"] is False
 
@@ -726,7 +773,7 @@ class TestLlamaCppDetect:
                 return {"present": True, "version": "llama.cpp b3447"}
             return {"present": False}
 
-        monkeypatch.setattr(pb, "command_version", fake_version)
+        monkeypatch.setattr(_llamacpp_mod, "command_version", fake_version)
         result = pb.llamacpp_detect()
         assert result["present"] is True
         assert result["binary"] == "server"
@@ -735,7 +782,12 @@ class TestLlamaCppDetect:
 class TestLlamaCppInfo:
     def test_returns_not_present_when_binary_missing(self, monkeypatch):
         monkeypatch.setattr(
-            pb, "llamacpp_detect", lambda: {"present": False, "binary": "", "version": ""}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": False, "binary": "", "version": ""}
+        )
+        # Override base URL to a port with no running server so the health
+        # check fails even when the dev host has a llama.cpp server elsewhere.
+        monkeypatch.setattr(
+            _llamacpp_mod, "llamacpp_base_url", lambda: "http://127.0.0.1:18003"
         )
         result = pb.llamacpp_info()
         assert result["present"] is False
@@ -743,7 +795,7 @@ class TestLlamaCppInfo:
 
     def test_server_running_when_health_and_models_respond(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_detect",
             lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
         )
@@ -790,7 +842,7 @@ class TestLlamaCppInfo:
         # so a second `ccl serve` doesn't try to spawn a duplicate on the
         # already-bound port.
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_detect",
             lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
         )
@@ -824,7 +876,7 @@ class TestLlamaCppInfo:
 
     def test_server_not_running_when_connection_refused(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_detect",
             lambda: {"present": True, "binary": "llama-server", "version": "b1234"},
         )
@@ -1054,7 +1106,7 @@ class TestLlamaCppAdapter:
 
     def test_healthcheck_when_binary_missing(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_info",
             lambda: {
                 "present": False,
@@ -1071,7 +1123,7 @@ class TestLlamaCppAdapter:
 
     def test_healthcheck_when_binary_present_but_server_down(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_info",
             lambda: {
                 "present": True,
@@ -1088,7 +1140,7 @@ class TestLlamaCppAdapter:
 
     def test_healthcheck_when_server_running(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_info",
             lambda: {
                 "present": True,
@@ -1105,7 +1157,7 @@ class TestLlamaCppAdapter:
 
     def test_list_models_when_server_running_with_model(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_info",
             lambda: {
                 "present": True,
@@ -1124,7 +1176,7 @@ class TestLlamaCppAdapter:
 
     def test_list_models_when_server_not_running(self, monkeypatch):
         monkeypatch.setattr(
-            pb,
+            _llamacpp_mod,
             "llamacpp_info",
             lambda: {
                 "present": True,
@@ -1139,7 +1191,7 @@ class TestLlamaCppAdapter:
 
     def test_run_test_delegates_to_smoke_test(self, monkeypatch):
         monkeypatch.setattr(
-            pb, "smoke_test_llamacpp_model", lambda m: {"ok": True, "response": "READY"}
+            _llamacpp_mod, "smoke_test_llamacpp_model", lambda m: {"ok": True, "response": "READY"}
         )
         adapter = pb.LlamaCppAdapter()
         result = adapter.run_test("qwen.gguf")
@@ -1277,7 +1329,7 @@ class TestRouter9Adapter:
 
     def test_run_test_delegates_to_smoke_test_models(self, monkeypatch):
         sentinel = {"ok": True, "models": ["kr/claude-sonnet-4.5"], "response": "1 models"}
-        monkeypatch.setattr(pb, "smoke_test_router9_models", lambda *a, **kw: sentinel)
+        monkeypatch.setattr(_router9_mod, "smoke_test_router9_models", lambda *a, **kw: sentinel)
         adapter = pb.Router9Adapter()
         # run_test deliberately ignores the model arg; it only probes /v1/models.
         assert adapter.run_test("kr/anything") == sentinel
@@ -1420,17 +1472,10 @@ class TestSmokeTestRouter9Models:
         the docstring (which mentions /chat/completions for the explicit
         warning) and inspect only the executable code lines.
         """
-        from pathlib import Path
+        import inspect
 
-        source = Path(pb.__file__).read_text()
-        marker = "def smoke_test_router9_models("
-        start = source.index(marker)
-        # Slice until the next top-level def; \n at column 0.
-        rest = source[start + len(marker) :]
-        end_idx = rest.find("\ndef ")
-        body = rest[:end_idx] if end_idx != -1 else rest
-        # Strip the triple-quoted docstring before the assertion so the
-        # warning text in the docstring doesn't trip the pin.
+        source = inspect.getsource(pb.smoke_test_router9_models)
+        body = source
         if '"""' in body:
             first = body.index('"""')
             second = body.index('"""', first + 3)
@@ -1577,7 +1622,7 @@ class TestOpenRouterAdapter:
             assert model == "anthropic/anything"
             return sentinel
 
-        monkeypatch.setattr(pb, "smoke_test_openrouter_model", fake_smoke)
+        monkeypatch.setattr(_openrouter_mod, "smoke_test_openrouter_model", fake_smoke)
         adapter = pb.OpenRouterAdapter()
         assert adapter.run_test("anthropic/anything") == sentinel
 
@@ -1627,14 +1672,10 @@ class TestSmokeTestOpenRouterModels:
 
         The selected-model smoke test lives in smoke_test_openrouter_model().
         """
-        from pathlib import Path
+        import inspect
 
-        source = Path(pb.__file__).read_text()
-        marker = "def smoke_test_openrouter_models("
-        start = source.index(marker)
-        rest = source[start + len(marker) :]
-        end_idx = rest.find("\ndef ")
-        body = rest[:end_idx] if end_idx != -1 else rest
+        source = inspect.getsource(pb.smoke_test_openrouter_models)
+        body = source
         if '"""' in body:
             first = body.index('"""')
             second = body.index('"""', first + 3)
@@ -2399,10 +2440,17 @@ class TestProbeGgufIsMtp:
         assert "oversized-string-array" in out["reason"]
 
 
+def _patch_mtp_config(monkeypatch, mtp_enabled, spec_draft_n_max):
+    """Patch LLAMACPP MTP config constants on all relevant modules."""
+    monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_MTP_ENABLED", mtp_enabled)
+    monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_SPEC_DRAFT_N_MAX", spec_draft_n_max)
+    monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", mtp_enabled)
+    monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", spec_draft_n_max)
+
+
 class TestDetectLlamaCppMtp:
     def test_env_override_off_short_circuits(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "0")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, "0", None)
         p = tmp_path / "Qwen3.6-27B-MTP.gguf"
         _write_minimal_gguf(p, name="Qwen3.6-27B-MTP")
         out = pb.detect_llamacpp_mtp(p)
@@ -2410,8 +2458,7 @@ class TestDetectLlamaCppMtp:
         assert out["source"] == "env-override"
 
     def test_env_override_on_forces_enabled(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, "1", None)
         # File does not exist — env override still wins.
         out = pb.detect_llamacpp_mtp(tmp_path / "anything.gguf")
         assert out["enabled"] is True
@@ -2419,24 +2466,21 @@ class TestDetectLlamaCppMtp:
         assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
 
     def test_filename_heuristic_triggers_when_probe_inconclusive(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", None)
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, None, None)
         # No actual file → probe returns file-not-found; filename pattern wins.
         out = pb.detect_llamacpp_mtp(tmp_path / "Qwen3.6-27B-MTP-Q4_K_M.gguf")
         assert out["enabled"] is True
         assert out["source"] == "filename"
 
     def test_no_false_positive_on_unrelated_name(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", None)
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, None, None)
         # "promtp" must not match — boundary-anchored regex.
         out = pb.detect_llamacpp_mtp(tmp_path / "some-promtp-model.gguf")
         assert out["enabled"] is False
         assert out["source"] == "disabled"
 
     def test_gguf_probe_overrides_filename_when_present(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", None)
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, None, None)
         # Plain filename, but the GGUF metadata declares MTP.
         p = tmp_path / "plain-name.gguf"
         _write_minimal_gguf(p, name="Qwen3.6-27B-MTP-Q4")
@@ -2445,26 +2489,22 @@ class TestDetectLlamaCppMtp:
         assert out["source"] == "gguf-metadata"
 
     def test_spec_draft_n_max_env_override(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        _patch_mtp_config(monkeypatch, "1", "6")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["spec_draft_n_max"] == 6
 
     def test_spec_draft_n_max_ignores_garbage(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "fast-and-loose")
+        _patch_mtp_config(monkeypatch, "1", "fast-and-loose")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
 
     def test_spec_draft_n_max_clamps_out_of_range(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        _patch_mtp_config(monkeypatch, "1", "99")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
 
     def test_conflict_with_mmproj_disables_and_warns(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, "1", None)
         out = pb.detect_llamacpp_mtp(
             tmp_path / "x.gguf",
             extra_argv=["--mmproj", "/tmp/proj.gguf"],
@@ -2474,8 +2514,7 @@ class TestDetectLlamaCppMtp:
         assert "mmproj" in (out["warning"] or "")
 
     def test_conflict_with_np_gt_1_disables_and_warns(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, "1", None)
         out = pb.detect_llamacpp_mtp(
             tmp_path / "x.gguf",
             extra_argv=["-np", "4"],
@@ -2485,8 +2524,7 @@ class TestDetectLlamaCppMtp:
         assert "-np 4" in (out["warning"] or "")
 
     def test_np_equal_1_does_not_conflict(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, "1", None)
         out = pb.detect_llamacpp_mtp(
             tmp_path / "x.gguf",
             extra_argv=["-np", "1"],
@@ -2495,8 +2533,7 @@ class TestDetectLlamaCppMtp:
 
     def test_parallel_long_form_also_conflicts(self, monkeypatch, tmp_path):
         # `--parallel 4` should behave the same as `-np 4`.
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        _patch_mtp_config(monkeypatch, "1", None)
         out = pb.detect_llamacpp_mtp(
             tmp_path / "x.gguf",
             extra_argv=["--parallel", "4"],
@@ -2507,8 +2544,7 @@ class TestDetectLlamaCppMtp:
     def test_conflict_clears_spec_draft_n_max(self, monkeypatch, tmp_path):
         # On conflict, ``spec_draft_n_max`` should be ``None`` so the disabled
         # state is unambiguous to downstream consumers.
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        _patch_mtp_config(monkeypatch, "1", "6")
         out = pb.detect_llamacpp_mtp(
             tmp_path / "x.gguf",
             extra_argv=["--mmproj", "/tmp/proj.gguf"],
@@ -2519,8 +2555,7 @@ class TestDetectLlamaCppMtp:
 
     def test_bad_spec_env_value_emits_note_out_of_range(self, monkeypatch, tmp_path):
         # Out-of-range integer should fall back to default AND surface a note.
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        _patch_mtp_config(monkeypatch, "1", "99")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
         assert any("out of range" in n for n in out["notes"])
@@ -2528,16 +2563,14 @@ class TestDetectLlamaCppMtp:
 
     def test_bad_spec_env_value_emits_note_garbage(self, monkeypatch, tmp_path):
         # Non-integer value should fall back to default AND surface a note.
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "fast-and-loose")
+        _patch_mtp_config(monkeypatch, "1", "fast-and-loose")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["spec_draft_n_max"] == pb.LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX
         assert any("not an integer" in n for n in out["notes"])
 
     def test_good_spec_env_value_emits_no_note(self, monkeypatch, tmp_path):
         # Valid in-range value should not produce any note.
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "1")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "6")
+        _patch_mtp_config(monkeypatch, "1", "6")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["spec_draft_n_max"] == 6
         assert out["notes"] == []
@@ -2545,8 +2578,7 @@ class TestDetectLlamaCppMtp:
     def test_notes_preserved_through_env_override_off(self, monkeypatch, tmp_path):
         # Env-override-off short-circuits early but still surfaces any spec
         # env diagnostics the operator should see.
-        monkeypatch.setattr(pb, "LLAMACPP_MTP_ENABLED", "0")
-        monkeypatch.setattr(pb, "LLAMACPP_SPEC_DRAFT_N_MAX", "99")
+        _patch_mtp_config(monkeypatch, "0", "99")
         out = pb.detect_llamacpp_mtp(tmp_path / "x.gguf")
         assert out["enabled"] is False
         assert out["source"] == "env-override"
@@ -2555,13 +2587,13 @@ class TestDetectLlamaCppMtp:
 
 class TestLlamaCppGpuOffload:
     def test_env_override_wins_over_profile(self, monkeypatch):
-        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", "33")
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_N_GPU_LAYERS", "33")
         out = pb.detect_llamacpp_gpu_offload({"llmfit_system": {"system": {"has_gpu": False}}})
         assert out["n_gpu_layers"] == 33
         assert out["kind"] == "env-override"
 
     def test_apple_silicon_profile_uses_metal(self, monkeypatch):
-        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_N_GPU_LAYERS", None)
         profile = {
             "llmfit_system": {"system": {"has_gpu": True, "gpu_name": "apple-m2"}},
         }
@@ -2572,7 +2604,7 @@ class TestLlamaCppGpuOffload:
     def test_cpu_only_when_no_signal(self, monkeypatch):
         import platform as _platform
 
-        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_N_GPU_LAYERS", None)
         monkeypatch.setattr(pb.shutil, "which", lambda name: None)
         monkeypatch.setattr(_platform, "system", lambda: "Linux")
         monkeypatch.setattr(_platform, "machine", lambda: "x86_64")
@@ -2583,7 +2615,7 @@ class TestLlamaCppGpuOffload:
     def test_cuda_detected_when_nvidia_smi_present(self, monkeypatch):
         import platform as _platform
 
-        monkeypatch.setattr(pb, "LLAMACPP_N_GPU_LAYERS", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_N_GPU_LAYERS", None)
         monkeypatch.setattr(
             pb.shutil, "which", lambda name: "/usr/bin/nvidia-smi" if name == "nvidia-smi" else None
         )
@@ -2594,17 +2626,17 @@ class TestLlamaCppGpuOffload:
         assert out["kind"] == "cuda"
 
     def test_threads_uses_profile_cpu_cores(self, monkeypatch):
-        monkeypatch.setattr(pb, "LLAMACPP_THREADS", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_THREADS", None)
         profile = {"llmfit_system": {"system": {"cpu_cores": 12}}}
         assert pb.detect_llamacpp_threads(profile) == 12
 
     def test_threads_caps_at_16(self, monkeypatch):
-        monkeypatch.setattr(pb, "LLAMACPP_THREADS", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_THREADS", None)
         profile = {"llmfit_system": {"system": {"cpu_cores": 64}}}
         assert pb.detect_llamacpp_threads(profile) == 16
 
     def test_threads_env_override(self, monkeypatch):
-        monkeypatch.setattr(pb, "LLAMACPP_THREADS", "6")
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_THREADS", "6")
         assert pb.detect_llamacpp_threads(None) == 6
 
 
@@ -2623,7 +2655,7 @@ class TestLlamaCppWaitUntilReady:
             assert "/health" in url
             return _Resp()
 
-        monkeypatch.setattr(pb, "LLAMACPP_SERVER_HOST", "127.0.0.1")
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_SERVER_HOST", "127.0.0.1")
         import urllib.request as _u
 
         monkeypatch.setattr(_u, "urlopen", _fake_urlopen)
@@ -2670,7 +2702,7 @@ class TestLlamaCppWaitUntilReady:
 class TestLlamaCppStartServer:
     def test_returns_error_when_binary_missing(self, monkeypatch, isolated_state):
         pb_mod, _wiz, _ = isolated_state
-        monkeypatch.setattr(pb_mod, "llamacpp_detect", lambda: {"present": False})
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_detect", lambda: {"present": False})
         out = pb_mod.llamacpp_start_server(model_path="/tmp/model.gguf")
         assert out["ok"] is False
         assert "binary not found" in out["error"]
@@ -2679,7 +2711,7 @@ class TestLlamaCppStartServer:
     def test_returns_error_when_model_path_missing(self, monkeypatch, isolated_state, tmp_path):
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2695,7 +2727,7 @@ class TestLlamaCppStartServer:
         pb_mod, _wiz, _ = isolated_state
         # Pretend the binary is present.
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2720,7 +2752,7 @@ class TestLlamaCppStartServer:
             return _FakeProc()
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", _fake_popen)
-        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
 
         out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18003)
         assert out["ok"] is True
@@ -2739,7 +2771,7 @@ class TestLlamaCppStartServer:
     def test_spawn_failure_returns_argv_for_manual_run(self, monkeypatch, isolated_state, tmp_path):
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2763,7 +2795,7 @@ class TestLlamaCppStartServer:
     def test_readiness_timeout_terminates_child(self, monkeypatch, isolated_state, tmp_path):
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2780,10 +2812,10 @@ class TestLlamaCppStartServer:
                 return None
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
-        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: False)
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: False)
         stop_calls: list = []
         monkeypatch.setattr(
-            pb_mod, "llamacpp_stop_server", lambda h, **kw: stop_calls.append(h) or True
+            _llamacpp_mod, "llamacpp_stop_server", lambda h, **kw: stop_calls.append(h) or True
         )
 
         out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18005)
@@ -2797,7 +2829,7 @@ class TestLlamaCppStartServer:
         # wizard's defaults.
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2814,7 +2846,7 @@ class TestLlamaCppStartServer:
                 return None
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
-        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
 
         out = pb_mod.llamacpp_start_server(
             model_path=str(model_file),
@@ -2832,10 +2864,10 @@ class TestLlamaCppStartServer:
         # (not just in detect_llamacpp_mtp unit tests). MTP flags must NOT
         # land in the spawned argv.
         pb_mod, _wiz, _ = isolated_state
-        monkeypatch.setattr(pb_mod, "LLAMACPP_MTP_ENABLED", None)
-        monkeypatch.setattr(pb_mod, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_MTP_ENABLED", None)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_SPEC_DRAFT_N_MAX", None)
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2852,7 +2884,7 @@ class TestLlamaCppStartServer:
                 return None
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
-        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
 
         out = pb_mod.llamacpp_start_server(
             model_path=str(model_file),
@@ -2872,7 +2904,7 @@ class TestLlamaCppStartServer:
     def test_post_readiness_exit_cleans_up_pid_file(self, monkeypatch, isolated_state, tmp_path):
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(
-            pb_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
         )
         monkeypatch.setattr(
             pb_mod.shutil,
@@ -2897,7 +2929,7 @@ class TestLlamaCppStartServer:
                 return 13
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FlappingProc())
-        monkeypatch.setattr(pb_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
 
         out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18006)
         assert out["ok"] is False
@@ -2964,7 +2996,7 @@ class TestLlamaCppStopServer:
                 return 0
 
         # Stub _signal_process so it doesn't actually fire on the host.
-        monkeypatch.setattr(pb_mod, "_signal_process", lambda pid, sig: None)
+        monkeypatch.setattr(_llamacpp_mod, "_signal_process", lambda pid, sig: None)
 
         fake = _FakeProc()
         handle = pb_mod.LlamaServerHandle(
@@ -3006,7 +3038,7 @@ class TestLlamaCppStopServer:
                     raise pb_mod.subprocess.TimeoutExpired(cmd="x", timeout=timeout or 0)
                 return -9
 
-        monkeypatch.setattr(pb_mod, "_signal_process", lambda pid, sig: None)
+        monkeypatch.setattr(_llamacpp_mod, "_signal_process", lambda pid, sig: None)
         proc = _StuckProc()
         handle = pb_mod.LlamaServerHandle(
             pid=proc.pid,
@@ -3026,7 +3058,7 @@ class TestLlamaCppStopServer:
 class TestLlamaCppStopServerByPort:
     def test_no_pid_file_refuses(self, isolated_state, monkeypatch, tmp_path):
         pb_mod, _wiz, _ = isolated_state
-        monkeypatch.setattr(pb_mod, "LLAMACPP_PID_DIR", tmp_path)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_PID_DIR", tmp_path)
         out = pb_mod.llamacpp_stop_server_by_port(8001)
         assert out["ok"] is False
         assert out["pid"] is None
@@ -3034,10 +3066,10 @@ class TestLlamaCppStopServerByPort:
 
     def test_stale_pid_file_is_removed(self, isolated_state, monkeypatch, tmp_path):
         pb_mod, _wiz, _ = isolated_state
-        monkeypatch.setattr(pb_mod, "LLAMACPP_PID_DIR", tmp_path)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_PID_DIR", tmp_path)
         pid_file = tmp_path / "llama-server-8001.pid"
         pid_file.write_text("4242")
-        monkeypatch.setattr(pb_mod, "_pid_gone", lambda pid: True)
+        monkeypatch.setattr(_llamacpp_mod, "_pid_gone", lambda pid: True)
         out = pb_mod.llamacpp_stop_server_by_port(8001)
         assert out["ok"] is True
         assert out["already_gone"] is True
@@ -3046,12 +3078,12 @@ class TestLlamaCppStopServerByPort:
 
     def test_alive_then_dies_after_sigterm(self, isolated_state, monkeypatch, tmp_path):
         pb_mod, _wiz, _ = isolated_state
-        monkeypatch.setattr(pb_mod, "LLAMACPP_PID_DIR", tmp_path)
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_PID_DIR", tmp_path)
         pid_file = tmp_path / "llama-server-8001.pid"
         pid_file.write_text("4242")
 
         signals: list[tuple[int, int]] = []
-        monkeypatch.setattr(pb_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig)))
+        monkeypatch.setattr(_llamacpp_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig)))
 
         gone_states = iter([False, True])
 
@@ -3061,7 +3093,7 @@ class TestLlamaCppStopServerByPort:
             except StopIteration:
                 return True
 
-        monkeypatch.setattr(pb_mod, "_pid_gone", _gone)
+        monkeypatch.setattr(_llamacpp_mod, "_pid_gone", _gone)
         monkeypatch.setattr(pb_mod.time, "sleep", lambda _s: None)
 
         out = pb_mod.llamacpp_stop_server_by_port(8001, grace_seconds=0.1)
@@ -3091,21 +3123,28 @@ def _stub_machine_internals(monkeypatch, pb_mod):
     """
     Patch the slow / network-touching parts of machine_profile so we can
     isolate the run_llmfit branch without mocking llmfit_system itself.
+
+    Patches must target the sub-module that *uses* each symbol, because
+    ``_machine_profile._probe_machine_profile_inputs`` lazy-imports from
+    ``_llmfit``, ``_lmstudio``, ``_llamacpp_lifecycle``, ``_hf_api``,
+    ``_vllm``, ``_ollama``, and ``_adapters`` and calls ``command_version``
+    from its own module-level import.
     """
 
     def fake_command_version(name):
         return {"present": True, "version": f"{name} 1.0.0"}
 
-    monkeypatch.setattr(pb_mod, "command_version", fake_command_version)
-    monkeypatch.setattr(pb_mod, "lms_info", lambda: {"present": False, "models": []})
-    monkeypatch.setattr(pb_mod, "llamacpp_detect", lambda: {"present": False, "version": ""})
-    monkeypatch.setattr(pb_mod, "huggingface_cli_detect", lambda: {"present": False, "version": ""})
+    monkeypatch.setattr(_mp_mod, "command_version", fake_command_version)
+    monkeypatch.setattr(_ollama_mod, "command_version", fake_command_version)
+    monkeypatch.setattr(_lmstudio_mod, "lms_info", lambda: {"present": False, "models": []})
+    monkeypatch.setattr(_llamacpp_mod, "llamacpp_detect", lambda: {"present": False, "version": ""})
+    monkeypatch.setattr(_hf_api_mod, "huggingface_cli_detect", lambda: {"present": False, "version": ""})
     monkeypatch.setattr(
-        pb_mod,
+        _vllm_mod,
         "vllm_info",
         lambda: {"present": False, "version": "", "base_url": "http://localhost:8000"},
     )
-    monkeypatch.setattr(pb_mod, "parse_ollama_list", lambda: [])
+    monkeypatch.setattr(_ollama_mod, "parse_ollama_list", lambda: [])
 
     class _StubRouter9:
         def detect(self):
@@ -3114,9 +3153,9 @@ def _stub_machine_internals(monkeypatch, pb_mod):
         def healthcheck(self):
             return {"ok": False}
 
-    monkeypatch.setattr(pb_mod, "Router9Adapter", _StubRouter9)
+    monkeypatch.setattr(_adapters_mod, "Router9Adapter", _StubRouter9)
     monkeypatch.setattr(
-        pb_mod,
+        _hf_api_mod,
         "disk_usage_for",
         lambda _path: {
             "total_bytes": 0,
@@ -3140,7 +3179,7 @@ class TestMachineProfileLazyLlmfit:
             calls.append(1)
             return {"system": {"available_ram_gb": 32}}
 
-        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_system", fake_llmfit)
 
         profile = pb_mod.machine_profile(run_llmfit=False)
 
@@ -3156,7 +3195,7 @@ class TestMachineProfileLazyLlmfit:
             calls.append(1)
             return {"system": {"available_ram_gb": 32}}
 
-        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_system", fake_llmfit)
 
         profile = pb_mod.machine_profile(run_llmfit=True)
 
@@ -3175,7 +3214,7 @@ class TestMachineProfileLazyLlmfit:
             calls.append(1)
             return {"system": {"available_ram_gb": 32}}
 
-        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_system", fake_llmfit)
 
         # First call (run_llmfit=True): builds + populates llmfit_system in cache.
         first = pb_mod.machine_profile(run_llmfit=True)
@@ -3201,7 +3240,7 @@ class TestMachineProfileLazyLlmfit:
             calls.append(1)
             return {"system": {"available_ram_gb": 64}}
 
-        monkeypatch.setattr(pb_mod, "llmfit_system", fake_llmfit)
+        monkeypatch.setattr(_llmfit_mod, "llmfit_system", fake_llmfit)
 
         # First call: defer the scan — sentinel is persisted.
         first = pb_mod.machine_profile(run_llmfit=False)
@@ -3235,7 +3274,7 @@ class TestMergeModelsForEngine:
         # Stub llmfit_coding_candidates to return a candidate whose ollama_tag
         # is already installed.
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda **_kw: [
                 {
@@ -3259,7 +3298,7 @@ class TestMergeModelsForEngine:
             "llmfit_system": {"system": {"available_ram_gb": 32}},
         }
         monkeypatch.setattr(
-            pb,
+            _llmfit_mod,
             "llmfit_coding_candidates",
             lambda **_kw: [
                 {
@@ -3302,7 +3341,7 @@ class TestMergeModelsForEngine:
     def test_empty_both(self, monkeypatch):
         """No installed models AND no cached candidates → empty list."""
         profile = {"ollama": {"models": []}}
-        monkeypatch.setattr(pb, "llmfit_coding_candidates", lambda **_kw: [])
+        monkeypatch.setattr(_llmfit_mod, "llmfit_coding_candidates", lambda **_kw: [])
         # No llmfit_system at all → falls through to return-only-installed branch.
         assert pb.merge_models_for_engine(profile, "ollama") == []
 

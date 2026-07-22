@@ -61,7 +61,15 @@ def isolated_state(tmp_path, monkeypatch):
     # Pi coding agent: prevent _pi_agent_dir() from resolving to the real ~/.pi/agent.
     monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
 
-    # Reload core first, then wizard (wizard imports core).
+    # Reload _config first so constants pick up new env vars.
+    import claude_codex_local._config as _cfg_mod
+
+    _cfg_mod = importlib.reload(_cfg_mod)
+    # Reload every sub-module that imports config constants at module-load
+    # time, otherwise stale copies linger after the _config reload above.
+    for _mod_name in _CONFIG_MODULES:
+        importlib.reload(importlib.import_module(_mod_name))
+    # Now reload core (which re-imports from the refreshed sub-modules), then wizard.
     import claude_codex_local.core as pb_mod
 
     pb_mod = importlib.reload(pb_mod)
@@ -251,6 +259,94 @@ def put_stub(fake_bin):
 # ---------------------------------------------------------------------------
 # Local-tier helper — skip when the real tool isn't installed.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Shared monkeypatch helpers — since sub-modules now import ``run``,
+# ``command_version``, and config constants directly (rather than through
+# ``core._pb``), tests must patch the target sub-module instead of (or in
+# addition to) ``core``.  These helpers make that easy.
+# ---------------------------------------------------------------------------
+
+
+def patch_submodules(
+    monkeypatch,
+    func_name: str,
+    mock,
+    *,
+    modules: tuple[str, ...] | None = None,
+    also_pb: bool = True,
+) -> None:
+    """Patch *func_name* on every sub-module listed in *modules*.
+
+    If *also_pb* is true (default) the same name is patched on ``core`` too,
+    so direct ``pb.func_name`` access in test assertions still works.
+    """
+    if modules is not None:
+        for mod_name in modules:
+            import importlib
+
+            mod = importlib.import_module(mod_name)
+            monkeypatch.setattr(mod, func_name, mock)
+    if also_pb:
+        import claude_codex_local.core as pb_mod
+
+        monkeypatch.setattr(pb_mod, func_name, mock)
+
+
+_RUN_MODULES = (
+    "claude_codex_local._ollama",
+    "claude_codex_local._llmfit",
+    "claude_codex_local._hf_api",
+    "claude_codex_local._lmstudio",
+    "claude_codex_local._doctor",
+)
+
+_COMMAND_VERSION_MODULES = (
+    "claude_codex_local._ollama",
+    "claude_codex_local._llmfit",
+    "claude_codex_local._llamacpp_lifecycle",
+    "claude_codex_local._machine_profile",
+    "claude_codex_local._adapters",
+    "claude_codex_local._lmstudio",
+    "claude_codex_local._vllm",
+)
+
+_CONFIG_MODULES = (
+    "claude_codex_local._ollama",
+    "claude_codex_local._llmfit",
+    "claude_codex_local._llamacpp_lifecycle",
+    "claude_codex_local._machine_profile",
+    "claude_codex_local._adapters",
+    "claude_codex_local._lmstudio",
+    "claude_codex_local._vllm",
+    "claude_codex_local._shell",
+    "claude_codex_local._openrouter",
+    "claude_codex_local._router9",
+)
+
+
+def patch_run(monkeypatch, mock):
+    patch_submodules(monkeypatch, "run", mock, modules=_RUN_MODULES)
+
+
+def patch_command_version(monkeypatch, mock):
+    patch_submodules(monkeypatch, "command_version", mock, modules=_COMMAND_VERSION_MODULES)
+
+
+def patch_config_constant(monkeypatch, name: str, value):
+    """Patch a config constant where it's imported (sub-modules) + pb."""
+    import claude_codex_local._config as _cfg_mod
+
+    monkeypatch.setattr(_cfg_mod, name, value)
+    for mod_name in _CONFIG_MODULES:
+        import importlib
+
+        mod = importlib.import_module(mod_name)
+        monkeypatch.setattr(mod, name, value)
+    import claude_codex_local.core as pb_mod
+
+    monkeypatch.setattr(pb_mod, name, value)
 
 
 def pytest_collection_modifyitems(config, items):
