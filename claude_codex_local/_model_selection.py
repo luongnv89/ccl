@@ -49,12 +49,12 @@ def rank_candidates_for_mode(candidates: list[dict[str, Any]], mode: str) -> lis
 
 
 def recommend_for_mode(profile: dict[str, Any], mode: str, engine: str) -> dict[str, Any] | None:
-    from claude_codex_local._llmfit import llmfit_coding_candidates
+    import claude_codex_local.core as _core
 
     if engine not in ("ollama", "lmstudio", "llamacpp"):
         return None
 
-    candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
+    candidates = _core.llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
     ranked = rank_candidates_for_mode(candidates, mode)
     if not ranked:
         return None

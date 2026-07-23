@@ -10,7 +10,7 @@ from typing import Any
 from claude_codex_local._config import HF_TO_OLLAMA, OLLAMA_API_KEY, _is_local_base_url
 from claude_codex_local._shell import (
     _auth_headers,
-    command_version,
+    command_version,  # noqa: F401 — kept for test monkeypatch compat (ollama_info uses _core.command_version)
     ollama_base_url,
 )
 from claude_codex_local._shell import (
@@ -97,7 +97,7 @@ def ollama_info() -> dict[str, Any]:
     # re-exports on the core (pb) facade.
     import claude_codex_local.core as _core
 
-    cli_info = command_version("ollama")
+    cli_info = _core.command_version("ollama")
     models = _core._ollama_http_models()
     server_reachable = models is not None
     if models is None and cli_info.get("present"):
