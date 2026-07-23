@@ -579,9 +579,10 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
             else:
                 caveats.append(f"Could not load model in LM Studio: {load_result.get('error', '')}")
         elif runtime == "ollama":
-            from claude_codex_local._ollama import smoke_test_ollama_model
+            import claude_codex_local.core as _core
 
-            smoke = smoke_test_ollama_model(selected_tag)
+            smoke = _core.smoke_test_ollama_model(selected_tag)
+            assert smoke is not None
             if smoke.get("ok"):
                 rationale.append("Live ollama smoke test passed.")
             else:

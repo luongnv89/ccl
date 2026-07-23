@@ -149,14 +149,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "profile":
-        from claude_codex_local._machine_profile import machine_profile
+        import claude_codex_local.core as _core
 
-        print_payload(machine_profile())
+        print_payload(_core.machine_profile())
     elif args.command == "recommend":
-        from claude_codex_local._machine_profile import machine_profile
-        from claude_codex_local._model_selection import select_best_model
+        import claude_codex_local.core as _core
 
-        print_payload(select_best_model(machine_profile(), args.mode))
+        print_payload(_core.select_best_model(_core.machine_profile(), args.mode))
     elif args.command == "doctor":
         print_payload(doctor(args.run_codex_smoke, args.mode))
     elif args.command == "adapters":
@@ -183,9 +182,9 @@ def main() -> None:
             "dry_run": not args.execute,
         }
         if args.action == "optimize":
-            from claude_codex_local._machine_profile import machine_profile
+            import claude_codex_local.core as _core
 
-            kwargs["profile"] = machine_profile(run_llmfit=False)
+            kwargs["profile"] = _core.machine_profile(run_llmfit=False)
         try:
             engine_result = run_engine_action(
                 args.engine,

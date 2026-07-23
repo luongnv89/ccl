@@ -99,7 +99,6 @@ from claude_codex_local._hf_api import (
     _dir_size_bytes,
     _looks_like_not_found,
     disk_usage_for,
-    huggingface_cli_detect,
 )
 from claude_codex_local._llamacpp_lifecycle import (
     LlamaServerConfig,
@@ -187,7 +186,6 @@ from claude_codex_local._ollama import (
     _smoke_test_ollama_cli,
     ollama_info,
     parse_ollama_list,
-    smoke_test_ollama_model,
 )
 from claude_codex_local._openrouter import (
     fetch_openrouter_free_models,
@@ -236,6 +234,18 @@ def llmfit_coding_candidates(*a, **k):
     """Delegate to ``_llmfit.llmfit_coding_candidates`` at call time so that
     test monkeypatches on ``_llmfit.llmfit_coding_candidates`` propagate."""
     return _llmfit_mod.llmfit_coding_candidates(*a, **k)
+
+
+def huggingface_cli_detect(*a, **k):
+    """Delegate to ``_hf_api.huggingface_cli_detect`` at call time so that
+    test monkeypatches on ``_hf_api.huggingface_cli_detect`` propagate."""
+    return _hf_api_mod.huggingface_cli_detect(*a, **k)
+
+
+def smoke_test_ollama_model(*a, **k):
+    """Delegate to ``_ollama.smoke_test_ollama_model`` at call time so that
+    test monkeypatches on ``_ollama.smoke_test_ollama_model`` propagate."""
+    return _ollama_mod.smoke_test_ollama_model(*a, **k)
 
 
 # ---------------------------------------------------------------------------

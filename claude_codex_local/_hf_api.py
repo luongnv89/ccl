@@ -4,7 +4,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -45,7 +44,13 @@ def huggingface_download_gguf(
     include: str | None = None,
     stream: bool = True,
 ) -> dict[str, Any]:
-    det = huggingface_cli_detect()
+    # Import core at call time so that test monkeypatches on
+    # core.huggingface_cli_detect take effect (some tests patch
+    # core directly, others patch _hf_api — core is the common
+    # target since tests use the `pb` (core) module reference).
+    import claude_codex_local.core as _core
+
+    det = _core.huggingface_cli_detect()
     if not det.get("present"):
         return {
             "ok": False,
@@ -64,10 +69,15 @@ def huggingface_download_gguf(
     if local_dir:
         cmd += ["--local-dir", local_dir]
 
+    # Import core at call time so that test monkeypatches on
+    # core.subprocess and core.run take effect (tests patch the re-export
+    # on the core facade).
+    import claude_codex_local.core as _core
+
     start = time.monotonic()
     try:
         if stream:
-            proc = subprocess.Popen(cmd, env=ensure_path(None))
+            proc = _core.subprocess.Popen(cmd, env=ensure_path(None))
             try:
                 rc = proc.wait(timeout=3600)
             except KeyboardInterrupt:
@@ -77,9 +87,9 @@ def huggingface_download_gguf(
                     proc.terminate()
                     try:
                         proc.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
+                    except _core.subprocess.TimeoutExpired:
                         proc.kill()
-                        with contextlib.suppress(subprocess.TimeoutExpired):
+                        with contextlib.suppress(_core.subprocess.TimeoutExpired):
                             proc.wait(timeout=3)
                 except Exception:
                     pass
@@ -119,8 +129,6 @@ def huggingface_download_gguf(
                 "elapsed_seconds": elapsed,
                 "not_found": False,
             }
-        import claude_codex_local.core as _core
-
         cp = _core.run(cmd, timeout=600, check=False)
         elapsed = time.monotonic() - start
         if cp.returncode != 0:

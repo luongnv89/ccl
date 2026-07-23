@@ -8,7 +8,18 @@ import time
 from typing import Any
 
 from claude_codex_local._config import HF_TO_OLLAMA, OLLAMA_API_KEY, _is_local_base_url
-from claude_codex_local._shell import _auth_headers, command_version, ollama_base_url
+from claude_codex_local._shell import (
+    _auth_headers,
+    command_version,
+    ollama_base_url,
+)
+from claude_codex_local._shell import (
+    run as _run_from_shell,
+)
+
+# Re-export run so that core.run can check _ollama.run for monkeypatches
+# (tests that use _patch_run patch _ollama.run).
+run = _run_from_shell
 
 
 def _ollama_http_models(timeout: int = 5) -> list[dict[str, Any]] | None:
