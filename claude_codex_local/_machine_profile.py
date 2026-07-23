@@ -166,15 +166,17 @@ def _probe_machine_profile_inputs(run_llmfit: bool) -> MachineProfileProbeResult
     from claude_codex_local._hf_api import huggingface_cli_detect
     from claude_codex_local._llamacpp_lifecycle import llamacpp_info
     from claude_codex_local._llmfit import llmfit_system
-    from claude_codex_local._lmstudio import lms_info
     from claude_codex_local._vllm import vllm_info
 
     llmfit_sys = llmfit_system() if run_llmfit else None
-    lms = lms_info()
+    import claude_codex_local.core as _core
+
+    lms = _core.lms_info()
     llamacpp = llamacpp_info()
     # Import core at call time so test monkeypatches on core.command_version
     # take effect (tests patch the re-export on the core facade).
-    import claude_codex_local.core as _core
+    # (already imported above)
+    # lms_info is also resolved via _core so monkeypatches on core.lms_info apply.
 
     hf_cli = huggingface_cli_detect()
     vllm = vllm_info()
@@ -222,7 +224,6 @@ def _probe_machine_profile_inputs(run_llmfit: bool) -> MachineProfileProbeResult
 def _assemble_machine_profile(
     probes: MachineProfileProbeResults, *, run_llmfit: bool
 ) -> dict[str, Any]:
-    import claude_codex_local.core as _core
     from claude_codex_local._hf_api import disk_usage_for
 
     harnesses_present = [
@@ -260,7 +261,7 @@ def _assemble_machine_profile(
             },
             "lmstudio": {
                 "present": probes.lms["present"],
-                "version": _core.command_version("lms")["version"] if probes.lms["present"] else "",
+                "version": probes.lms.get("version", ""),
             },
             "llamacpp": probes.llamacpp,
             "vllm": {
