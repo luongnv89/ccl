@@ -95,17 +95,16 @@ class TestCoreAdaptersFromRegistry:
         import claude_codex_local.core as core_module
 
         source = inspect.getsource(core_module)
-        # The old pattern was: ALL_ADAPTERS = [LMStudioAdapter(), ...]
-        # The new pattern uses _build_adapters()
-        assert "ALL_ADAPTERS: list = _build_adapters()" in source
+        # core.py is now a facade — the adapter list lives in _adapters.py
+        assert "ALL_ADAPTERS" in source
 
     def test_core_imports_registry(self):
         """core.py must reference the engine registry."""
         import inspect
 
-        import claude_codex_local.core as core_module
+        import claude_codex_local._adapters as adapters_module
 
-        source = inspect.getsource(core_module)
+        source = inspect.getsource(adapters_module)
         assert "_ENGINE_ADAPTER_MAP" in source
         assert "_build_adapters" in source
 
