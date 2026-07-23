@@ -4,24 +4,50 @@ claude-codex-local core — decomposed into focused modules under
 ``claude_codex_local/_*.py`` with this file acting as a backward-compatible
 re-export facade so that all existing imports (``from claude_codex_local import
 core as pb`` → ``pb.*``) continue working with zero source changes.
+
+Monkeypatch-propagation note:
+  - Direct imports (e.g. STATE_DIR, machine_profile, select_best_model) are
+    bound at module-load time and work for all callers.
+  - Functions that tests monkeypatch via ``_patch_run`` / ``_patch_command_version``
+    are resolved at call time via ``__getattr__`` or wrapper functions so that
+    patches on the underlying sub-modules (``_ollama``, ``_llmfit``, ``_hf_api``,
+    ``_lmstudio``) propagate through ``core`` automatically.
 """
 
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# Re-export everything from the sub-modules in dependency order so that
-# module-level imports in downstream code resolve without circular errors.
-#
-# Also re-export stdlib modules that sub-modules import, so that tests
-# monkeypatching ``pb.shutil``, ``pb.os``, etc. propagate correctly to all
-# internal call sites (every sub-module shares the same stdlib module objects).
+# Stdlib re-exports — shared module objects so test monkeypatches on
+# ``pb.shutil``, ``pb.os``, etc. propagate to all internal call sites.
 # ---------------------------------------------------------------------------
-
 import os as os
 import shutil as shutil
 import subprocess as subprocess
 import time as time
 
+# Re-export sub-modules for monkeypatch propagation.
+import claude_codex_local._hf_api as _hf_api_mod  # noqa: F401
+import claude_codex_local._llmfit as _llmfit_mod  # noqa: F401
+import claude_codex_local._lmstudio as _lmstudio_mod  # noqa: F401
+import claude_codex_local._ollama as _ollama_mod  # noqa: F401
+import claude_codex_local._shell as _shell_mod  # noqa: F401
+
+# ---------------------------------------------------------------------------
+# Sub-module imports — sorted alphabetically by module name for ruff I001.
+# ---------------------------------------------------------------------------
+from claude_codex_local._adapters import (
+    _ADAPTER_PREFERENCE_ORDER,
+    _ENGINE_ADAPTER_MAP,
+    ALL_ADAPTERS,
+    LlamaCppAdapter,
+    LMStudioAdapter,
+    OllamaAdapter,
+    OpenRouterAdapter,
+    Router9Adapter,
+    RuntimeAdapter,
+    VLLMAdapter,
+    _build_adapters,
+)
 from claude_codex_local._config import (
     HF_TO_LMS_HUB,
     HF_TO_OLLAMA,
@@ -59,93 +85,12 @@ from claude_codex_local._config import (
     _normalize_base_url,
     _probe_openai_models_endpoint,
 )
-
-from claude_codex_local._shell import (
-    _auth_headers,
-    command_version,
-    ensure_path,
-    ensure_state_dirs,
-    llamacpp_base_url,
-    ollama_base_url,
-    ollama_openai_base_url,
-    require,
-    run as _run_from_shell,
-    run_shell,
-    state_env,
+from claude_codex_local._doctor import (
+    doctor,
+    main,
+    print_payload,
+    smoke_test_codex,
 )
-
-# Re-export _shell module so monkeypatches on _shell.run propagate through
-# core._shell.run (tests that patch _shell.run or the _shell module directly).
-import claude_codex_local._shell as _shell_mod
-
-# Re-export _ollama module so monkeypatches on _ollama.run propagate through
-# core._ollama.run (tests that use _patch_run patch _ollama.run).
-import claude_codex_local._ollama as _ollama_mod
-
-# Wrapper that resolves run at call time, checking _ollama.run first
-# (for tests that use _patch_run to patch _ollama.run), then falling back
-# to _shell.run (for tests that patch core.run directly).
-def run(*args, **kwargs):
-    # If _ollama.run has been monkeypatched, use it.
-    if _ollama_mod.run is not _run_from_shell:
-        return _ollama_mod.run(*args, **kwargs)
-    return _shell_mod.run(*args, **kwargs)
-
-from claude_codex_local._ollama import (
-    _ollama_http_models,
-    _parse_ollama_list_cli,
-    _smoke_test_ollama_cli,
-    ollama_info,
-    parse_ollama_list,
-    smoke_test_ollama_model,
-)
-
-from claude_codex_local._lmstudio import (
-    lms_binary as _lms_binary,
-    lms_download_model,
-    lms_info,
-    lms_load_model,
-    lms_responses_api_ok,
-    lms_running_models,
-    lms_start_server,
-    smoke_test_lmstudio_model,
-)
-
-# Re-export _lmstudio module so monkeypatches on _lmstudio.lms_binary propagate.
-import claude_codex_local._lmstudio as _lmstudio_mod
-
-from claude_codex_local._router9 import (
-    smoke_test_router9_models,
-)
-
-from claude_codex_local._openrouter import (
-    fetch_openrouter_free_models,
-    smoke_test_openrouter_model,
-    smoke_test_openrouter_models,
-)
-
-from claude_codex_local._llmfit import (
-    _canonical_key,
-    _derive_lms_mlx_path,
-    hf_name_to_lms_hub,
-    hf_name_to_ollama_tag,
-    llmfit_coding_candidates as _llmfit_coding_candidates,
-    llmfit_estimate_size_bytes,
-    llmfit_info,
-    llmfit_system,
-)
-
-# Re-export the _llmfit module so that monkeypatches on
-# _llmfit.llmfit_coding_candidates propagate through core._llmfit.
-import claude_codex_local._llmfit as _llmfit_mod
-
-
-# Wrapper that always delegates to _llmfit.llmfit_coding_candidates at call
-# time so that test monkeypatches on _llmfit.llmfit_coding_candidates also
-# propagate through core.llmfit_coding_candidates.
-def llmfit_coding_candidates(*a, **k):
-    return _llmfit_mod.llmfit_coding_candidates(*a, **k)
-
 from claude_codex_local._hf_api import (
     _GGUF_MIRROR_AUTHORS,
     _GGUF_MIRROR_CACHE,
@@ -156,32 +101,6 @@ from claude_codex_local._hf_api import (
     disk_usage_for,
     huggingface_cli_detect,
 )
-
-# Re-export _hf_api module so monkeypatches on _hf_api propagate through
-# core._hf_api.<function> and also via lazy __getattr__ for direct names.
-import claude_codex_local._hf_api as _hf_api_mod
-
-
-# Lazy attribute access so that monkeypatches on _hf_api.<function> propagate
-# through core.<function> automatically (tests that set _hf_api.X = core.X
-# expect them to be the same object after patching).
-_hf_lazy_names = (
-    "huggingface_repo_has_gguf",
-    "huggingface_search_models",
-    "huggingface_download_gguf",
-    "huggingface_fuzzy_find",
-    "huggingface_list_repo_files",
-    "resolve_gguf_mirror",
-)
-
-# Lazy access for _lmstudio.lms_binary so that monkeypatches propagate.
-def __getattr__(name):
-    if name in _hf_lazy_names:
-        return getattr(_hf_api_mod, name)
-    if name == "lms_binary":
-        return getattr(_lmstudio_mod, "lms_binary")
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 from claude_codex_local._llamacpp_lifecycle import (
     LlamaServerConfig,
     LlamaServerHandle,
@@ -203,26 +122,30 @@ from claude_codex_local._llamacpp_lifecycle import (
     safe_repo_slug,
     smoke_test_llamacpp_model,
 )
-
-from claude_codex_local._vllm import (
-    smoke_test_vllm_model,
-    vllm_info,
+from claude_codex_local._llmfit import (
+    _canonical_key,
+    _derive_lms_mlx_path,
+    hf_name_to_lms_hub,
+    hf_name_to_ollama_tag,
+    llmfit_estimate_size_bytes,
+    llmfit_info,
+    llmfit_system,
 )
-
-from claude_codex_local._adapters import (
-    ALL_ADAPTERS,
-    LMStudioAdapter,
-    LlamaCppAdapter,
-    OllamaAdapter,
-    OpenRouterAdapter,
-    Router9Adapter,
-    RuntimeAdapter,
-    VLLMAdapter,
-    _ADAPTER_PREFERENCE_ORDER,
-    _ENGINE_ADAPTER_MAP,
-    _build_adapters,
+from claude_codex_local._llmfit import (
+    llmfit_coding_candidates as _llmfit_coding_candidates,
 )
-
+from claude_codex_local._lmstudio import (
+    lms_binary as _lms_binary,
+)
+from claude_codex_local._lmstudio import (
+    lms_download_model,
+    lms_info,
+    lms_load_model,
+    lms_responses_api_ok,
+    lms_running_models,
+    lms_start_server,
+    smoke_test_lmstudio_model,
+)
 from claude_codex_local._machine_profile import (
     LLMFIT_SKIPPED_SENTINEL,
     MachineProfileCache,
@@ -242,7 +165,6 @@ from claude_codex_local._machine_profile import (
     invalidate_machine_profile_inproc_cache,
     machine_profile,
 )
-
 from claude_codex_local._model_selection import (
     MODE_CHOICES,
     RECOMMENDATION_MODE_DESCRIPTIONS,
@@ -259,13 +181,89 @@ from claude_codex_local._model_selection import (
     select_best_model,
     select_model_decision,
 )
-
-from claude_codex_local._doctor import (
-    doctor,
-    main,
-    print_payload,
-    smoke_test_codex,
+from claude_codex_local._ollama import (
+    _ollama_http_models,
+    _parse_ollama_list_cli,
+    _smoke_test_ollama_cli,
+    ollama_info,
+    parse_ollama_list,
+    smoke_test_ollama_model,
 )
+from claude_codex_local._openrouter import (
+    fetch_openrouter_free_models,
+    smoke_test_openrouter_model,
+    smoke_test_openrouter_models,
+)
+from claude_codex_local._router9 import (
+    smoke_test_router9_models,
+)
+from claude_codex_local._shell import (
+    _auth_headers,
+    command_version,
+    ensure_path,
+    ensure_state_dirs,
+    llamacpp_base_url,
+    ollama_base_url,
+    ollama_openai_base_url,
+    require,
+    run_shell,
+    state_env,
+)
+from claude_codex_local._shell import (
+    run as _run_from_shell,
+)
+from claude_codex_local._vllm import (
+    smoke_test_vllm_model,
+    vllm_info,
+)
+
+# ---------------------------------------------------------------------------
+# Wrapper functions — resolve at call time so test monkeypatches on the
+# underlying sub-modules propagate through the ``core`` facade.
+# ---------------------------------------------------------------------------
+
+
+def run(*args, **kwargs):
+    # If _ollama.run has been monkeypatched, use it; otherwise fall back to
+    # _shell.run.  This covers both _patch_run (patches _ollama.run) and
+    # direct core.run patches.
+    if _ollama_mod.run is not _run_from_shell:  # noqa: SIM108
+        return _ollama_mod.run(*args, **kwargs)
+    return _shell_mod.run(*args, **kwargs)
+
+
+def llmfit_coding_candidates(*a, **k):
+    """Delegate to ``_llmfit.llmfit_coding_candidates`` at call time so that
+    test monkeypatches on ``_llmfit.llmfit_coding_candidates`` propagate."""
+    return _llmfit_mod.llmfit_coding_candidates(*a, **k)
+
+
+# ---------------------------------------------------------------------------
+# Lazy attribute access (__getattr__) — resolves at call time so that
+# monkeypatches on sub-module attributes propagate through core automatically.
+#
+# This is needed for functions that tests patch on the sub-module directly
+# (e.g. ``monkeypatch.setattr(_hf_api, "huggingface_search_models", mock)``)
+# and expect ``core.huggingface_search_models`` to reflect the patch.
+# ---------------------------------------------------------------------------
+
+_hf_lazy_names = (
+    "huggingface_repo_has_gguf",
+    "huggingface_search_models",
+    "huggingface_download_gguf",
+    "huggingface_fuzzy_find",
+    "huggingface_list_repo_files",
+    "resolve_gguf_mirror",
+)
+
+
+def __getattr__(name):
+    """Lazy attribute access for sub-module names that must reflect monkeypatches."""
+    if name in _hf_lazy_names:
+        return getattr(_hf_api_mod, name)
+    if name == "lms_binary":
+        return _lmstudio_mod.lms_binary
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 if __name__ == "__main__":

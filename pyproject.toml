@@ -72,6 +72,8 @@ ignore = ["E501", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B", "SIM"]
+# core.py is a re-export facade; F401 is expected for all re-exports.
+"claude_codex_local/core.py" = ["F401"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -615,7 +615,7 @@ def llamacpp_start_server(
         popen_kwargs["start_new_session"] = True
 
     try:
-        log_handle = open(log_path, "ab", buffering=0)
+        log_handle = open(log_path, "ab", buffering=0)  # noqa: SIM115
     except OSError as exc:
         return {
             "ok": False,
@@ -635,7 +635,8 @@ def llamacpp_start_server(
             **popen_kwargs,
         )
     except FileNotFoundError as exc:
-        log_handle.close()
+        with contextlib.suppress(OSError):
+            log_handle.close()
         return {
             "ok": False,
             "handle": None,
