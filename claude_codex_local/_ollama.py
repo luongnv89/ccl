@@ -8,18 +8,7 @@ import time
 from typing import Any
 
 from claude_codex_local._config import HF_TO_OLLAMA, OLLAMA_API_KEY, _is_local_base_url
-from claude_codex_local._shell import _auth_headers, ollama_base_url
-
-# Re-export run from _shell so tests can monkeypatch _ollama_mod.run and have
-# it propagate into _parse_ollama_list_cli() which calls _core.run() →
-# core.run() → _ollama_mod.run when patched.
-from claude_codex_local._shell import run as shell_run
-
-
-# Callable alias — resolves at call time so test monkeypatches on
-# ``_ollama_mod.run`` (e.g. from test_core_unit.py) propagate.
-def run(*args, **kwargs):
-    return shell_run(*args, **kwargs)
+from claude_codex_local._shell import _auth_headers, command_version, ollama_base_url
 
 
 def _ollama_http_models(timeout: int = 5) -> list[dict[str, Any]] | None:
@@ -97,7 +86,7 @@ def ollama_info() -> dict[str, Any]:
     # re-exports on the core (pb) facade.
     import claude_codex_local.core as _core
 
-    cli_info = _core.command_version("ollama")
+    cli_info = command_version("ollama")
     models = _core._ollama_http_models()
     server_reachable = models is not None
     if models is None and cli_info.get("present"):

@@ -30,14 +30,9 @@ import claude_codex_local._vllm
 
 # Helpers to monkeypatch functions across all sub-modules that import them.
 def _patch_command_version(monkeypatch, mock):
-    # After core.py decomposition, command_version lives in _shell.py and is
-    # imported by each submodule.  Some modules (e.g. _ollama) use
-    # ``_core.command_version()`` at call time instead of having a module-level
-    # ``command_version`` name, so we must patch the owning modules that
-    # actually expose the name AND patch core itself (where
-    # ``_probe_machine_profile_inputs`` and ``ollama_info`` resolve it).
     for _mod in (
         claude_codex_local._machine_profile,
+        claude_codex_local._ollama,
         claude_codex_local._llmfit,
         claude_codex_local._llamacpp_lifecycle,
         claude_codex_local._adapters,
@@ -45,19 +40,20 @@ def _patch_command_version(monkeypatch, mock):
         claude_codex_local._vllm,
     ):
         monkeypatch.setattr(_mod, "command_version", mock)
-    # Patch core.command_version so that _probe_machine_profile_inputs and
-    # ollama_info (which use ``_core.command_version``) see the mock.
-    monkeypatch.setattr(claude_codex_local.core, "command_version", mock)
 
 
 def _patch_run(monkeypatch, mock):
     for _mod in (
-        claude_codex_local._ollama,
         claude_codex_local._llmfit,
         claude_codex_local._lmstudio,
         claude_codex_local._doctor,
     ):
         monkeypatch.setattr(_mod, "run", mock)
+    # _ollama resolves ``run`` through a wrapper function that checks
+    # ``_ollama_mod.run`` at call time, so we can't monkeypatch a module-level
+    # ``run`` name on _ollama.  Instead patch core.run which delegates to
+    # _ollama.run when monkeypatched.
+    monkeypatch.setattr(claude_codex_local.core, "run", mock)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +126,7 @@ def _force_urlopen_fail(pb_module):
     def _fail(*a, **kw):
         raise urllib.error.URLError("connection refused")
 
-    # Monkeypatch must target the same urllib.request module claude_codex_local.core imports.
+    # Monkeypatch must target the same urllib.request module pb imports.
     return urllib.request, "urlopen", _fail
 
 
@@ -252,11 +248,8 @@ class TestMachineProfileAggregation:
         monkeypatch.setattr(
             claude_codex_local._llmfit, "llmfit_system", lambda: {"system": {"ram_gb": 64}}
         )
-        # Patch _lmstudio.lms_info (where _machine_profile resolves it),
-        # not pb.lms_info, because _probe_machine_profile_inputs
-        # does ``from _lmstudio import lms_info`` at call time.
         monkeypatch.setattr(
-            claude_codex_local._lmstudio,
+            pb,
             "lms_info",
             lambda: {"present": True, "server_running": True, "server_port": 1234, "models": []},
         )
@@ -469,10 +462,8 @@ class TestHuggingfaceCliDetect:
 class TestHuggingfaceDownloadGguf:
     def test_returns_error_when_cli_missing(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        # Patch core.huggingface_cli_detect so _hf_api.huggingface_download_gguf
-        # (which calls ``_core.huggingface_cli_detect()`` at call time) sees it.
         monkeypatch.setattr(
-            claude_codex_local.core, "huggingface_cli_detect", lambda: {"present": False}
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
         )
         result = pb.huggingface_download_gguf("org/repo")
         assert result["ok"] is False
@@ -486,14 +477,8 @@ class TestHuggingfaceDownloadGguf:
     def test_success_returns_path_non_streaming(self, isolated_state, monkeypatch):
         """stream=False preserves the original capture-based path extraction."""
         pb, _, _ = isolated_state
-        # Patch core.huggingface_cli_detect so _hf_api resolves it at call time.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "hf", "version": ""},
         )
         monkeypatch.setattr(
             pb,
@@ -513,14 +498,8 @@ class TestHuggingfaceDownloadGguf:
         # not the hardcoded string "huggingface-cli".
         pb, _, _ = isolated_state
         captured: list[list[str]] = []
-        # Patch core.huggingface_cli_detect so _hf_api resolves it at call time.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "hf", "version": ""},
         )
         monkeypatch.setattr(
             pb,
@@ -534,15 +513,8 @@ class TestHuggingfaceDownloadGguf:
 
     def test_download_failure_non_streaming_flags_not_found(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        # Patch both core and _hf_api so _hf_api.huggingface_download_gguf
-        # (which calls _core.huggingface_cli_detect at call time) sees the mock.
         monkeypatch.setattr(
             pb,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "huggingface-cli", "version": ""},
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "huggingface-cli", "version": ""},
         )
@@ -558,14 +530,8 @@ class TestHuggingfaceDownloadGguf:
 
     def test_exception_is_caught(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "hf", "version": ""},
         )
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("network error"))
@@ -577,14 +543,8 @@ class TestHuggingfaceDownloadGguf:
     def test_streaming_success_uses_popen(self, isolated_state, monkeypatch, tmp_path):
         """stream=True delegates to subprocess.Popen so progress is visible."""
         pb, _, _ = isolated_state
-        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "hf", "version": ""},
         )
 
         class _FakeProc:
@@ -620,14 +580,8 @@ class TestHuggingfaceDownloadGguf:
 
     def test_streaming_failure_returns_rc_message(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "hf", "version": ""},
         )
 
         class _FailProc:
@@ -828,10 +782,8 @@ def pytest_fail_unreached():  # helper used by the test above
 class TestDownloadGgufViaHfCli:
     def test_warns_and_fails_when_cli_missing(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        # Patch core.huggingface_cli_detect so wizard (which calls
-        # ``pb.huggingface_cli_detect()``) sees the mock.
         monkeypatch.setattr(
-            claude_codex_local.core, "huggingface_cli_detect", lambda: {"present": False}
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
         )
         # User declines install offer → should still return {"ok": False}.
         import questionary as _q
@@ -1692,14 +1644,8 @@ class TestHuggingfaceDownloadGgufKI:
 
     def test_streamed_ki_terminates_child_and_reraises(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb,
-            "huggingface_cli_detect",
-            lambda: {"present": True, "binary": "hf", "version": ""},
-        )
-        monkeypatch.setattr(
-            claude_codex_local._hf_api,
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
@@ -1743,7 +1689,6 @@ class TestHuggingfaceDownloadGgufKI:
     def test_streamed_ki_force_kills_when_terminate_hangs(self, isolated_state, monkeypatch):
         """If the child ignores SIGTERM within 3s, escalate to SIGKILL."""
         pb, _, _ = isolated_state
-        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb,
             "huggingface_cli_detect",

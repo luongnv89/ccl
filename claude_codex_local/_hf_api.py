@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -44,11 +45,7 @@ def huggingface_download_gguf(
     include: str | None = None,
     stream: bool = True,
 ) -> dict[str, Any]:
-    # Import core at call time so test monkeypatches on
-    # ``core.huggingface_cli_detect`` propagate into this function.
-    import claude_codex_local.core as _core
-
-    det = _core.huggingface_cli_detect()
+    det = huggingface_cli_detect()
     if not det.get("present"):
         return {
             "ok": False,
@@ -70,7 +67,7 @@ def huggingface_download_gguf(
     start = time.monotonic()
     try:
         if stream:
-            proc = _core.subprocess.Popen(cmd, env=ensure_path(None))
+            proc = subprocess.Popen(cmd, env=ensure_path(None))
             try:
                 rc = proc.wait(timeout=3600)
             except KeyboardInterrupt:
@@ -80,9 +77,9 @@ def huggingface_download_gguf(
                     proc.terminate()
                     try:
                         proc.wait(timeout=3)
-                    except _core.subprocess.TimeoutExpired:
+                    except subprocess.TimeoutExpired:
                         proc.kill()
-                        with contextlib.suppress(_core.subprocess.TimeoutExpired):
+                        with contextlib.suppress(subprocess.TimeoutExpired):
                             proc.wait(timeout=3)
                 except Exception:
                     pass
@@ -321,11 +318,8 @@ def _candidate_base_name(name: str) -> str:
 
 
 def resolve_gguf_mirror(name: str) -> str | None:
-    # Import core at call time so test monkeypatches on
-    # ``core.huggingface_repo_has_gguf`` and ``core.huggingface_search_models``
-    # propagate.  Since core.py now imports these directly from _hf_api,
-    # ``core.huggingface_repo_has_gguf`` IS ``_hf_api.huggingface_repo_has_gguf``
-    # (same function object), so patches on either propagate.
+    # Call through core so test monkeypatches on core.huggingface_repo_has_gguf
+    # take effect.
     import claude_codex_local.core as _core
 
     if not name:

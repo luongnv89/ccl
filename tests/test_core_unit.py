@@ -34,7 +34,9 @@ import claude_codex_local.core as pb
 
 
 def _patch_ollama_run(monkeypatch, mock):
-    monkeypatch.setattr(_ollama_mod, "run", mock)
+    # _ollama resolves ``run`` through a wrapper function at call time.
+    # Patch core.run which delegates to _ollama.run when monkeypatched.
+    monkeypatch.setattr(pb, "run", mock)
 
 
 def _patch_llmfit_run(monkeypatch, mock):
@@ -119,7 +121,7 @@ class TestParseOllamaList:
             "qwen2.5-coder:7b      def456          4.1 GB    1 week ago\n"
         )
         self._block_http(monkeypatch)
-        monkeypatch.setattr(_ollama_mod, "run", lambda *a, **kw: _FakeCP(stdout=sample))
+        monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
         assert len(models) == 2
         assert models[0]["name"] == "qwen3-coder:30b"
@@ -131,7 +133,9 @@ class TestParseOllamaList:
     def test_only_header_returns_empty(self, monkeypatch):
         self._block_http(monkeypatch)
         monkeypatch.setattr(
-            _ollama_mod, "run", lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n")
+            pb,
+            "run",
+            lambda *a, **kw: _FakeCP(stdout="NAME  ID  SIZE  MODIFIED\n"),
         )
         assert pb.parse_ollama_list() == []
 
@@ -141,13 +145,13 @@ class TestParseOllamaList:
         def boom(*a, **kw):
             raise FileNotFoundError("ollama")
 
-        monkeypatch.setattr(_ollama_mod, "run", boom)
+        monkeypatch.setattr(pb, "run", boom)
         assert pb.parse_ollama_list() == []
 
     def test_marks_unsized_rows_nonlocal(self, monkeypatch):
         self._block_http(monkeypatch)
         sample = "NAME  ID  SIZE  MODIFIED\nphantom:latest  xxx  -  never\n"
-        monkeypatch.setattr(_ollama_mod, "run", lambda *a, **kw: _FakeCP(stdout=sample))
+        monkeypatch.setattr(pb, "run", lambda *a, **kw: _FakeCP(stdout=sample))
         models = pb.parse_ollama_list()
         assert models[0]["local"] is False
 
@@ -693,8 +697,7 @@ class TestAdapters:
     def test_ollama_adapter_healthcheck_when_missing(self, monkeypatch):
         _patch_adapters_cmd_ver(monkeypatch, lambda *a, **kw: {"present": False})
         monkeypatch.setattr(_llmfit_mod, "command_version", lambda *a, **kw: {"present": False})
-        # _ollama uses ``_core.command_version()`` at call time — patch core.
-        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
+        monkeypatch.setattr(_ollama_mod, "command_version", lambda *a, **kw: {"present": False})
         # Block HTTP so ollama_info() falls through to parse_ollama_list.
         monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
         monkeypatch.setattr(_ollama_mod, "parse_ollama_list", lambda: [])
@@ -707,9 +710,8 @@ class TestAdapters:
         monkeypatch.setattr(
             _llmfit_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
         )
-        # _ollama uses ``_core.command_version()`` at call time — patch core.
         monkeypatch.setattr(
-            pb, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
+            _ollama_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
         )
         # Block HTTP so parse_ollama_list mock is reached.
         monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
@@ -3144,10 +3146,7 @@ def _stub_machine_internals(monkeypatch, pb_mod):
         return {"present": True, "version": f"{name} 1.0.0"}
 
     monkeypatch.setattr(_mp_mod, "command_version", fake_command_version)
-    # _ollama uses ``_core.command_version()`` at call time (no module-level
-    # name), so patch core.command_version so _probe_machine_profile_inputs
-    # and ollama_info see the mock.
-    monkeypatch.setattr(pb, "command_version", fake_command_version)
+    monkeypatch.setattr(_ollama_mod, "command_version", fake_command_version)
     monkeypatch.setattr(_lmstudio_mod, "lms_info", lambda: {"present": False, "models": []})
     monkeypatch.setattr(_llamacpp_mod, "llamacpp_detect", lambda: {"present": False, "version": ""})
     monkeypatch.setattr(

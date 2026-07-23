@@ -1,0 +1,309 @@
+{
+  "analysis": {
+    "issue_number": 161,
+    "title": "Decompose core implementation into cohesive modules",
+    "complexity": "HIGH",
+    "already_resolved": false,
+    "change_surface": {
+      "files_to_modify": 19,
+      "files_to_create": "10-12 modules depending on option",
+      "import_references_to_update": "50+ across wizard.py, bench.py, 8 engine files, 8+ test files"
+    },
+    "architecture_summary": "core.py (4,785 lines) is a God Module containing URL/port constants, shell utilities, 6 RuntimeAdapter classes (Ollama/LMStudio/LlamaCpp/VLLM/Router9/OpenRouter), all engine-specific probe/smoke functions, HuggingFace API wrappers, llmfit bridge, llamacpp server lifecycle, machine profiling, model selection, and doctor CLI. The engines/ directory already demonstrates the modular pattern core.py should follow. 19 downstream files import from core as `pb` or `core`."
+  },
+  "options": [
+    {
+      "number": 1,
+      "name": "Minimal extraction of self-contained helpers",
+      "summary": "Extract only the most self-contained helpers (constants, shell utilities, HF API, llmfit bridge) into separate modules. Keep RuntimeAdapter classes, model selection, machine profiling, and llama-server lifecycle in core.py. Update imports across the codebase.",
+      "files_to_modify": [
+        {
+          "path": "claude_codex_local/core.py",
+          "changes": "Remove constants, shell utils, HF API, llmfit — leaving ~3,200 lines of adapters, model selection, profiling, server lifecycle. Update remaining internal imports."
+        },
+        {
+          "path": "claude_codex_local/wizard.py",
+          "changes": "Update imports: replace `pb.CONSTANT` references with module-qualified names for extracted items."
+        },
+        {
+          "path": "claude_codex_local/bench.py",
+          "changes": "Update imports for extracted items."
+        },
+        {
+          "path": "claude_codex_local/engines/*/config.py",
+          "changes": "Update imports for extracted constants/shell utils."
+        },
+        {
+          "path": "claude_codex_local/engines/*/test.py",
+          "changes": "Update imports for extracted items."
+        },
+        {
+          "path": "claude_codex_local/engines/*/benchmark.py",
+          "changes": "Update imports for extracted items."
+        },
+        {
+          "path": "claude_codex_local/engines/llamacpp/optimize.py",
+          "changes": "Update imports for extracted items."
+        },
+        {
+          "path": "tests/test_core_unit.py",
+          "changes": "Update import paths for extracted items; add new test files for extracted modules."
+        },
+        {
+          "path": "tests/test_*",
+          "changes": "Update import paths (7+ additional test files)."
+        }
+      ],
+      "files_to_create": [
+        {
+          "path": "claude_codex_local/_config.py",
+          "purpose": "URL/port constants and default settings extracted from core.py"
+        },
+        {
+          "path": "claude_codex_local/_shell.py",
+          "purpose": "Shell command utilities (run_subprocess, etc.) extracted from core.py"
+        },
+        {
+          "path": "claude_codex_local/_hf_api.py",
+          "purpose": "HuggingFace API wrappers extracted from core.py"
+        },
+        {
+          "path": "claude_codex_local/_llmfit.py",
+          "purpose": "llmfit bridge extracted from core.py"
+        }
+      ],
+      "test_strategy": "Extract corresponding test cases from test_core_unit.py into new test__config.py, test__shell.py, test__hf_api.py, test__llmfit.py. Existing adapter/model selection/server tests remain in test_core_unit.py untouched. Run full existing test suite to confirm no regressions.",
+      "pros": [
+        "Low risk — minimal change to the most stable parts of core.py",
+        "Fast to implement (1-2 days)",
+        "Reduces core.py by ~1,500 lines immediately",
+        "No risk to adapter/model selection/server logic — those stay untouched"
+      ],
+      "cons": [
+        "core.py remains a God Module at ~3,200 lines with 5+ unrelated concerns",
+        "Adapters, model selection, profiling, server lifecycle stayed tangled",
+        "Does not align with the engines/* modular pattern already established",
+        "Limited future evolution benefit — most of the coupling remains"
+      ],
+      "complexity": "S",
+      "risk": "Low",
+      "risk_details": "Extracted items are self-contained helper functions/constants with no internal coupling to adapters or model selection. Test extraction is straightforward. Low blast radius if something goes wrong.",
+      "recommended": false
+    },
+    {
+      "number": 2,
+      "name": "Balanced full decomposition with compatibility facade",
+      "summary": "Extract ALL major concerns from core.py into separate dedicated modules. Keep core.py as a backward-compatible re-export facade so all 19 downstream files continue to work without import changes. This is the recommended approach — it achieves full separation while maintaining zero-disruption imports.",
+      "files_to_modify": [
+        {
+          "path": "claude_codex_local/core.py",
+          "changes": "Replace all ~4,785 lines with a compatibility facade that re-exports every public symbol from the new sub-modules. Add deprecation notices (optional)."
+        },
+        {
+          "path": "claude_codex_local/wizard.py",
+          "changes": "Optionally update imports to point to new modules directly (not required — facade preserves `pb.*`)."
+        },
+        {
+          "path": "claude_codex_local/__init__.py",
+          "changes": "Optionally expose new module paths in package-level __init__.py."
+        }
+      ],
+      "files_to_create": [
+        {
+          "path": "claude_codex_local/_config.py",
+          "purpose": "URL/port constants and default settings"
+        },
+        {
+          "path": "claude_codex_local/_shell.py",
+          "purpose": "Shell command utilities (run_subprocess, etc.)"
+        },
+        {
+          "path": "claude_codex_local/_adapters.py",
+          "purpose": "All 6 RuntimeAdapter classes and the abstract base"
+        },
+        {
+          "path": "claude_codex_local/_machine_profile.py",
+          "purpose": "Machine profiling (RAM, GPU, CPU detection)"
+        },
+        {
+          "path": "claude_codex_local/_model_selection.py",
+          "purpose": "Model selection logic and decision tree"
+        },
+        {
+          "path": "claude_codex_local/_llamacpp_lifecycle.py",
+          "purpose": "llama-server start/stop/health lifecycle (was in core.py)"
+        },
+        {
+          "path": "claude_codex_local/_hf_api.py",
+          "purpose": "HuggingFace API wrappers"
+        },
+        {
+          "path": "claude_codex_local/_llmfit.py",
+          "purpose": "llmfit bridge"
+        },
+        {
+          "path": "claude_codex_local/_gguf_scan.py",
+          "purpose": "GGUF file scanning and metadata extraction"
+        },
+        {
+          "path": "claude_codex_local/_doctor.py",
+          "purpose": "Doctor CLI diagnostic logic"
+        }
+      ],
+      "test_strategy": "Split test_core_unit.py (3,451 lines) into per-module test files matching each new module (test__config.py, test__adapters.py, etc.). Keep test fixture/data-sharing via conftest.py. Run full suite to verify facade re-exports match original symbols exactly. Test files importing `core as pb` continue working without changes.",
+      "pros": [
+        "Full architectural separation — each concern can evolve independently",
+        "Zero import disruption — 19 downstream files need zero changes (facade pattern)",
+        "Aligns with the existing engines/* modular pattern",
+        "Enables focused, smaller test files per module",
+        "Clear ownership boundaries for future contributors",
+        "Facade can issue deprecation warnings for future direct imports"
+      ],
+      "cons": [
+        "Higher implementation effort (3-5 days)",
+        "Facade maintenance overhead — must stay in sync with new modules",
+        "Module-level mutable constants (e.g., OLLAMA_BASE_URL) need careful handling when reassigned by wizard.py for remote endpoints — facade must forward reassignments"
+      ],
+      "complexity": "M",
+      "risk": "Medium",
+      "risk_details": "Main risk is subtle import-order issues and module-level mutable constant forwarding. The facade must ensure that reassignment of `core.OLLAMA_BASE_URL` propagates to the backing `_config.OLLAMA_BASE_URL`. This can be solved by having `core` not re-export scalars by value but instead re-export the module itself or use a singleton config object. Medium risk because the facade pattern is well-understood and testable.",
+      "recommended": true
+    },
+    {
+      "number": 3,
+      "name": "Comprehensive refactor with adapter migration and deprecation shims",
+      "summary": "Same full decomposition as option 2, but additionally refactor the 6 RuntimeAdapter classes into per-engine modules (aligning with engines/*), add explicit deprecation warnings on old import paths, and create backward-compat __init__.py shims in the package root.",
+      "files_to_modify": [
+        {
+          "path": "claude_codex_local/core.py",
+          "changes": "Replace with compatibility facade re-exporting from new modules and per-engine adapter modules."
+        },
+        {
+          "path": "claude_codex_local/__init__.py",
+          "changes": "Add lazy imports from new modules for common public symbols."
+        },
+        {
+          "path": "claude_codex_local/_adapters.py",
+          "changes": "Replace with per-engine imports or remove entirely; adapters move to engines/*"
+        },
+        {
+          "path": "claude_codex_local/engines/ollama/__init__.py",
+          "changes": "Add RuntimeAdapter export (or create adapter module)"
+        },
+        {
+          "path": "claude_codex_local/engines/lmstudio/__init__.py",
+          "changes": "Add RuntimeAdapter export"
+        },
+        {
+          "path": "claude_codex_local/engines/llamacpp/__init__.py",
+          "changes": "Add RuntimeAdapter export"
+        },
+        {
+          "path": "claude_codex_local/engines/vllm/__init__.py",
+          "changes": "Add RuntimeAdapter export"
+        },
+        {
+          "path": "claude_codex_local/engines/router9/__init__.py",
+          "changes": "Add RuntimeAdapter export"
+        },
+        {
+          "path": "claude_codex_local/engines/openrouter/__init__.py",
+          "changes": "Add RuntimeAdapter export"
+        },
+        {
+          "path": "claude_codex_local/wizard.py",
+          "changes": "Update imports to use new per-engine adapter paths (e.g., `from claude_codex_local.engines.ollama import OllamaAdapter`)."
+        },
+        {
+          "path": "claude_codex_local/bench.py",
+          "changes": "Update imports for adapter references."
+        },
+        {
+          "path": "tests/test_core_unit.py",
+          "changes": "Split entirely; adapter tests migrate to per-engine test files."
+        }
+      ],
+      "files_to_create": [
+        {
+          "path": "claude_codex_local/_config.py",
+          "purpose": "URL/port constants and default settings"
+        },
+        {
+          "path": "claude_codex_local/_shell.py",
+          "purpose": "Shell command utilities"
+        },
+        {
+          "path": "claude_codex_local/_machine_profile.py",
+          "purpose": "Machine profiling"
+        },
+        {
+          "path": "claude_codex_local/_model_selection.py",
+          "purpose": "Model selection logic"
+        },
+        {
+          "path": "claude_codex_local/_llamacpp_lifecycle.py",
+          "purpose": "llama-server lifecycle"
+        },
+        {
+          "path": "claude_codex_local/_hf_api.py",
+          "purpose": "HuggingFace API wrappers"
+        },
+        {
+          "path": "claude_codex_local/_llmfit.py",
+          "purpose": "llmfit bridge"
+        },
+        {
+          "path": "claude_codex_local/_gguf_scan.py",
+          "purpose": "GGUF file scanning"
+        },
+        {
+          "path": "claude_codex_local/_doctor.py",
+          "purpose": "Doctor CLI logic"
+        },
+        {
+          "path": "claude_codex_local/engines/ollama/adapter.py",
+          "purpose": "Ollama RuntimeAdapter (moved from _adapters.py)"
+        },
+        {
+          "path": "claude_codex_local/engines/lmstudio/adapter.py",
+          "purpose": "LMStudio RuntimeAdapter"
+        },
+        {
+          "path": "claude_codex_local/engines/llamacpp/adapter.py",
+          "purpose": "LlamaCpp RuntimeAdapter"
+        },
+        {
+          "path": "claude_codex_local/engines/vllm/adapter.py",
+          "purpose": "VLLM RuntimeAdapter"
+        },
+        {
+          "path": "claude_codex_local/engines/router9/adapter.py",
+          "purpose": "Router9 RuntimeAdapter"
+        },
+        {
+          "path": "claude_codex_local/engines/openrouter/adapter.py",
+          "purpose": "OpenRouter RuntimeAdapter"
+        }
+      ],
+      "test_strategy": "Same as option 2 plus: create per-engine adapter tests in each engine's directory (or tests/test_engines/ollama/ etc.). Add integration tests verifying old import paths emit deprecation warnings but still function. Run full suite plus engine-specific e2e tests.",
+      "pros": [
+        "Most thorough decomposition — each concern and each engine is fully independent",
+        "Adapters live alongside their engine lifecycle code (perfect alignment with engines/* pattern)",
+        "Deprecation warnings guide downstream consumers to new import paths",
+        "Long-term maintainability is maximized"
+      ],
+      "cons": [
+        "Highest implementation effort (1-2 weeks)",
+        "Highest risk of breakage — 19 downstream files need import updates",
+        "Adapter migration may reveal hidden coupling between RuntimeAdapter classes and shared utilities currently in core.py",
+        "Requires careful coordination; best done as a feature branch with multiple PRs",
+        "More aggressive than needed for the immediate goal of enabling independent evolution"
+      ],
+      "complexity": "XL",
+      "risk": "High",
+      "risk_details": "Moving 6 RuntimeAdapter classes to per-engine modules risks breaking import chains; adapters may have undocumented cross-references or shared state. Deprecation shims add surface area. High blast radius: 19 downstream files across the codebase must update imports. Recommended only if the team has capacity for a dedicated refactoring sprint.",
+      "recommended": false
+    }
+  ],
+  "recommended_option": 2
+}
