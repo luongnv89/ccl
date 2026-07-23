@@ -162,24 +162,21 @@ class MachineProfileProbeResults:
 
 
 def _probe_machine_profile_inputs(run_llmfit: bool) -> MachineProfileProbeResults:
+    # Import core at call time so test monkeypatches on core.* propagate.
+    import claude_codex_local.core as _core
     from claude_codex_local._adapters import OpenRouterAdapter, Router9Adapter
     from claude_codex_local._hf_api import huggingface_cli_detect
     from claude_codex_local._llamacpp_lifecycle import llamacpp_info
     from claude_codex_local._llmfit import llmfit_system
     from claude_codex_local._lmstudio import lms_info
-    from claude_codex_local._ollama import ollama_info
     from claude_codex_local._vllm import vllm_info
 
     llmfit_sys = llmfit_system() if run_llmfit else None
     lms = lms_info()
     llamacpp = llamacpp_info()
-    # Import core at call time so test monkeypatches on core.command_version
-    # take effect (tests patch the re-export on the core facade).
-    import claude_codex_local.core as _core
-
     hf_cli = huggingface_cli_detect()
     vllm = vllm_info()
-    ollama = ollama_info()
+    ollama = _core.ollama_info()
     claude_info = _core.command_version("claude")
     codex_info = _core.command_version("codex")
     pi_info = _core.command_version("pi")

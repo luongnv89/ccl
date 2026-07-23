@@ -693,7 +693,8 @@ class TestAdapters:
     def test_ollama_adapter_healthcheck_when_missing(self, monkeypatch):
         _patch_adapters_cmd_ver(monkeypatch, lambda *a, **kw: {"present": False})
         monkeypatch.setattr(_llmfit_mod, "command_version", lambda *a, **kw: {"present": False})
-        monkeypatch.setattr(_ollama_mod, "command_version", lambda *a, **kw: {"present": False})
+        # _ollama uses ``_core.command_version()`` at call time — patch core.
+        monkeypatch.setattr(pb, "command_version", lambda *a, **kw: {"present": False})
         # Block HTTP so ollama_info() falls through to parse_ollama_list.
         monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
         monkeypatch.setattr(_ollama_mod, "parse_ollama_list", lambda: [])
@@ -706,8 +707,9 @@ class TestAdapters:
         monkeypatch.setattr(
             _llmfit_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
         )
+        # _ollama uses ``_core.command_version()`` at call time — patch core.
         monkeypatch.setattr(
-            _ollama_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
+            pb, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
         )
         # Block HTTP so parse_ollama_list mock is reached.
         monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
@@ -3142,7 +3144,10 @@ def _stub_machine_internals(monkeypatch, pb_mod):
         return {"present": True, "version": f"{name} 1.0.0"}
 
     monkeypatch.setattr(_mp_mod, "command_version", fake_command_version)
-    monkeypatch.setattr(_ollama_mod, "command_version", fake_command_version)
+    # _ollama uses ``_core.command_version()`` at call time (no module-level
+    # name), so patch core.command_version so _probe_machine_profile_inputs
+    # and ollama_info see the mock.
+    monkeypatch.setattr(pb, "command_version", fake_command_version)
     monkeypatch.setattr(_lmstudio_mod, "lms_info", lambda: {"present": False, "models": []})
     monkeypatch.setattr(_llamacpp_mod, "llamacpp_detect", lambda: {"present": False, "version": ""})
     monkeypatch.setattr(

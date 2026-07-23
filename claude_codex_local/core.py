@@ -248,11 +248,11 @@ def llmfit_coding_candidates(*a, **k):
 # ---------------------------------------------------------------------------
 
 _hf_lazy_names = (
-    "huggingface_repo_has_gguf",
-    "huggingface_search_models",
     "huggingface_download_gguf",
     "huggingface_fuzzy_find",
     "huggingface_list_repo_files",
+    "huggingface_repo_has_gguf",
+    "huggingface_search_models",
     "resolve_gguf_mirror",
 )
 

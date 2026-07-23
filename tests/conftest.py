@@ -77,6 +77,23 @@ def isolated_state(tmp_path, monkeypatch):
 
     wiz_mod = importlib.reload(wiz_mod)
 
+    # Clear stale monkeypatch artifacts from ``core.__dict__`` left by
+    # ``monkeypatch.undo()`` in previous tests.  When a prior test patched
+    # ``pb.huggingface_repo_has_gguf`` (for example), ``monkeypatch.undo()``
+    # restored the original function object into ``core.__dict__``.  Because
+    # ``core`` re-imports these names only via ``__getattr__`` (``_hf_lazy_names``),
+    # the stale ``__dict__`` entry shadows ``__getattr__`` and breaks
+    # subsequent tests that patch ``_hf_api`` directly.
+    _HF_LAZY = (
+        "huggingface_repo_has_gguf",
+        "huggingface_search_models",
+        "huggingface_list_repo_files",
+        "huggingface_fuzzy_find",
+        "huggingface_download_gguf",
+    )
+    for _k in _HF_LAZY:
+        pb_mod.__dict__.pop(_k, None)
+
     # Clear any lingering in-process caches from previous test runs (machine profile,
     # llmfit candidates, llmfit system) so each test starts with a clean slate.
     if hasattr(pb_mod, "_machine_profile_in_process_cache"):
@@ -313,6 +330,7 @@ _COMMAND_VERSION_MODULES = (
 )
 
 _CONFIG_MODULES = (
+    "claude_codex_local._hf_api",
     "claude_codex_local._ollama",
     "claude_codex_local._llmfit",
     "claude_codex_local._llamacpp_lifecycle",

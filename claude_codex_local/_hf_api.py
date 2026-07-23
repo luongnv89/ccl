@@ -319,8 +319,11 @@ def _candidate_base_name(name: str) -> str:
 
 
 def resolve_gguf_mirror(name: str) -> str | None:
-    # Call through core so test monkeypatches on core.huggingface_repo_has_gguf
-    # take effect.
+    # Import core at call time so test monkeypatches on
+    # ``core.huggingface_repo_has_gguf`` and ``core.huggingface_search_models``
+    # propagate.  Since core.py now imports these directly from _hf_api,
+    # ``core.huggingface_repo_has_gguf`` IS ``_hf_api.huggingface_repo_has_gguf``
+    # (same function object), so patches on either propagate.
     import claude_codex_local.core as _core
 
     if not name:

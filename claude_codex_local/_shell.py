@@ -4,8 +4,6 @@ import sys
 from typing import Any
 
 from claude_codex_local._config import (
-    LLAMACPP_BASE_URL,
-    OLLAMA_BASE_URL,
     ORIG_HOME,
     STATE_DIR,
 )
@@ -72,7 +70,12 @@ def run_shell(
 
 
 def ollama_base_url() -> str:
-    return OLLAMA_BASE_URL
+    # Import core at call time so test monkeypatches on
+    # ``core.OLLAMA_BASE_URL`` (set by wizard._apply_remote_endpoint)
+    # propagate into code that reads the URL via this function.
+    import claude_codex_local.core as _core
+
+    return _core.OLLAMA_BASE_URL
 
 
 def ollama_openai_base_url() -> str:
@@ -80,7 +83,9 @@ def ollama_openai_base_url() -> str:
 
 
 def llamacpp_base_url() -> str:
-    return LLAMACPP_BASE_URL
+    import claude_codex_local.core as _core
+
+    return _core.LLAMACPP_BASE_URL
 
 
 def _auth_headers(api_key: str | None) -> dict[str, str]:

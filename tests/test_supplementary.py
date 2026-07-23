@@ -30,9 +30,14 @@ import claude_codex_local._vllm
 
 # Helpers to monkeypatch functions across all sub-modules that import them.
 def _patch_command_version(monkeypatch, mock):
+    # After core.py decomposition, command_version lives in _shell.py and is
+    # imported by each submodule.  Some modules (e.g. _ollama) use
+    # ``_core.command_version()`` at call time instead of having a module-level
+    # ``command_version`` name, so we must patch the owning modules that
+    # actually expose the name AND patch core itself (where
+    # ``_probe_machine_profile_inputs`` and ``ollama_info`` resolve it).
     for _mod in (
         claude_codex_local._machine_profile,
-        claude_codex_local._ollama,
         claude_codex_local._llmfit,
         claude_codex_local._llamacpp_lifecycle,
         claude_codex_local._adapters,
@@ -40,6 +45,9 @@ def _patch_command_version(monkeypatch, mock):
         claude_codex_local._vllm,
     ):
         monkeypatch.setattr(_mod, "command_version", mock)
+    # Patch core.command_version so that _probe_machine_profile_inputs and
+    # ollama_info (which use ``_core.command_version``) see the mock.
+    monkeypatch.setattr(claude_codex_local.core, "command_version", mock)
 
 
 def _patch_run(monkeypatch, mock):
