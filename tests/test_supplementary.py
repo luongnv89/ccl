@@ -252,8 +252,11 @@ class TestMachineProfileAggregation:
         monkeypatch.setattr(
             claude_codex_local._llmfit, "llmfit_system", lambda: {"system": {"ram_gb": 64}}
         )
+        # Patch _lmstudio.lms_info (where _machine_profile resolves it),
+        # not pb.lms_info, because _probe_machine_profile_inputs
+        # does ``from _lmstudio import lms_info`` at call time.
         monkeypatch.setattr(
-            pb,
+            claude_codex_local._lmstudio,
             "lms_info",
             lambda: {"present": True, "server_running": True, "server_port": 1234, "models": []},
         )
@@ -466,8 +469,10 @@ class TestHuggingfaceCliDetect:
 class TestHuggingfaceDownloadGguf:
     def test_returns_error_when_cli_missing(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        # Patch core.huggingface_cli_detect so _hf_api.huggingface_download_gguf
+        # (which calls ``_core.huggingface_cli_detect()`` at call time) sees it.
         monkeypatch.setattr(
-            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+            claude_codex_local.core, "huggingface_cli_detect", lambda: {"present": False}
         )
         result = pb.huggingface_download_gguf("org/repo")
         assert result["ok"] is False
@@ -481,8 +486,14 @@ class TestHuggingfaceDownloadGguf:
     def test_success_returns_path_non_streaming(self, isolated_state, monkeypatch):
         """stream=False preserves the original capture-based path extraction."""
         pb, _, _ = isolated_state
+        # Patch core.huggingface_cli_detect so _hf_api resolves it at call time.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
         )
         monkeypatch.setattr(
             pb,
@@ -502,8 +513,14 @@ class TestHuggingfaceDownloadGguf:
         # not the hardcoded string "huggingface-cli".
         pb, _, _ = isolated_state
         captured: list[list[str]] = []
+        # Patch core.huggingface_cli_detect so _hf_api resolves it at call time.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
         )
         monkeypatch.setattr(
             pb,
@@ -517,8 +534,15 @@ class TestHuggingfaceDownloadGguf:
 
     def test_download_failure_non_streaming_flags_not_found(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        # Patch both core and _hf_api so _hf_api.huggingface_download_gguf
+        # (which calls _core.huggingface_cli_detect at call time) sees the mock.
         monkeypatch.setattr(
             pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "huggingface-cli", "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "huggingface-cli", "version": ""},
         )
@@ -534,8 +558,14 @@ class TestHuggingfaceDownloadGguf:
 
     def test_exception_is_caught(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
         )
         monkeypatch.setattr(
             pb, "run", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("network error"))
@@ -547,8 +577,14 @@ class TestHuggingfaceDownloadGguf:
     def test_streaming_success_uses_popen(self, isolated_state, monkeypatch, tmp_path):
         """stream=True delegates to subprocess.Popen so progress is visible."""
         pb, _, _ = isolated_state
+        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
         )
 
         class _FakeProc:
@@ -584,8 +620,14 @@ class TestHuggingfaceDownloadGguf:
 
     def test_streaming_failure_returns_rc_message(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
         )
 
         class _FailProc:
@@ -786,8 +828,10 @@ def pytest_fail_unreached():  # helper used by the test above
 class TestDownloadGgufViaHfCli:
     def test_warns_and_fails_when_cli_missing(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
+        # Patch core.huggingface_cli_detect so wizard (which calls
+        # ``pb.huggingface_cli_detect()``) sees the mock.
         monkeypatch.setattr(
-            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+            claude_codex_local.core, "huggingface_cli_detect", lambda: {"present": False}
         )
         # User declines install offer → should still return {"ok": False}.
         import questionary as _q
@@ -1648,8 +1692,14 @@ class TestHuggingfaceDownloadGgufKI:
 
     def test_streamed_ki_terminates_child_and_reraises(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
+        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb,
+            "huggingface_cli_detect",
+            lambda: {"present": True, "binary": "hf", "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
@@ -1693,6 +1743,7 @@ class TestHuggingfaceDownloadGgufKI:
     def test_streamed_ki_force_kills_when_terminate_hangs(self, isolated_state, monkeypatch):
         """If the child ignores SIGTERM within 3s, escalate to SIGKILL."""
         pb, _, _ = isolated_state
+        # Patch both core and _hf_api.
         monkeypatch.setattr(
             pb,
             "huggingface_cli_detect",
