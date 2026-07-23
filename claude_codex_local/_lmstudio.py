@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import time
 from typing import Any
 
-from claude_codex_local._config import ORIG_HOME, LMS_SERVER_PORT
+from claude_codex_local._config import LMS_SERVER_PORT, ORIG_HOME
 from claude_codex_local._shell import command_version, run
 
 
@@ -155,7 +154,6 @@ def smoke_test_lmstudio_model(
     expected: str | None = "READY",
     max_tokens: int = 16,
 ) -> dict[str, Any]:
-    import time
     import urllib.error
     import urllib.request
 

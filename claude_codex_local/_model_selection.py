@@ -50,6 +50,7 @@ def rank_candidates_for_mode(candidates: list[dict[str, Any]], mode: str) -> lis
 
 def recommend_for_mode(profile: dict[str, Any], mode: str, engine: str) -> dict[str, Any] | None:
     from claude_codex_local._llmfit import llmfit_coding_candidates
+
     if engine not in ("ollama", "lmstudio", "llamacpp"):
         return None
 
@@ -72,6 +73,7 @@ def _candidate_tag_for_engine(c: dict[str, Any], engine: str) -> str | None:
         return c.get("lms_hub_name") or c.get("lms_mlx_path")
     if engine == "llamacpp":
         from claude_codex_local._hf_api import resolve_gguf_mirror
+
         name = c.get("name")
         return resolve_gguf_mirror(name) if name else None
     return None
@@ -329,6 +331,7 @@ def merge_models_for_engine(profile: dict[str, Any], engine: str) -> list[dict[s
         return merged
 
     from claude_codex_local._llmfit import llmfit_coding_candidates
+
     candidates = llmfit_coding_candidates(ram_gb=_available_ram_gb(profile))
     for candidate in candidates:
         tag = _candidate_tag_for_engine(candidate, engine)
@@ -414,7 +417,10 @@ def select_model_decision(
                     lms_usable = False
                     break
 
-                from claude_codex_local._lmstudio import lms_responses_api_ok as _lms_responses_api_ok
+                from claude_codex_local._lmstudio import (
+                    lms_responses_api_ok as _lms_responses_api_ok,
+                )
+
                 api_ok_fn = lms_responses_api_ok or _lms_responses_api_ok
                 if not api_ok_fn(matched_key):
                     caveats.append(
@@ -452,6 +458,7 @@ def select_model_decision(
                 break
 
     if not selected_tag and ollama_installed:
+
         def _ollama_size_key(name: str) -> float:
             m = re.search(r"(\d+(?:\.\d+)?)[bB]", name)
             return float(m.group(1)) if m else 0.0
@@ -559,6 +566,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
     if status == "ready" and selected_tag:
         if runtime == "lmstudio":
             from claude_codex_local._lmstudio import lms_load_model, smoke_test_lmstudio_model
+
             load_result = lms_load_model(selected_tag)
             if load_result.get("ok"):
                 smoke = smoke_test_lmstudio_model(selected_tag)
@@ -572,6 +580,7 @@ def select_best_model(profile: dict[str, Any], mode: str = "balanced") -> dict[s
                 caveats.append(f"Could not load model in LM Studio: {load_result.get('error', '')}")
         elif runtime == "ollama":
             from claude_codex_local._ollama import smoke_test_ollama_model
+
             smoke = smoke_test_ollama_model(selected_tag)
             if smoke.get("ok"):
                 rationale.append("Live ollama smoke test passed.")

@@ -10,11 +10,11 @@ Acceptance criteria:
 
 from __future__ import annotations
 
-from claude_codex_local import core as pb
 import claude_codex_local._llmfit
 import claude_codex_local._lmstudio
 import claude_codex_local._model_selection
 import claude_codex_local._ollama
+from claude_codex_local import core as pb
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -296,8 +296,14 @@ class TestSideEffectsInOrchestrator:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
-        monkeypatch.setattr(claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True}
+        )
         result = pb.select_best_model({})
         assert result["selected_model"] == "test-model"
         assert result["runtime"] == "ollama"
@@ -324,10 +330,16 @@ class TestSideEffectsInOrchestrator:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
+        monkeypatch.setattr(
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
         smoke_called = []
         monkeypatch.setattr(
-            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: (smoke_called.append(tag), {"ok": False})[1]
+            claude_codex_local._ollama,
+            "smoke_test_ollama_model",
+            lambda tag: (smoke_called.append(tag), {"ok": False})[1],
         )
         result = pb.select_best_model({})
         assert result["status"] == "download-required"
@@ -353,8 +365,14 @@ class TestSideEffectsInOrchestrator:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
-        monkeypatch.setattr(claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True}
+        )
         result = pb.select_best_model({})
         assert "custom rationale from decision" in result["rationale"]
 
@@ -378,8 +396,14 @@ class TestSideEffectsInOrchestrator:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
-        monkeypatch.setattr(claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True}
+        )
         result = pb.select_best_model({})
         assert "pre-existing caveat" in result["caveats"]
 
@@ -407,14 +431,22 @@ class TestSideEffectsInOrchestrator:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
+        monkeypatch.setattr(
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
         load_called = []
         smoke_called = []
         monkeypatch.setattr(
-            claude_codex_local._lmstudio, "lms_load_model", lambda tag: (load_called.append(tag), {"ok": True})[1]
+            claude_codex_local._lmstudio,
+            "lms_load_model",
+            lambda tag: (load_called.append(tag), {"ok": True})[1],
         )
         monkeypatch.setattr(
-            claude_codex_local._lmstudio, "smoke_test_lmstudio_model", lambda tag: (smoke_called.append(tag), {"ok": True})[1]
+            claude_codex_local._lmstudio,
+            "smoke_test_lmstudio_model",
+            lambda tag: (smoke_called.append(tag), {"ok": True})[1],
         )
         pb.select_best_model({})
         assert load_called == ["qwen/qwen3-coder-30b"]
@@ -431,7 +463,9 @@ class TestBackwardCompatibility:
 
     def test_hardcoded_fallback_same_result(self, monkeypatch):
         """Fallback when no candidates must still be qwen2.5-coder:7b via ollama."""
-        monkeypatch.setattr(claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True}
+        )
         result = pb.select_best_model(_empty_profile())
         assert result["selected_model"] == "qwen2.5-coder:7b"
         assert result["runtime"] == "ollama"
@@ -440,7 +474,9 @@ class TestBackwardCompatibility:
     def test_installed_ollama_match_same_result(self, monkeypatch):
         """Installed Ollama model matching llmfit candidate is selected."""
         monkeypatch.setattr(
-            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True, "response": "READY"}
+            claude_codex_local._ollama,
+            "smoke_test_ollama_model",
+            lambda tag: {"ok": True, "response": "READY"},
         )
         monkeypatch.setattr(
             claude_codex_local._llmfit,
@@ -519,9 +555,12 @@ class TestBackwardCompatibility:
 
     def test_result_has_all_expected_keys(self, monkeypatch):
         """select_best_model result must have all legacy keys."""
-        monkeypatch.setattr(claude_codex_local._llmfit,
-            "llmfit_coding_candidates", lambda *a, **k: [])
-        monkeypatch.setattr(claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(
+            claude_codex_local._llmfit, "llmfit_coding_candidates", lambda *a, **k: []
+        )
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True}
+        )
         result = pb.select_best_model(_empty_profile())
         expected_keys = {
             "runtime",
@@ -557,7 +596,9 @@ class TestBackwardCompatibility:
                 },
             ],
         )
-        monkeypatch.setattr(claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True})
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": True}
+        )
         profile = _empty_profile()
         profile["ollama"]["models"] = [{"name": "qwen3-coder:30b", "local": True}]
         result = pb.select_best_model(profile)
@@ -619,10 +660,16 @@ class TestCoverageBothPaths:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
+        monkeypatch.setattr(
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
         smoke_results = []
         monkeypatch.setattr(
-            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: smoke_results.append(tag) or {"ok": True}
+            claude_codex_local._ollama,
+            "smoke_test_ollama_model",
+            lambda tag: smoke_results.append(tag) or {"ok": True},
         )
         pb.select_best_model({})
         assert smoke_results == ["test-model"], "Orchestrator must run smoke tests"
@@ -655,9 +702,15 @@ class TestCoverageBothPaths:
             "model_source": "llmfit",
             "candidates_evaluated": 1,
         }
-        monkeypatch.setattr(claude_codex_local._model_selection, "select_model_decision", lambda *a, **k: mock_decision)
         monkeypatch.setattr(
-            claude_codex_local._ollama, "smoke_test_ollama_model", lambda tag: {"ok": False, "error": "test smoke failure"}
+            claude_codex_local._model_selection,
+            "select_model_decision",
+            lambda *a, **k: mock_decision,
+        )
+        monkeypatch.setattr(
+            claude_codex_local._ollama,
+            "smoke_test_ollama_model",
+            lambda tag: {"ok": False, "error": "test smoke failure"},
         )
         result = pb.select_best_model({})
         assert result["selected_model"] == "test-model"  # decision unchanged

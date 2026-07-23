@@ -7,8 +7,8 @@ import subprocess
 import time
 from typing import Any
 
-from claude_codex_local._config import OLLAMA_API_KEY, _is_local_base_url, HF_TO_OLLAMA
-from claude_codex_local._shell import ollama_base_url, _auth_headers, run, command_version
+from claude_codex_local._config import HF_TO_OLLAMA, OLLAMA_API_KEY, _is_local_base_url
+from claude_codex_local._shell import _auth_headers, command_version, ollama_base_url
 
 
 def _ollama_http_models(timeout: int = 5) -> list[dict[str, Any]] | None:
@@ -117,7 +117,6 @@ def smoke_test_ollama_model(
     expected: str | None = "READY",
     max_tokens: int | None = None,
 ) -> dict[str, Any]:
-    import time
     import urllib.error
     import urllib.request
 
@@ -190,4 +189,3 @@ def _smoke_test_ollama_cli(
         return {"ok": False, "error": "timeout after 180s"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-

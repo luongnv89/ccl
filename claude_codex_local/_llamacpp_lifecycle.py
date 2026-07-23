@@ -6,7 +6,6 @@ import os
 import platform
 import re
 import shutil
-import signal
 import struct
 import subprocess
 import time
@@ -168,7 +167,17 @@ def probe_gguf_is_mtp(model_path: str | Path) -> dict[str, Any]:
     T_STRING = 8
     T_ARRAY = 9
     SCALAR_SIZE = {
-        0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8,
+        0: 1,
+        1: 1,
+        2: 2,
+        3: 2,
+        4: 4,
+        5: 4,
+        6: 4,
+        7: 1,
+        10: 8,
+        11: 8,
+        12: 8,
     }
     MAX_KEY_LEN = 512
     MAX_STR_LEN = 4096

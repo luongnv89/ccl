@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from claude_codex_local._config import (
-    _normalize_base_url,
-    _probe_openai_models_endpoint,
-    _is_local_base_url,
     OPENROUTER_BASE_URL,
     OPENROUTER_KEY_FILE,
     ROUTER9_BASE_URL,
+    _is_local_base_url,
+    _normalize_base_url,
+    _probe_openai_models_endpoint,
 )
 from claude_codex_local._shell import (
     _auth_headers,
@@ -24,20 +24,15 @@ from claude_codex_local._shell import (
 class RuntimeAdapter(Protocol):
     name: str
 
-    def detect(self) -> dict[str, Any]:
-        ...
+    def detect(self) -> dict[str, Any]: ...
 
-    def healthcheck(self) -> dict[str, Any]:
-        ...
+    def healthcheck(self) -> dict[str, Any]: ...
 
-    def list_models(self) -> list[dict[str, Any]]:
-        ...
+    def list_models(self) -> list[dict[str, Any]]: ...
 
-    def run_test(self, model: str) -> dict[str, Any]:
-        ...
+    def run_test(self, model: str) -> dict[str, Any]: ...
 
-    def recommend_params(self, mode: str) -> dict[str, Any]:
-        ...
+    def recommend_params(self, mode: str) -> dict[str, Any]: ...
 
 
 @dataclass
@@ -46,6 +41,7 @@ class OllamaAdapter:
 
     def detect(self) -> dict[str, Any]:
         from claude_codex_local._ollama import ollama_info
+
         info = ollama_info()
         if info.get("present"):
             return info
@@ -53,6 +49,7 @@ class OllamaAdapter:
 
     def healthcheck(self) -> dict[str, Any]:
         from claude_codex_local._ollama import ollama_info, parse_ollama_list
+
         info = ollama_info()
         if info.get("server_reachable"):
             models = info.get("models", [])
@@ -68,10 +65,12 @@ class OllamaAdapter:
 
     def list_models(self) -> list[dict[str, Any]]:
         from claude_codex_local._ollama import parse_ollama_list
+
         return parse_ollama_list()
 
     def run_test(self, model: str) -> dict[str, Any]:
         from claude_codex_local._ollama import smoke_test_ollama_model
+
         return smoke_test_ollama_model(model)
 
     def recommend_params(self, mode: str) -> dict[str, Any]:
@@ -84,6 +83,7 @@ class LMStudioAdapter:
 
     def detect(self) -> dict[str, Any]:
         from claude_codex_local._lmstudio import lms_binary
+
         lms = lms_binary()
         if not lms:
             return {"present": False, "version": ""}
@@ -91,6 +91,7 @@ class LMStudioAdapter:
 
     def healthcheck(self) -> dict[str, Any]:
         from claude_codex_local._lmstudio import lms_info
+
         info = lms_info()
         if not info.get("present"):
             return {"ok": False, "detail": "lms CLI not found"}
@@ -106,6 +107,7 @@ class LMStudioAdapter:
 
     def list_models(self) -> list[dict[str, Any]]:
         from claude_codex_local._lmstudio import lms_info
+
         info = lms_info()
         return [
             {"name": m["path"], "format": m["format"], "local": True}
@@ -114,6 +116,7 @@ class LMStudioAdapter:
 
     def run_test(self, model: str) -> dict[str, Any]:
         from claude_codex_local._lmstudio import smoke_test_lmstudio_model
+
         return smoke_test_lmstudio_model(model)
 
     def recommend_params(self, mode: str) -> dict[str, Any]:
@@ -126,10 +129,12 @@ class LlamaCppAdapter:
 
     def detect(self) -> dict[str, Any]:
         from claude_codex_local._llamacpp_lifecycle import llamacpp_detect
+
         return llamacpp_detect()
 
     def healthcheck(self) -> dict[str, Any]:
         from claude_codex_local._llamacpp_lifecycle import llamacpp_info
+
         info = llamacpp_info()
         base_url = info.get("base_url", llamacpp_base_url())
         if info.get("server_running"):
@@ -154,6 +159,7 @@ class LlamaCppAdapter:
 
     def list_models(self) -> list[dict[str, Any]]:
         from claude_codex_local._llamacpp_lifecycle import llamacpp_info
+
         info = llamacpp_info()
         if not info.get("server_running"):
             return []
@@ -164,6 +170,7 @@ class LlamaCppAdapter:
 
     def run_test(self, model: str) -> dict[str, Any]:
         from claude_codex_local._llamacpp_lifecycle import smoke_test_llamacpp_model
+
         return smoke_test_llamacpp_model(model)
 
     def recommend_params(self, mode: str) -> dict[str, Any]:
@@ -274,6 +281,7 @@ class VLLMAdapter:
 
     def run_test(self, model: str) -> dict[str, Any]:
         from claude_codex_local._vllm import smoke_test_vllm_model
+
         return smoke_test_vllm_model(
             model,
             base_url=self._base_url,
@@ -308,6 +316,7 @@ class Router9Adapter:
 
     def healthcheck(self) -> dict[str, Any]:
         from claude_codex_local._router9 import smoke_test_router9_models
+
         result = smoke_test_router9_models()
         if result.get("ok"):
             count = len(result.get("models", []))
@@ -319,6 +328,7 @@ class Router9Adapter:
 
     def list_models(self) -> list[dict[str, Any]]:
         from claude_codex_local._router9 import smoke_test_router9_models
+
         result = smoke_test_router9_models()
         if not result.get("ok"):
             return []
@@ -328,6 +338,7 @@ class Router9Adapter:
 
     def run_test(self, model: str) -> dict[str, Any]:
         from claude_codex_local._router9 import smoke_test_router9_models
+
         return smoke_test_router9_models()
 
     def recommend_params(self, mode: str) -> dict[str, Any]:
@@ -356,6 +367,7 @@ class OpenRouterAdapter:
 
     def healthcheck(self) -> dict[str, Any]:
         from claude_codex_local._openrouter import smoke_test_openrouter_models
+
         result = smoke_test_openrouter_models()
         if result.get("ok"):
             count = len(result.get("models", []))
@@ -367,6 +379,7 @@ class OpenRouterAdapter:
 
     def list_models(self) -> list[dict[str, Any]]:
         from claude_codex_local._openrouter import smoke_test_openrouter_models
+
         result = smoke_test_openrouter_models()
         if not result.get("ok"):
             return []
@@ -376,6 +389,7 @@ class OpenRouterAdapter:
 
     def run_test(self, model: str) -> dict[str, Any]:
         from claude_codex_local._openrouter import smoke_test_openrouter_model
+
         api_key = os.environ.get("CCL_OPENROUTER_API_KEY", "").strip()
         if not api_key and OPENROUTER_KEY_FILE.exists():
             api_key = OPENROUTER_KEY_FILE.read_text().strip()

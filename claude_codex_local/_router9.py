@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from claude_codex_local._config import _probe_openai_models_endpoint, ROUTER9_BASE_URL
+from claude_codex_local._config import ROUTER9_BASE_URL, _probe_openai_models_endpoint
 
 
 def smoke_test_router9_models(base_url: str | None = None) -> dict[str, Any]:

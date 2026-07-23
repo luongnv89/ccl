@@ -27,6 +27,7 @@ import claude_codex_local._ollama
 import claude_codex_local._shell
 import claude_codex_local._vllm
 
+
 # Helpers to monkeypatch functions across all sub-modules that import them.
 def _patch_command_version(monkeypatch, mock):
     for _mod in (
@@ -49,6 +50,7 @@ def _patch_run(monkeypatch, mock):
         claude_codex_local._doctor,
     ):
         monkeypatch.setattr(_mod, "run", mock)
+
 
 # ---------------------------------------------------------------------------
 # core.llamacpp_detect — all-missing and one-present branches.
@@ -239,14 +241,22 @@ class TestSmokeTestOllama:
 class TestMachineProfileAggregation:
     def test_aggregates_subcalls_into_full_dict(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", lambda: {"system": {"ram_gb": 64}})
+        monkeypatch.setattr(
+            claude_codex_local._llmfit, "llmfit_system", lambda: {"system": {"ram_gb": 64}}
+        )
         monkeypatch.setattr(
             pb,
             "lms_info",
             lambda: {"present": True, "server_running": True, "server_port": 1234, "models": []},
         )
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_detect", lambda: {"present": False, "version": ""})
-        monkeypatch.setattr(claude_codex_local._ollama, "parse_ollama_list", lambda: [{"name": "x", "local": True}])
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle,
+            "llamacpp_detect",
+            lambda: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._ollama, "parse_ollama_list", lambda: [{"name": "x", "local": True}]
+        )
         monkeypatch.setattr(
             pb,
             "command_version",
@@ -448,7 +458,9 @@ class TestHuggingfaceCliDetect:
 class TestHuggingfaceDownloadGguf:
     def test_returns_error_when_cli_missing(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         result = pb.huggingface_download_gguf("org/repo")
         assert result["ok"] is False
         assert "not found" in result["error"]
@@ -663,7 +675,9 @@ class TestHuggingfaceRepoHasGguf:
         # Network down / 404 → empty list → tri-state None so callers don't
         # mistake an outage for "this repo has no GGUF".
         pb, _, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: []
+        )
         assert pb.huggingface_repo_has_gguf("org/repo") is None
 
 
@@ -705,8 +719,12 @@ class TestResolveGgufMirror:
     def test_returns_none_when_no_mirror_found(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
         pb._GGUF_MIRROR_CACHE.clear()
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_repo_has_gguf", lambda repo: False)
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_search_models", lambda *a, **kw: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_repo_has_gguf", lambda repo: False
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_search_models", lambda *a, **kw: []
+        )
         assert pb.resolve_gguf_mirror("Foo/Bar-MLX-4bit") is None
 
     def test_caches_by_base_name(self, isolated_state, monkeypatch):
@@ -719,7 +737,9 @@ class TestResolveGgufMirror:
             return True if repo == "bartowski/Foo-GGUF" else False
 
         monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_repo_has_gguf", _has_gguf)
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_search_models", lambda *a, **kw: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_search_models", lambda *a, **kw: []
+        )
         first = pb.resolve_gguf_mirror("Some/Foo-MLX-4bit")
         first_call_count = calls["n"]
         second = pb.resolve_gguf_mirror("Some/Foo-MLX-4bit")
@@ -758,7 +778,9 @@ def pytest_fail_unreached():  # helper used by the test above
 class TestDownloadGgufViaHfCli:
     def test_warns_and_fails_when_cli_missing(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         # User declines install offer → should still return {"ok": False}.
         import questionary as _q
 
@@ -775,7 +797,9 @@ class TestDownloadGgufViaHfCli:
         )
         # Empty file listing is treated as "ambiguous, proceed without
         # filter" — preserves the outage-tolerance contract from #58.
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: []
+        )
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
@@ -825,7 +849,9 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             pb, "huggingface_cli_detect", lambda: {"present": True, "binary": "hf", "version": ""}
         )
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: []
+        )
         # A failure that doesn't look like not-found should propagate as-is
         # without invoking the fuzzy-search loop.
         monkeypatch.setattr(
@@ -841,7 +867,9 @@ class TestDownloadGgufViaHfCli:
             },
         )
         # Ensure the fuzzy-search probe is never exercised here.
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_search_models", lambda *a, **kw: ["org/repo"])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_search_models", lambda *a, **kw: ["org/repo"]
+        )
         result = wiz._download_gguf_via_hf_cli("org/repo")
         assert result["ok"] is False
 
@@ -867,7 +895,9 @@ class TestDownloadGgufViaHfCli:
             cli_called["flag"] = True
             raise AssertionError("huggingface_download_gguf should not be reached")
 
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_download_gguf", _fail_if_called)
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_download_gguf", _fail_if_called
+        )
 
         # User declines fuzzy-retry → wrapper returns a clean failure dict
         # without ever invoking the CLI.
@@ -876,7 +906,9 @@ class TestDownloadGgufViaHfCli:
         monkeypatch.setattr(
             _q, "select", lambda *a, **kw: type("S", (), {"ask": lambda self: "__cancel__"})()
         )
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda *a, **kw: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda *a, **kw: []
+        )
         monkeypatch.setattr(_q, "text", lambda *a, **kw: type("T", (), {"ask": lambda self: ""})())
 
         result = wiz._download_gguf_via_hf_cli("NexVeridian/Qwen3-Coder-Next-8bit")
@@ -896,7 +928,9 @@ class TestDownloadGgufViaHfCli:
         def _fail_if_called(*a, **kw):
             raise AssertionError("repo file listing must not be fetched when filename is pinned")
 
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_list_repo_files", _fail_if_called)
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_list_repo_files", _fail_if_called
+        )
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
@@ -1021,7 +1055,9 @@ class TestDownloadGgufViaHfCli:
         def _fail_if_called(*a, **kw):
             raise AssertionError("download must not start when user cancels picker")
 
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_download_gguf", _fail_if_called)
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_download_gguf", _fail_if_called
+        )
         result = wiz._download_gguf_via_hf_cli("org/repo")
         assert result["ok"] is False
         assert "cancel" in (result.get("error") or "").lower()
@@ -1153,7 +1189,9 @@ class TestHuggingfaceSearchModels:
             def __exit__(self, *a):
                 return False
 
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_search_models", pb.huggingface_search_models)  # sanity
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_search_models", pb.huggingface_search_models
+        )  # sanity
         # Patch urllib.request.urlopen inside core.
         import urllib.request as _ur
 
@@ -1217,7 +1255,9 @@ class TestHuggingfaceFuzzyFind:
 
     def test_returns_empty_when_no_candidates(self, isolated_state, monkeypatch):
         pb, _, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_search_models", lambda q, limit=10: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_search_models", lambda q, limit=10: []
+        )
         assert pb.huggingface_fuzzy_find("does-not-exist") == []
 
     def test_falls_back_to_api_order_when_difflib_returns_nothing(
@@ -1260,7 +1300,11 @@ class TestFuzzySearchReprompt:
 
     def test_picker_reprompt_lets_user_type_new_name(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: ["some/match"])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_fuzzy_find",
+            lambda q, max_results=3: ["some/match"],
+        )
         monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("__reenter__"))
         monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("user/custom-typed"))
         out = wiz._prompt_fuzzy_hf_match("qwen2.5-coder")
@@ -1268,7 +1312,11 @@ class TestFuzzySearchReprompt:
 
     def test_picker_cancel_returns_none(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: ["some/match"])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_fuzzy_find",
+            lambda q, max_results=3: ["some/match"],
+        )
         monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("__cancel__"))
         out = wiz._prompt_fuzzy_hf_match("qwen2.5-coder")
         assert out is None
@@ -1277,14 +1325,18 @@ class TestFuzzySearchReprompt:
         pb, wiz, _ = isolated_state
         # No fuzzy hits — the picker should be skipped and we drop directly
         # into the text re-entry prompt.
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: []
+        )
         monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk("user/backup-typed"))
         out = wiz._prompt_fuzzy_hf_match("gibberish")
         assert out == "user/backup-typed"
 
     def test_zero_matches_blank_reentry_returns_none(self, isolated_state, monkeypatch):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: []
+        )
         monkeypatch.setattr(wiz.questionary, "text", lambda *a, **kw: _StubAsk(""))
         assert wiz._prompt_fuzzy_hf_match("gibberish") is None
 
@@ -1300,7 +1352,9 @@ class TestFuzzySearchDownloadFlow:
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
         # Empty file listing → ambiguous, proceed (fuzzy-on-404 path runs).
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: []
+        )
         # Call 1: fail with 404. Call 2: success with the fuzzy-picked repo.
         calls: list[str] = []
 
@@ -1351,7 +1405,9 @@ class TestFuzzySearchDownloadFlow:
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: [])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_list_repo_files", lambda repo: []
+        )
         attempt = {"n": 0}
 
         def fake_download(repo, filename=None, local_dir=None, *, include=None, stream=True):
@@ -1399,7 +1455,9 @@ class TestFuzzySearchDownloadFlow:
             "huggingface_cli_detect",
             lambda: {"present": True, "binary": "hf", "version": ""},
         )
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_repo_has_gguf", lambda repo: None)
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_repo_has_gguf", lambda repo: None
+        )
         monkeypatch.setattr(
             pb,
             "huggingface_download_gguf",
@@ -1412,7 +1470,11 @@ class TestFuzzySearchDownloadFlow:
                 "elapsed_seconds": 0.3,
             },
         )
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_fuzzy_find", lambda q, max_results=3: ["some/match"])
+        monkeypatch.setattr(
+            claude_codex_local._hf_api,
+            "huggingface_fuzzy_find",
+            lambda q, max_results=3: ["some/match"],
+        )
         monkeypatch.setattr(wiz.questionary, "select", lambda *a, **kw: _StubAsk("__cancel__"))
         out = wiz._download_gguf_via_hf_cli("user/typo")
         assert out["ok"] is False
@@ -1446,7 +1508,11 @@ class TestDownloadModelSummary:
 
     def test_ollama_success_prints_summary(self, isolated_state, monkeypatch, capsys):
         pb, wiz, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._machine_profile, "machine_profile", lambda: {"ollama": {"models": []}})
+        monkeypatch.setattr(
+            claude_codex_local._machine_profile,
+            "machine_profile",
+            lambda: {"ollama": {"models": []}},
+        )
         # subprocess.run → no-op (simulates a silent-but-fast pull).
         calls: list[list[str]] = []
         monkeypatch.setattr(
@@ -1771,7 +1837,9 @@ class TestMachineProfileCache:
     def test_profile_assembly_from_supplied_probe_results(self, isolated_state, monkeypatch):
         """Profile assembly is testable without running any environment probes."""
         pb, _, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._hf_api, "disk_usage_for", lambda path: {"free_bytes": 42})
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "disk_usage_for", lambda path: {"free_bytes": 42}
+        )
         _patch_command_version(monkeypatch, lambda name, args=None: {"version": "lms-v"})
         probes = pb.MachineProfileProbeResults(
             llmfit_system=None,
@@ -1799,11 +1867,21 @@ class TestMachineProfileCache:
     def test_probe_inputs_are_separate_from_profile_assembly(self, isolated_state, monkeypatch):
         """Tool and endpoint probes can be validated as their own service seam."""
         pb, _, _ = isolated_state
-        monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", lambda: {"system": {"ram_gb": 64}})
+        monkeypatch.setattr(
+            claude_codex_local._llmfit, "llmfit_system", lambda: {"system": {"ram_gb": 64}}
+        )
         monkeypatch.setattr(claude_codex_local._lmstudio, "lms_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._vllm, "vllm_info", lambda: {"present": False, "base_url": "http://vllm"})
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle, "llamacpp_info", lambda: {"present": False}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
+        monkeypatch.setattr(
+            claude_codex_local._vllm,
+            "vllm_info",
+            lambda: {"present": False, "base_url": "http://vllm"},
+        )
         monkeypatch.setattr(
             pb, "ollama_info", lambda: {"present": True, "base_url": "http://ollama"}
         )
@@ -1826,7 +1904,9 @@ class TestMachineProfileCache:
                 return {"ok": True, "detail": "ok"}
 
         monkeypatch.setattr(claude_codex_local._adapters, "Router9Adapter", lambda: _FakeRouter9())
-        monkeypatch.setattr(claude_codex_local._adapters, "OpenRouterAdapter", lambda: _FakeOpenRouter())
+        monkeypatch.setattr(
+            claude_codex_local._adapters, "OpenRouterAdapter", lambda: _FakeOpenRouter()
+        )
 
         probes = pb._probe_machine_profile_inputs(run_llmfit=True)
         assert probes.llmfit_system == {"system": {"ram_gb": 64}}
@@ -1916,8 +1996,14 @@ class TestMachineProfileCache:
         # Mock out slow sub-calls so this test stays fast
         monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", lambda: None)
         monkeypatch.setattr(claude_codex_local._lmstudio, "lms_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_detect", lambda: {"present": False, "version": ""})
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle,
+            "llamacpp_detect",
+            lambda: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         monkeypatch.setattr(
             pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
         )
@@ -1972,8 +2058,14 @@ class TestMachineProfileCache:
         # Mock scan so it returns something different
         monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", lambda: None)
         monkeypatch.setattr(claude_codex_local._lmstudio, "lms_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_detect", lambda: {"present": False, "version": ""})
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle,
+            "llamacpp_detect",
+            lambda: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         monkeypatch.setattr(
             pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
         )
@@ -2025,8 +2117,14 @@ class TestMachineProfileCache:
 
         monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", fake_llmfit)
         monkeypatch.setattr(claude_codex_local._lmstudio, "lms_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_detect", lambda: {"present": False, "version": ""})
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle,
+            "llamacpp_detect",
+            lambda: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         monkeypatch.setattr(
             pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
         )
@@ -2079,8 +2177,14 @@ class TestMachineProfileCache:
 
         monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", fake_llmfit)
         monkeypatch.setattr(claude_codex_local._lmstudio, "lms_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_detect", lambda: {"present": False, "version": ""})
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle,
+            "llamacpp_detect",
+            lambda: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         monkeypatch.setattr(
             pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
         )
@@ -2106,7 +2210,9 @@ class TestMachineProfileCache:
         monkeypatch.setattr(pb.time, "time", fake_time)
 
         # Also prevent file cache from being hit
-        monkeypatch.setattr(claude_codex_local._machine_profile, "_load_machine_profile_cache", lambda: None)
+        monkeypatch.setattr(
+            claude_codex_local._machine_profile, "_load_machine_profile_cache", lambda: None
+        )
 
         # First call at T=0
         result1 = pb.machine_profile()
@@ -2182,13 +2288,23 @@ class TestMachineProfileCache:
         setattr(pb._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})
 
         # Make cache file path point to a non-existent directory
-        monkeypatch.setattr(claude_codex_local._machine_profile, "MACHINE_PROFILE_CACHE_FILE", state_dir / "nonexist" / "mp.json")
+        monkeypatch.setattr(
+            claude_codex_local._machine_profile,
+            "MACHINE_PROFILE_CACHE_FILE",
+            state_dir / "nonexist" / "mp.json",
+        )
 
         # Mock scan functions
         monkeypatch.setattr(claude_codex_local._llmfit, "llmfit_system", lambda: None)
         monkeypatch.setattr(claude_codex_local._lmstudio, "lms_info", lambda: {"present": False})
-        monkeypatch.setattr(claude_codex_local._llamacpp_lifecycle, "llamacpp_detect", lambda: {"present": False, "version": ""})
-        monkeypatch.setattr(claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False})
+        monkeypatch.setattr(
+            claude_codex_local._llamacpp_lifecycle,
+            "llamacpp_detect",
+            lambda: {"present": False, "version": ""},
+        )
+        monkeypatch.setattr(
+            claude_codex_local._hf_api, "huggingface_cli_detect", lambda: {"present": False}
+        )
         monkeypatch.setattr(
             pb, "vllm_info", lambda: {"present": False, "base_url": "http://localhost:8000"}
         )

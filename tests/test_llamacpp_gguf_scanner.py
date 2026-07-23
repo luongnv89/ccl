@@ -442,7 +442,9 @@ class TestScanStateDirGgufModels:
 
     def test_missing_state_dir_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.setattr(claude_codex_local._config, "STATE_DIR", tmp_path / "does-not-exist")
-        monkeypatch.setattr(claude_codex_local._model_selection, "STATE_DIR", tmp_path / "does-not-exist")
+        monkeypatch.setattr(
+            claude_codex_local._model_selection, "STATE_DIR", tmp_path / "does-not-exist"
+        )
         assert core.scan_state_dir_gguf_models() == []
 
     def test_finds_wizard_layout(self, tmp_path, monkeypatch):

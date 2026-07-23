@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from claude_codex_local._config import (
+    LLAMACPP_API_KEY,
     MACHINE_PROFILE_CACHE_FILE,
     MACHINE_PROFILE_TTL_SECONDS,
     OLLAMA_API_KEY,
-    LLAMACPP_API_KEY,
-    VLLM_BASE_URL,
-    VLLM_API_KEY,
     OPENROUTER_BASE_URL,
     ROUTER9_BASE_URL,
     STATE_DIR,
+    VLLM_API_KEY,
+    VLLM_BASE_URL,
 )
 from claude_codex_local._shell import command_version as _command_version_from_shell
 from claude_codex_local._shell import llamacpp_base_url, ollama_base_url
@@ -162,13 +162,14 @@ class MachineProfileProbeResults:
 
 
 def _probe_machine_profile_inputs(run_llmfit: bool) -> MachineProfileProbeResults:
+    from claude_codex_local._adapters import OpenRouterAdapter, Router9Adapter
+    from claude_codex_local._hf_api import huggingface_cli_detect
+    from claude_codex_local._llamacpp_lifecycle import llamacpp_info
     from claude_codex_local._llmfit import llmfit_system
     from claude_codex_local._lmstudio import lms_info
-    from claude_codex_local._llamacpp_lifecycle import llamacpp_info
-    from claude_codex_local._hf_api import huggingface_cli_detect
-    from claude_codex_local._vllm import vllm_info
     from claude_codex_local._ollama import ollama_info
-    from claude_codex_local._adapters import Router9Adapter, OpenRouterAdapter
+    from claude_codex_local._vllm import vllm_info
+
     llmfit_sys = llmfit_system() if run_llmfit else None
     lms = lms_info()
     llamacpp = llamacpp_info()
@@ -338,6 +339,7 @@ def machine_profile(run_llmfit: bool = True) -> dict[str, Any]:
         cached_llmfit = file_cache.get("llmfit_system")
         if run_llmfit and _is_llmfit_skipped(cached_llmfit):
             from claude_codex_local._llmfit import llmfit_system
+
             llmfit_sys = llmfit_system()
             if llmfit_sys:
                 file_cache["llmfit_system"] = llmfit_sys

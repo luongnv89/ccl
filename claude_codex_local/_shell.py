@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 from claude_codex_local._config import (

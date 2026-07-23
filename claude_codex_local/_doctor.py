@@ -4,15 +4,12 @@ import argparse
 import json
 import re
 import subprocess
-import sys
 from typing import Any
 
-from claude_codex_local._shell import state_env
 from claude_codex_local._model_selection import MODE_CHOICES
 
 # Re-export run so that _patch_run (which patches _doctor.run) can target it.
 from claude_codex_local._shell import run as _run_from_shell
-
 
 # Alias for _patch_run compatibility — tests patch _doctor.run directly.
 run = _run_from_shell
@@ -59,12 +56,12 @@ def smoke_test_codex(model: str, runtime: str = "ollama") -> dict[str, Any]:
 
 
 def doctor(run_codex_smoke: bool, mode: str = "balanced") -> dict[str, Any]:
-    from claude_codex_local._model_selection import select_best_model
-
     # Import core at call time so that test monkeypatches on core.machine_profile
     # (or core._machine_profile_in_process_cache) take effect instead of bypassing
     # the patch via a direct _machine_profile import.
     import claude_codex_local.core as _core
+    from claude_codex_local._model_selection import select_best_model
+
     profile = _core.machine_profile()
     recommendation = select_best_model(profile, mode)
     issues: list[str] = []
@@ -153,15 +150,18 @@ def main() -> None:
 
     if args.command == "profile":
         from claude_codex_local._machine_profile import machine_profile
+
         print_payload(machine_profile())
     elif args.command == "recommend":
         from claude_codex_local._machine_profile import machine_profile
         from claude_codex_local._model_selection import select_best_model
+
         print_payload(select_best_model(machine_profile(), args.mode))
     elif args.command == "doctor":
         print_payload(doctor(args.run_codex_smoke, args.mode))
     elif args.command == "adapters":
         from claude_codex_local._adapters import ALL_ADAPTERS
+
         result = []
         for adapter in ALL_ADAPTERS:
             result.append(
@@ -184,6 +184,7 @@ def main() -> None:
         }
         if args.action == "optimize":
             from claude_codex_local._machine_profile import machine_profile
+
             kwargs["profile"] = machine_profile(run_llmfit=False)
         try:
             engine_result = run_engine_action(

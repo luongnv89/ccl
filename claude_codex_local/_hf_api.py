@@ -45,7 +45,6 @@ def huggingface_download_gguf(
     include: str | None = None,
     stream: bool = True,
 ) -> dict[str, Any]:
-    import time
 
     det = huggingface_cli_detect()
     if not det.get("present"):
@@ -228,8 +227,9 @@ def huggingface_search_models(
 
 
 def huggingface_fuzzy_find(query: str, *, max_results: int = 3) -> list[str]:
-    import claude_codex_local.core as _core
     import difflib
+
+    import claude_codex_local.core as _core
 
     candidates = _core.huggingface_search_models(query, limit=10)
     if not candidates:

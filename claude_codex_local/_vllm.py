@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import Any
 
@@ -12,6 +11,7 @@ from claude_codex_local._shell import command_version
 def vllm_info() -> dict[str, Any]:
     cli_info = command_version("vllm")
     from claude_codex_local._adapters import VLLMAdapter
+
     adapter = VLLMAdapter()
     base_url = adapter._base_url or VLLM_BASE_URL
     detect = adapter.detect()
@@ -39,7 +39,6 @@ def smoke_test_vllm_model(
     prompt: str = "Reply with exactly READY",
     expected: str | None = "READY",
 ) -> dict[str, Any]:
-    import time
     import urllib.error
     import urllib.request
 

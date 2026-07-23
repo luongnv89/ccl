@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from typing import Any
 
-from claude_codex_local._config import _probe_openai_models_endpoint, OPENROUTER_BASE_URL, OPENROUTER_KEY_FILE
+from claude_codex_local._config import (
+    OPENROUTER_BASE_URL,
+    _probe_openai_models_endpoint,
+)
 
 
 def smoke_test_openrouter_models(base_url: str | None = None) -> dict[str, Any]:

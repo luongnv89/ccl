@@ -12,8 +12,6 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-import claude_codex_local.core as pb
-
 # ---------------------------------------------------------------------------
 # Sub-module references for monkeypatching — the refactored sub-modules import
 # ``run``, ``command_version``, and config constants directly from ``_shell``
@@ -21,8 +19,6 @@ import claude_codex_local.core as pb
 # the symbol rather than (only) ``pb``.
 # ---------------------------------------------------------------------------
 import claude_codex_local._adapters as _adapters_mod
-import claude_codex_local._config as _cfg_mod
-import claude_codex_local._doctor as _doctor_mod
 import claude_codex_local._hf_api as _hf_api_mod
 import claude_codex_local._llamacpp_lifecycle as _llamacpp_mod
 import claude_codex_local._llmfit as _llmfit_mod
@@ -34,6 +30,7 @@ import claude_codex_local._openrouter as _openrouter_mod
 import claude_codex_local._router9 as _router9_mod
 import claude_codex_local._shell as _shell_mod
 import claude_codex_local._vllm as _vllm_mod
+import claude_codex_local.core as pb
 
 
 def _patch_ollama_run(monkeypatch, mock):
@@ -336,7 +333,7 @@ class TestSelectBestModel:
             "llmfit_coding_candidates",
             lambda *a, **k: [
                 {
-                "name": "Qwen/Qwen3-Coder-30B",
+                    "name": "Qwen/Qwen3-Coder-30B",
                     "score": 90,
                     "ollama_tag": "qwen3-coder:30b",
                     "lms_mlx_path": None,
@@ -638,8 +635,9 @@ class TestInstalledModelsForEngine:
         assert tags[0] == "qwen/qwen3-coder-30b"
 
     def test_llamacpp_surfaces_running_server_model(self):
-        with patch.object(_ms_mod, "scan_huggingface_gguf_cache", return_value=[]), patch.object(
-            _ms_mod, "scan_state_dir_gguf_models", return_value=[]
+        with (
+            patch.object(_ms_mod, "scan_huggingface_gguf_cache", return_value=[]),
+            patch.object(_ms_mod, "scan_state_dir_gguf_models", return_value=[]),
         ):
             profile = {
                 "llamacpp": {
@@ -655,8 +653,9 @@ class TestInstalledModelsForEngine:
             assert out[0]["running"] is True
 
     def test_llamacpp_returns_empty_when_server_not_running(self):
-        with patch.object(_ms_mod, "scan_huggingface_gguf_cache", return_value=[]), patch.object(
-            _ms_mod, "scan_state_dir_gguf_models", return_value=[]
+        with (
+            patch.object(_ms_mod, "scan_huggingface_gguf_cache", return_value=[]),
+            patch.object(_ms_mod, "scan_state_dir_gguf_models", return_value=[]),
         ):
             profile = {
                 "llamacpp": {
@@ -704,11 +703,17 @@ class TestAdapters:
 
     def test_ollama_adapter_healthcheck_reports_model_count(self, monkeypatch):
         _patch_adapters_cmd_ver(monkeypatch, lambda *a, **kw: {"present": True, "version": "0.1"})
-        monkeypatch.setattr(_llmfit_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"})
-        monkeypatch.setattr(_ollama_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"})
+        monkeypatch.setattr(
+            _llmfit_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
+        )
+        monkeypatch.setattr(
+            _ollama_mod, "command_version", lambda *a, **kw: {"present": True, "version": "0.1"}
+        )
         # Block HTTP so parse_ollama_list mock is reached.
         monkeypatch.setattr(_ollama_mod, "_ollama_http_models", lambda timeout=5: None)
-        monkeypatch.setattr(_ollama_mod, "parse_ollama_list", lambda: [{"name": "a"}, {"name": "b"}])
+        monkeypatch.setattr(
+            _ollama_mod, "parse_ollama_list", lambda: [{"name": "a"}, {"name": "b"}]
+        )
         adapter = pb.OllamaAdapter()
         result = adapter.healthcheck()
         assert result["ok"] is True
@@ -782,13 +787,13 @@ class TestLlamaCppDetect:
 class TestLlamaCppInfo:
     def test_returns_not_present_when_binary_missing(self, monkeypatch):
         monkeypatch.setattr(
-            _llamacpp_mod, "llamacpp_detect", lambda: {"present": False, "binary": "", "version": ""}
+            _llamacpp_mod,
+            "llamacpp_detect",
+            lambda: {"present": False, "binary": "", "version": ""},
         )
         # Override base URL to a port with no running server so the health
         # check fails even when the dev host has a llama.cpp server elsewhere.
-        monkeypatch.setattr(
-            _llamacpp_mod, "llamacpp_base_url", lambda: "http://127.0.0.1:18003"
-        )
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_base_url", lambda: "http://127.0.0.1:18003")
         result = pb.llamacpp_info()
         assert result["present"] is False
         assert result["server_running"] is False
@@ -3083,7 +3088,9 @@ class TestLlamaCppStopServerByPort:
         pid_file.write_text("4242")
 
         signals: list[tuple[int, int]] = []
-        monkeypatch.setattr(_llamacpp_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig)))
+        monkeypatch.setattr(
+            _llamacpp_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
+        )
 
         gone_states = iter([False, True])
 
@@ -3138,7 +3145,9 @@ def _stub_machine_internals(monkeypatch, pb_mod):
     monkeypatch.setattr(_ollama_mod, "command_version", fake_command_version)
     monkeypatch.setattr(_lmstudio_mod, "lms_info", lambda: {"present": False, "models": []})
     monkeypatch.setattr(_llamacpp_mod, "llamacpp_detect", lambda: {"present": False, "version": ""})
-    monkeypatch.setattr(_hf_api_mod, "huggingface_cli_detect", lambda: {"present": False, "version": ""})
+    monkeypatch.setattr(
+        _hf_api_mod, "huggingface_cli_detect", lambda: {"present": False, "version": ""}
+    )
     monkeypatch.setattr(
         _vllm_mod,
         "vllm_info",

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any
 
-from claude_codex_local._config import HF_TO_OLLAMA, HF_TO_LMS_HUB, MLX_QUANT_RANK, MLX_QUANT_SUFFIX
+from claude_codex_local._config import HF_TO_LMS_HUB, HF_TO_OLLAMA, MLX_QUANT_RANK, MLX_QUANT_SUFFIX
 from claude_codex_local._shell import command_version, run
 
 
