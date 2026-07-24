@@ -31,7 +31,6 @@ from claude_codex_local import core as pb
 from claude_codex_local.wizard_discovery import (
     _ensure_llmfit,
     step_2_1_discover,
-    step_2_2_install_missing,
 )
 from claude_codex_local.wizard_state import GUIDE_PATH, STATE_DIR, STATE_FILE, WizardState
 from claude_codex_local.wizard_steps import (

@@ -25,13 +25,10 @@ import os
 import platform
 import shutil
 import subprocess
-import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import questionary
-from rich.console import Console
 from rich.table import Table
 
 from claude_codex_local import core as pb

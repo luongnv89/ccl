@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import re
 import shlex
 import shutil
@@ -19,37 +18,30 @@ import sys
 import sysconfig
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import questionary
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 from claude_codex_local import core as pb
-from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 from claude_codex_local.engines.pickers import get_picker
 from claude_codex_local.wizard_discovery import (
-    INSTALL_HINTS,
     _ALL_ENGINES,
     _ALL_HARNESSES,
     _ensure_llmfit,
     _ensure_tool,
     _is_model_compatible_with_engine,
-    _persist_targeted_profile_update,
-    _refresh_llmfit_for_profile,
     _refresh_selected_engine,
     _refresh_selected_harness,
     _show_install_hint,
     _show_selected_harness_status,
     _sync_presence_from_tools,
-    _try_llmfit_fallback,
 )
-from claude_codex_local.wizard_state import STATE_DIR, STATE_FILE, WizardState, WireResult
-from claude_codex_local.wizard_ui import console, fail, header, info, ok, warn
+from claude_codex_local.wizard_state import STATE_DIR, WizardState, WireResult
+from claude_codex_local.wizard_ui import fail, header, info, ok, warn
 
 console = Console()
 
