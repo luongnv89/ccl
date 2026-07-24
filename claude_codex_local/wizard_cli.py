@@ -29,6 +29,7 @@ from typing import Any
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
 from claude_codex_local.wizard_discovery import (
+    _ensure_llmfit,
     step_2_1_discover,
     step_2_2_install_missing,
 )
@@ -37,6 +38,7 @@ from claude_codex_local.wizard_steps import (
     _alias_names_for,
     _ensure_llamacpp_server_running,
     _fence_tag_for,
+    _find_model_interactive,
     _helper_script_basename,
     _model_already_installed,
     _OPENROUTER_MODEL_RE,
@@ -51,8 +53,19 @@ from claude_codex_local.wizard_steps import (
     step_2_select_harness,
     step_3_select_engine,
 )
-from claude_codex_local.wizard_ui import Panel, console, fail, header, info, ok, warn
+from claude_codex_local.wizard_ui import (
+    Panel,
+    console,
+    fail,
+    header,
+    info,
+    ok,
+    print_welcome_banner,
+    warn,
+)
 from rich.table import Table
+import shlex
+import subprocess
 
 STEPS: list[tuple[str, str, Callable]] = [
     ("1", "Discover environment", step_2_1_discover),
@@ -943,10 +956,10 @@ def run_status() -> int:
     existing_shortcuts = _detect_existing_shortcuts()
 
     local_script_configs: dict[str, dict[str, str]] = {}
-    for basename, info in existing_shortcuts.items():
-        if info["engine_kind"] != "local":
+    for basename, shortcut_info in existing_shortcuts.items():
+        if shortcut_info["engine_kind"] != "local":
             continue
-        engine, model = _infer_engine_from_script(info["path"])
+        engine, model = _infer_engine_from_script(shortcut_info["path"])
         if engine:
             local_script_configs[basename] = {"engine": engine, "model": model or "(unknown)"}
 

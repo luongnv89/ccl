@@ -37,12 +37,10 @@ from rich.table import Table
 from claude_codex_local import core as pb
 from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 from claude_codex_local.wizard_state import WizardState
-from claude_codex_local.wizard_ui import console, fail, info, ok
+from claude_codex_local.wizard_ui import console, fail, info, ok, warn
 
 # Forward reference — _run_engine_lifecycle is defined in wizard_steps
-# to avoid circular imports at module load time., warn
-
-console = Console()
+# to avoid circular imports at module load time.
 
 # ---------------------------------------------------------------------------
 # Step 1 — Discover environment
