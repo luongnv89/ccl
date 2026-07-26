@@ -60,9 +60,7 @@ class WizardState:
     model_name: str = ""  # raw user input or find-model selection
     model_source: str = ""  # "direct" | "find-model"
     engine_model_tag: str = ""  # engine-specific tag (e.g. qwen3-coder:30b)
-    model_candidate: dict = field(
-        default_factory=dict
-    )  # llmfit candidate metadata when available
+    model_candidate: dict = field(default_factory=dict)  # llmfit candidate metadata when available
     # launch command the wizard wired up
     launch_command: list[str] = field(default_factory=list)
     # serialized WireResult: {"argv": [...], "env": {...}, "effective_tag": "..."}
