@@ -31,6 +31,7 @@ from rich.table import Table
 
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
+from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 from claude_codex_local.wizard_discovery import (
     _ensure_llmfit,
     step_2_1_discover,
@@ -1173,12 +1174,37 @@ def run_find_model_standalone() -> int:
     return 1
 
 
+# Derive the engine list from the registry so adding a new engine package
+# automatically surfaces it without touching this file.
+_ALL_ENGINES = list(_REGISTRY_ENGINES)
+
+
+def _engine_help_text() -> str:
+    """Build a human-readable list of supported engines from the registry.
+
+    This keeps CLI help text in sync with the actual engine choices so the
+    description and the --engine choices can never drift independently.
+    """
+    _DISPLAY_NAMES: dict[str, str] = {
+        "9router": "9router",
+        "llamacpp": "llama.cpp",
+        "lmstudio": "LM Studio",
+        "ollama": "Ollama",
+        "openrouter": "OpenRouter",
+        "vllm": "vLLM",
+    }
+    parts: list[str] = []
+    for eng in _REGISTRY_ENGINES:
+        parts.append(_DISPLAY_NAMES.get(eng, eng))
+    return ", ".join(parts)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ccl",
         description=(
-            "ccl — claude-codex-local. Wire up Claude Code or Codex to a local LLM engine "
-            "(Ollama, LM Studio, or llama.cpp). Run without arguments to start the interactive "
+            f"ccl — claude-codex-local. Wire up Claude Code or Codex to a local LLM engine "
+            f"({_engine_help_text()}). Run without arguments to start the interactive "
             "first-run wizard."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1230,7 +1256,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     setup.add_argument(
         "--engine",
-        choices=("ollama", "lmstudio", "llamacpp", "vllm", "9router", "openrouter"),
+        choices=tuple(_ALL_ENGINES),
         help="Force the primary engine",
     )
     setup.add_argument(
