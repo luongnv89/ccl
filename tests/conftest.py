@@ -73,6 +73,16 @@ def isolated_state(tmp_path, monkeypatch):
     import claude_codex_local.core as pb_mod
 
     pb_mod = importlib.reload(pb_mod)
+    # Reload the decomposed wizard sub-modules so their console/warn references
+    # pick up the monkeypatched state (STATE_DIR, console, etc.).
+    for _wiz_mod in (
+        "claude_codex_local.wizard_ui",
+        "claude_codex_local.wizard_state",
+        "claude_codex_local.wizard_discovery",
+        "claude_codex_local.wizard_steps",
+        "claude_codex_local.wizard_cli",
+    ):
+        importlib.reload(importlib.import_module(_wiz_mod))
     import claude_codex_local.wizard as wiz_mod
 
     wiz_mod = importlib.reload(wiz_mod)
