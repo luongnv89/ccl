@@ -16,15 +16,18 @@ Exports:
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import argparse
 import contextlib
 import os
 import re
+import shlex
+import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from rich.table import Table
 
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
@@ -34,21 +37,21 @@ from claude_codex_local.wizard_discovery import (
 )
 from claude_codex_local.wizard_state import GUIDE_PATH, STATE_DIR, STATE_FILE, WizardState
 from claude_codex_local.wizard_steps import (
+    _OPENROUTER_MODEL_RE,
+    _ROUTER9_MODEL_RE,
     _alias_names_for,
     _ensure_llamacpp_server_running,
     _fence_tag_for,
     _find_model_interactive,
     _helper_script_basename,
     _model_already_installed,
-    _OPENROUTER_MODEL_RE,
-    _ROUTER9_MODEL_RE,
     step_2_4_pick_model,
     step_2_5_5_benchmark,
     step_2_5_smoke_test,
     step_2_6_wire_harness,
-    step_2_65_install_aliases,
     step_2_7_verify,
     step_2_8_generate_guide,
+    step_2_65_install_aliases,
     step_2_select_harness,
     step_3_select_engine,
 )
@@ -62,9 +65,6 @@ from claude_codex_local.wizard_ui import (
     print_welcome_banner,
     warn,
 )
-from rich.table import Table
-import shlex
-import subprocess
 
 STEPS: list[tuple[str, str, Callable]] = [
     ("1", "Discover environment", step_2_1_discover),

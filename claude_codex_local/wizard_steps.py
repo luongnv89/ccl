@@ -40,10 +40,11 @@ from claude_codex_local.wizard_discovery import (
     _show_selected_harness_status,
     _sync_presence_from_tools,
 )
-from claude_codex_local.wizard_state import STATE_DIR, WizardState, WireResult
+from claude_codex_local.wizard_state import STATE_DIR, WireResult, WizardState
 from claude_codex_local.wizard_ui import fail, header, info, ok, warn
 
 console = Console()
+
 
 def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> bool:
     header("Step 2 — Select harness")
@@ -4029,4 +4030,3 @@ def step_2_8_generate_guide(state: WizardState, non_interactive: bool = False) -
 # ---------------------------------------------------------------------------
 # Wizard driver
 # ---------------------------------------------------------------------------
-
