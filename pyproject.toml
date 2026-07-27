@@ -76,7 +76,7 @@ ignore = ["E501", "B008"]
 "claude_codex_local/core.py" = ["F401"]
 # wizard.py is a re-export facade; E402 (imports after code), F401 (re-exports), I001 (import order) are expected.
 "claude_codex_local/wizard.py" = ["E402", "F401", "I001"]
-"claude_codex_local/wizard_steps.py" = ["E402"]
+"claude_codex_local/wizard_steps.py" = ["E402", "F401"]
 "claude_codex_local/wizard_discovery.py" = ["F401", "E402", "I001"]
 "claude_codex_local/wizard_cli.py" = ["F401", "I001"]
 

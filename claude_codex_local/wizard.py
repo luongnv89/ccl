@@ -67,6 +67,7 @@ _ALL_ENGINES = list(_REGISTRY_ENGINES)
 # Re-export from wizard_state
 # ---------------------------------------------------------------------------
 from claude_codex_local.wizard_state import (
+    GUIDE_PATH,
     WireResult,
     WizardState,
     _backup_invalid_wizard_state,
@@ -111,6 +112,7 @@ def fail(msg: str) -> None:
 
 def info(msg: str) -> None:
     console.print(f"[dim]\u00b7[/dim] {msg}")
+
 
 # ---------------------------------------------------------------------------
 # Re-export from wizard_discovery
@@ -274,7 +276,8 @@ _CCL_REPO_URL = "https://github.com/luongnv89/claude-codex-local"
 # ---------------------------------------------------------------------------
 STATE_DIR = pb.STATE_DIR
 STATE_FILE = STATE_DIR / "wizard-state.json"
-GUIDE_PATH = Path.cwd() / "guide.md"
+# GUIDE_PATH is re-exported from wizard_state.py — tests patch wizard.GUIDE_PATH
+
 
 # ---------------------------------------------------------------------------
 # step_3_select_engine — kept here so that test monkeypatches on
@@ -477,6 +480,7 @@ _wizard_cli_mod._resolve_wire_env = _resolve_wire_env
 # the ``wizard`` module propagate to callers automatically.
 # ---------------------------------------------------------------------------
 
+
 def run_wizard(
     *,
     resume: bool = False,
@@ -512,13 +516,17 @@ def run_session(
     """Delegate to ``wizard_cli.run_session`` at call time.
 
     Monkeypatch propagation: resolve _build_oneshot_cmd and
-    _resolve_wire_env from this module at call time so that
+    _resolve_wire_env from wizard.__dict__ at call time so that
     ``monkeypatch.setattr(wizard, ...)`` patches propagate.
     """
-    # Resolve helpers from this module at call time so monkeypatches
+    # Resolve helpers from wizard.__dict__ at call time so monkeypatches
     # on wizard._build_oneshot_cmd / wizard._resolve_wire_env propagate.
-    _wizard_cli_mod._build_oneshot_cmd = _build_oneshot_cmd
-    _wizard_cli_mod._resolve_wire_env = _resolve_wire_env
+    _wizard_cli_mod._build_oneshot_cmd = sys.modules[__name__].__dict__.get(
+        "_build_oneshot_cmd", _build_oneshot_cmd
+    )
+    _wizard_cli_mod._resolve_wire_env = sys.modules[__name__].__dict__.get(
+        "_resolve_wire_env", _resolve_wire_env
+    )
     return _cli_run_session(
         prompt=prompt,
         no_context=no_context,
@@ -597,12 +605,33 @@ def __getattr__(name: str):
         _wizard_cli_mod.questionary = val  # type: ignore[attr-defined]
         _wizard_discovery_mod.questionary = val  # type: ignore[attr-defined]
         return val
+    if name == "_build_oneshot_cmd":
+        val = globals().get("_build_oneshot_cmd", _cli_build_oneshot_cmd)
+        _wizard_cli_mod._build_oneshot_cmd = val  # type: ignore[attr-defined]
+        return val
+    if name == "_resolve_wire_env":
+        val = globals().get("_resolve_wire_env", _cli_resolve_wire_env)
+        _wizard_cli_mod._resolve_wire_env = val  # type: ignore[attr-defined]
+        return val
+    if name == "subprocess":
+        val = globals().get("subprocess", subprocess)
+        _wizard_steps_mod.subprocess = val
+        _wizard_cli_mod.subprocess = val
+        _wizard_discovery_mod.subprocess = val
+        return val
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __setattr__(name: str, value):
     """Intercept attribute writes so monkeypatches propagate to sub-modules."""
-    if name in ("_refresh_selected_engine", "_ensure_tool", "questionary"):
+    if name in (
+        "_refresh_selected_engine",
+        "_ensure_tool",
+        "questionary",
+        "_build_oneshot_cmd",
+        "_resolve_wire_env",
+        "subprocess",
+    ):
         object.__setattr__(sys.modules[__name__], name, value)
         if name == "_refresh_selected_engine":
             _wizard_steps_mod._refresh_selected_engine = value
@@ -616,6 +645,14 @@ def __setattr__(name: str, value):
             _wizard_steps_mod.questionary = value
             _wizard_cli_mod.questionary = value  # type: ignore[attr-defined]
             _wizard_discovery_mod.questionary = value  # type: ignore[attr-defined]
+        elif name == "_build_oneshot_cmd":
+            _wizard_cli_mod._build_oneshot_cmd = value  # type: ignore[attr-defined]
+        elif name == "_resolve_wire_env":
+            _wizard_cli_mod._resolve_wire_env = value  # type: ignore[attr-defined]
+        elif name == "subprocess":
+            _wizard_steps_mod.subprocess = value
+            _wizard_cli_mod.subprocess = value
+            _wizard_discovery_mod.subprocess = value
     else:
         object.__setattr__(sys.modules[__name__], name, value)
 

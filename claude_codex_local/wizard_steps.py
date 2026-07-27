@@ -42,6 +42,7 @@ from claude_codex_local.wizard_state import STATE_DIR, WireResult, WizardState
 
 _LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
 
+
 # Resolve _ensure_tool and _refresh_selected_engine from wizard.py at call
 # time so that test monkeypatches on ``wizard._ensure_tool`` and
 # ``wizard._refresh_selected_engine`` propagate to this module.
@@ -52,7 +53,9 @@ def _ensure_tool(*a, **k):
         return _w.__dict__["_ensure_tool"](*a, **k)
     # Fallback: import from wizard_discovery
     from claude_codex_local.wizard_discovery import _ensure_tool as _et
+
     return _et(*a, **k)
+
 
 def _refresh_selected_engine(*a, **k):
     _w = sys.modules.get("claude_codex_local.wizard")
@@ -60,7 +63,9 @@ def _refresh_selected_engine(*a, **k):
         return _w.__dict__["_refresh_selected_engine"](*a, **k)
     # Fallback: import from wizard_discovery
     from claude_codex_local.wizard_discovery import _refresh_selected_engine as _rse
+
     return _rse(*a, **k)
+
 
 # Resolve _download_model from wizard.py at call time so that test
 # monkeypatches on ``wizard._download_model`` propagate to this module.
@@ -74,6 +79,7 @@ def _download_model(state):
     # Fallback: call the local implementation
     return _download_model_impl(state)
 
+
 # Resolve _find_model_auto from wizard.py at call time so that test
 # monkeypatches on ``wizard._find_model_auto`` propagate.
 def _find_model_auto(engine, profile=None):
@@ -85,6 +91,7 @@ def _find_model_auto(engine, profile=None):
         return _val(engine, profile)
     # Fallback: call the local implementation
     return _find_model_auto_impl(engine, profile)
+
 
 # Resolve _detect_shell_rc from wizard.py at call time so that test
 # monkeypatches on ``wizard._detect_shell_rc`` propagate.
@@ -98,9 +105,12 @@ def _detect_shell_rc():
         return _val()
     # Fallback: call the local implementation
     return _detect_shell_rc_impl()
+
+
 from claude_codex_local.wizard_ui import fail, header, info, ok, warn  # noqa: E402
 
 console = Console()
+
 
 # Resolve subprocess from wizard module at call time so that test
 # monkeypatches on ``wizard.subprocess`` propagate to this module.
@@ -1393,7 +1403,9 @@ def _map_to_engine(user_input: str, engine: str) -> str | None:
     return user_input
 
 
-def _find_model_auto_impl(engine: str, profile: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def _find_model_auto_impl(
+    engine: str, profile: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     """
     Non-interactive model pick. Prefers a model that is *already installed* for
     the chosen engine over a new download, because downloads in non-interactive
@@ -1980,7 +1992,11 @@ def _download_model_impl(state: WizardState) -> bool:
         elif engine == "llamacpp":
             # Resolve from wizard for test monkeypatch propagation.
             _wz = sys.modules.get("claude_codex_local.wizard")
-            _dgh = getattr(_wz, "_download_gguf_via_hf_cli", _download_gguf_via_hf_cli) if _wz else _download_gguf_via_hf_cli
+            _dgh = (
+                getattr(_wz, "_download_gguf_via_hf_cli", _download_gguf_via_hf_cli)
+                if _wz
+                else _download_gguf_via_hf_cli
+            )
             hf_result = _dgh(tag)
             if not hf_result.get("ok"):
                 return False
@@ -2016,11 +2032,19 @@ def _download_model_impl(state: WizardState) -> bool:
         if engine == "ollama":
             # Resolve from wizard for test monkeypatch propagation.
             _wz = sys.modules.get("claude_codex_local.wizard")
-            _oms = getattr(_wz, "_ollama_model_size_hint", _ollama_model_size_hint) if _wz else _ollama_model_size_hint
+            _oms = (
+                getattr(_wz, "_ollama_model_size_hint", _ollama_model_size_hint)
+                if _wz
+                else _ollama_model_size_hint
+            )
             size_hint = _oms(tag)
         elif engine == "lmstudio":
             _wz = sys.modules.get("claude_codex_local.wizard")
-            _lms = getattr(_wz, "_lms_model_size_hint", _lms_model_size_hint) if _wz else _lms_model_size_hint
+            _lms = (
+                getattr(_wz, "_lms_model_size_hint", _lms_model_size_hint)
+                if _wz
+                else _lms_model_size_hint
+            )
             size_hint = _lms(tag)
         bits = []
         if size_hint:

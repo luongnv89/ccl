@@ -36,7 +36,7 @@ from claude_codex_local.wizard_discovery import (
     _ensure_llmfit,
     step_2_1_discover,
 )
-from claude_codex_local.wizard_state import GUIDE_PATH, STATE_DIR, STATE_FILE, WizardState
+from claude_codex_local.wizard_state import GUIDE_PATH as _GUIDE_PATH_FALLBACK, STATE_DIR, STATE_FILE, WizardState
 from claude_codex_local.wizard_steps import (
     _OPENROUTER_MODEL_RE,
     _ROUTER9_MODEL_RE,
@@ -67,6 +67,7 @@ from claude_codex_local.wizard_ui import (
     warn,
 )
 
+
 # Resolve subprocess from wizard module at call time so that test
 # monkeypatches on ``wizard.subprocess`` propagate to this module.
 def _resolved_subprocess():
@@ -74,6 +75,16 @@ def _resolved_subprocess():
     if _w is not None and "subprocess" in _w.__dict__:
         return _w.__dict__["subprocess"]
     return subprocess
+
+
+# Resolve GUIDE_PATH from wizard module at call time so that conftest
+# patches on wizard.GUIDE_PATH propagate to wizard_cli.
+def _resolved_guide_path():
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "GUIDE_PATH" in _w.__dict__:
+        return _w.__dict__["GUIDE_PATH"]
+    return _GUIDE_PATH_FALLBACK
+
 
 STEPS: list[tuple[str, str, Callable]] = [
     ("1", "Discover environment", step_2_1_discover),
@@ -148,7 +159,7 @@ def run_wizard(
             f"Reload your shell so the new alias is picked up:\n"
             f"  [cyan]source {state.shell_rc_path}[/cyan]  (or open a new terminal)\n\n"
             f"Then run: [cyan]{alias_short}[/cyan]\n\n"
-            f"See [bold]{GUIDE_PATH}[/bold] for the full guide."
+            f"See [bold]{_resolved_guide_path()}[/bold] for the full guide."
         )
     else:
         helper = state.helper_script_path or "(helper script)"
@@ -157,7 +168,7 @@ def run_wizard(
             f"Alias install was skipped, so no shell reload is required.\n\n"
             f"Run the helper directly:\n"
             f"  [cyan]{helper}[/cyan]\n\n"
-            f"See [bold]{GUIDE_PATH}[/bold] for the full guide."
+            f"See [bold]{_resolved_guide_path()}[/bold] for the full guide."
         )
     console.print()
     console.print(
@@ -360,9 +371,9 @@ def run_doctor() -> int:
     # guide.md
     add_row(
         "guide.md",
-        str(GUIDE_PATH),
-        GUIDE_PATH.exists(),
-        "present" if GUIDE_PATH.exists() else "missing — re-run step 8",
+        str(_resolved_guide_path()),
+        _resolved_guide_path().exists(),
+        "present" if _resolved_guide_path().exists() else "missing — re-run step 8",
     )
 
     console.print(check_table)
@@ -1178,7 +1189,11 @@ def run_find_model_standalone() -> int:
     # so that test monkeypatches on ``wizard._find_model_interactive``
     # propagate to this function.
     _wz = sys.modules.get("claude_codex_local.wizard")
-    _fmi = getattr(_wz, "_find_model_interactive", _find_model_interactive) if _wz else _find_model_interactive
+    _fmi = (
+        getattr(_wz, "_find_model_interactive", _find_model_interactive)
+        if _wz
+        else _find_model_interactive
+    )
     picked = _fmi(engine, profile)
     if picked:
         console.print(f"\n[bold]You picked:[/bold] {picked['display']}")
@@ -1460,7 +1475,11 @@ def main() -> int:
     if cmd == "find-model":
         # Resolve from wizard module at call time for test monkeypatch propagation.
         _wz = sys.modules.get("claude_codex_local.wizard")
-        _rfs = getattr(_wz, "run_find_model_standalone", run_find_model_standalone) if _wz else run_find_model_standalone
+        _rfs = (
+            getattr(_wz, "run_find_model_standalone", run_find_model_standalone)
+            if _wz
+            else run_find_model_standalone
+        )
         return _rfs()
     if cmd == "doctor":
         _wz = sys.modules.get("claude_codex_local.wizard")

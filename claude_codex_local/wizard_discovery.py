@@ -34,6 +34,7 @@ from rich.table import Table
 
 from claude_codex_local import core as pb
 
+
 # Resolve subprocess from wizard module at call time so that test
 # monkeypatches on ``wizard.subprocess`` propagate to this module.
 def _resolved_subprocess():
@@ -41,6 +42,8 @@ def _resolved_subprocess():
     if _w is not None and "subprocess" in _w.__dict__:
         return _w.__dict__["subprocess"]
     return subprocess
+
+
 from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 from claude_codex_local.wizard_state import WizardState
 from claude_codex_local.wizard_ui import console, fail, info, ok, warn
