@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from claude_codex_local import core as _pb
+from claude_codex_local.wizard_ui import warn as _warn
 
 STATE_DIR = _pb.STATE_DIR
 STATE_FILE = STATE_DIR / "wizard-state.json"
@@ -109,8 +110,6 @@ class WizardState:
             return cls(**data)
         except Exception as exc:
             backup_path = _backup_invalid_wizard_state(raw_state)
-            from claude_codex_local.wizard_ui import warn as _warn
-
             _warn(
                 "Invalid wizard state could not be loaded; starting with a blank state. "
                 f"Previous content was backed up to {backup_path} for recovery. "

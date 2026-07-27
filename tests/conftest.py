@@ -60,6 +60,18 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     # Pi coding agent: prevent _pi_agent_dir() from resolving to the real ~/.pi/agent.
     monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    # Engine base URLs and API keys: prevent remote URLs/keys from leaking into unit tests.
+    for _key in (
+        "LLAMACPP_BASE_URL",
+        "VLLM_BASE_URL",
+        "LMS_BASE_URL",
+        "OLLAMA_API_KEY",
+        "LLAMACPP_API_KEY",
+        "VLLM_API_KEY",
+        "OPENROUTER_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
+        monkeypatch.delenv(_key, raising=False)
 
     # Reload _config first so constants pick up new env vars.
     import claude_codex_local._config as _cfg_mod

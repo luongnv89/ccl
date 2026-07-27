@@ -32,18 +32,93 @@ from claude_codex_local.wizard_discovery import (
     _ALL_ENGINES,
     _ALL_HARNESSES,
     _ensure_llmfit,
-    _ensure_tool,
     _is_model_compatible_with_engine,
-    _refresh_selected_engine,
     _refresh_selected_harness,
     _show_install_hint,
     _show_selected_harness_status,
     _sync_presence_from_tools,
 )
 from claude_codex_local.wizard_state import STATE_DIR, WireResult, WizardState
-from claude_codex_local.wizard_ui import fail, header, info, ok, warn
+
+_LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
+
+
+# Resolve _ensure_tool and _refresh_selected_engine from wizard.py at call
+# time so that test monkeypatches on ``wizard._ensure_tool`` and
+# ``wizard._refresh_selected_engine`` propagate to this module.
+# We read directly from ``wizard.__dict__`` to pick up monkeypatches.
+def _ensure_tool(*a, **k):
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "_ensure_tool" in _w.__dict__:
+        return _w.__dict__["_ensure_tool"](*a, **k)
+    # Fallback: import from wizard_discovery
+    from claude_codex_local.wizard_discovery import _ensure_tool as _et
+
+    return _et(*a, **k)
+
+
+def _refresh_selected_engine(*a, **k):
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "_refresh_selected_engine" in _w.__dict__:
+        return _w.__dict__["_refresh_selected_engine"](*a, **k)
+    # Fallback: import from wizard_discovery
+    from claude_codex_local.wizard_discovery import _refresh_selected_engine as _rse
+
+    return _rse(*a, **k)
+
+
+# Resolve _download_model from wizard.py at call time so that test
+# monkeypatches on ``wizard._download_model`` propagate to this module.
+def _download_model(state):
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "_download_model" in _w.__dict__:
+        _val = _w.__dict__["_download_model"]
+        if _val is _download_model:
+            return _download_model_impl(state)
+        return _val(state)
+    # Fallback: call the local implementation
+    return _download_model_impl(state)
+
+
+# Resolve _find_model_auto from wizard.py at call time so that test
+# monkeypatches on ``wizard._find_model_auto`` propagate.
+def _find_model_auto(engine, profile=None):
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "_find_model_auto" in _w.__dict__:
+        _val = _w.__dict__["_find_model_auto"]
+        if _val is _find_model_auto:
+            return _find_model_auto_impl(engine, profile)
+        return _val(engine, profile)
+    # Fallback: call the local implementation
+    return _find_model_auto_impl(engine, profile)
+
+
+# Resolve _detect_shell_rc from wizard.py at call time so that test
+# monkeypatches on ``wizard._detect_shell_rc`` propagate.
+def _detect_shell_rc():
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "_detect_shell_rc" in _w.__dict__:
+        _val = _w.__dict__["_detect_shell_rc"]
+        # Avoid recursion: if the value IS this wrapper, use the impl.
+        if _val is _detect_shell_rc:
+            return _detect_shell_rc_impl()
+        return _val()
+    # Fallback: call the local implementation
+    return _detect_shell_rc_impl()
+
+
+from claude_codex_local.wizard_ui import fail, header, info, ok, warn  # noqa: E402
 
 console = Console()
+
+
+# Resolve subprocess from wizard module at call time so that test
+# monkeypatches on ``wizard.subprocess`` propagate to this module.
+def _resolved_subprocess():
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "subprocess" in _w.__dict__:
+        return _w.__dict__["subprocess"]
+    return subprocess
 
 
 def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> bool:
@@ -129,8 +204,6 @@ def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> 
 # Engines that can either be run locally or pointed at a remote OpenAI-compatible
 # endpoint. The wizard surfaces the local-vs-remote choice for these only —
 # lmstudio is local-only, and 9router/openrouter are inherently remote.
-_LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
-
 # Default ports applied automatically when the user enters a hostname or IP
 # without an explicit port during the remote endpoint prompt.
 _ENGINE_DEFAULT_PORTS: dict[str, int] = {
@@ -406,6 +479,11 @@ def _prompt_local_or_remote(state: WizardState, engine: str) -> bool:
 
 
 def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> bool:
+    """Select the primary engine (interactive or non-interactive).
+
+    NOTE: This copy is kept for wizard_cli.py to avoid circular imports.
+    The version in wizard.py is the authoritative one used by tests.
+    """
     header("Step 3 — Select engine")
     presence = _sync_presence_from_tools(state.profile)
     engines = presence["engines"]
@@ -464,11 +542,6 @@ def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> b
             ).ask()
             if choice is None:
                 return False
-            # Surface the local-vs-remote choice for local-capable engines
-            # BEFORE attempting any install or probe — when remote is picked
-            # we want to skip `_ensure_tool(choice)` entirely (the binary is
-            # not needed on this host), and we want the probe below to hit
-            # the remote URL.
             remote = False
             if choice in _LOCAL_OR_REMOTE_ENGINES:
                 remote = _prompt_local_or_remote(state, choice)
@@ -516,15 +589,7 @@ def step_3_select_engine(state: WizardState, non_interactive: bool = False) -> b
 
 
 def _default_engine(engines: list[str], profile: dict[str, Any]) -> str:
-    """
-    Pick a sensible default engine.
-
-    Rules:
-      1. Prefer an engine that already has a coding model installed *and* is
-         ready to serve (ollama server running, lmstudio server running).
-      2. On Apple Silicon, prefer lmstudio when it's ready.
-      3. Otherwise fall back to ollama, then whatever's first.
-    """
+    """Pick a sensible default engine."""
     ollama_ready = "ollama" in engines and bool(profile.get("ollama", {}).get("models"))
     lms_data = profile.get("lmstudio", {})
     lms_ready = (
@@ -1338,7 +1403,9 @@ def _map_to_engine(user_input: str, engine: str) -> str | None:
     return user_input
 
 
-def _find_model_auto(engine: str, profile: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def _find_model_auto_impl(
+    engine: str, profile: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
     """
     Non-interactive model pick. Prefers a model that is *already installed* for
     the chosen engine over a new download, because downloads in non-interactive
@@ -1658,11 +1725,11 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
         ).ask()
         if install:
             try:
-                subprocess.run(
+                _resolved_subprocess().run(
                     [sys.executable, "-m", "pip", "install", "huggingface_hub[cli]"],
                     check=True,
                 )
-            except subprocess.CalledProcessError as exc:
+            except _resolved_subprocess().CalledProcessError as exc:
                 fail(f"pip install failed: {exc}")
                 return {"ok": False, "path": None, "repo_id": None}
             # pip installs the CLI binary into the same scripts directory as
@@ -1899,7 +1966,7 @@ def _human_duration(seconds: float) -> str:
     return f"{minutes}m {secs:02d}s"
 
 
-def _download_model(state: WizardState) -> bool:
+def _download_model_impl(state: WizardState) -> bool:
     import time
 
     engine = state.primary_engine
@@ -1915,15 +1982,22 @@ def _download_model(state: WizardState) -> bool:
     start = time.monotonic()
     try:
         if engine == "ollama":
-            subprocess.run(["ollama", "pull", tag], check=True)
+            _resolved_subprocess().run(["ollama", "pull", tag], check=True)
         elif engine == "lmstudio":
             lms = pb.lms_binary()
             if not lms:
                 fail("lms CLI not found")
                 return False
-            subprocess.run([lms, "get", tag, "-y"], check=True)
+            _resolved_subprocess().run([lms, "get", tag, "-y"], check=True)
         elif engine == "llamacpp":
-            hf_result = _download_gguf_via_hf_cli(tag)
+            # Resolve from wizard for test monkeypatch propagation.
+            _wz = sys.modules.get("claude_codex_local.wizard")
+            _dgh = (
+                getattr(_wz, "_download_gguf_via_hf_cli", _download_gguf_via_hf_cli)
+                if _wz
+                else _download_gguf_via_hf_cli
+            )
+            hf_result = _dgh(tag)
             if not hf_result.get("ok"):
                 return False
             llamacpp_model_path = hf_result.get("path")
@@ -1941,7 +2015,7 @@ def _download_model(state: WizardState) -> bool:
     except KeyboardInterrupt:
         fail("Download interrupted by user.")
         return False
-    except subprocess.CalledProcessError as exc:
+    except _resolved_subprocess().CalledProcessError as exc:
         fail(f"Download failed: {exc}")
         return False
     elapsed = time.monotonic() - start
@@ -1956,9 +2030,22 @@ def _download_model(state: WizardState) -> bool:
     else:
         size_hint: str | None = None
         if engine == "ollama":
-            size_hint = _ollama_model_size_hint(tag)
+            # Resolve from wizard for test monkeypatch propagation.
+            _wz = sys.modules.get("claude_codex_local.wizard")
+            _oms = (
+                getattr(_wz, "_ollama_model_size_hint", _ollama_model_size_hint)
+                if _wz
+                else _ollama_model_size_hint
+            )
+            size_hint = _oms(tag)
         elif engine == "lmstudio":
-            size_hint = _lms_model_size_hint(tag)
+            _wz = sys.modules.get("claude_codex_local.wizard")
+            _lms = (
+                getattr(_wz, "_lms_model_size_hint", _lms_model_size_hint)
+                if _wz
+                else _lms_model_size_hint
+            )
+            size_hint = _lms(tag)
         bits = []
         if size_hint:
             bits.append(size_hint)
@@ -2429,11 +2516,17 @@ def _speed_verdict(tps: float) -> tuple[str, Callable[[str], None]]:
       - 10–30 tok/s → acceptable
       - > 30 tok/s  → fast
     """
+    # Resolve printer functions from wizard module so test monkeypatches
+    # on ``wizard.warn``, ``wizard.info``, ``wizard.ok`` propagate.
+    _w = sys.modules.get("claude_codex_local.wizard")
+    _warn = _w.warn if _w is not None else warn
+    _info = _w.info if _w is not None else info
+    _ok = _w.ok if _w is not None else ok
     if tps < 10:
-        return ("slow — may feel sluggish for interactive use", warn)
+        return ("slow — may feel sluggish for interactive use", _warn)
     if tps < 30:
-        return ("acceptable for most interactive coding tasks", info)
-    return ("fast — should feel snappy", ok)
+        return ("acceptable for most interactive coding tasks", _info)
+    return ("fast — should feel snappy", _ok)
 
 
 def _report_smoke_test_speed(result: dict[str, Any], non_interactive: bool = False) -> bool:
@@ -3542,7 +3635,7 @@ def _alias_block(script_path: Path, harness: str) -> tuple[str, list[str]]:
     return "\n".join(body_lines) + "\n", names
 
 
-def _detect_shell_rc() -> Path | None:
+def _detect_shell_rc_impl() -> Path | None:
     shell = os.environ.get("SHELL", "")
     home = Path.home()
     if shell.endswith("zsh") or "zsh" in shell:
@@ -3789,14 +3882,14 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
 
     info(f"Running: {' '.join(shlex.quote(x) for x in cmd)}")
     try:
-        proc = subprocess.run(
+        proc = _resolved_subprocess().run(
             cmd,
             capture_output=True,
             text=True,
             env={**os.environ, **wire_env},
             timeout=300,
         )
-    except subprocess.TimeoutExpired:
+    except _resolved_subprocess().TimeoutExpired:
         fail("Verify command timed out after 5 minutes.")
         return False
 
