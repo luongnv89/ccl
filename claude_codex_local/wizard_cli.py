@@ -36,7 +36,12 @@ from claude_codex_local.wizard_discovery import (
     _ensure_llmfit,
     step_2_1_discover,
 )
-from claude_codex_local.wizard_state import GUIDE_PATH as _GUIDE_PATH_FALLBACK, STATE_DIR, STATE_FILE, WizardState
+from claude_codex_local.wizard_state import (
+    GUIDE_PATH as _GUIDE_PATH_FALLBACK,
+    STATE_DIR,
+    STATE_FILE,
+    WizardState,
+)
 from claude_codex_local.wizard_steps import (
     _OPENROUTER_MODEL_RE,
     _ROUTER9_MODEL_RE,
