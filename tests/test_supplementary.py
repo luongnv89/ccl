@@ -1522,7 +1522,7 @@ class TestDownloadModelSummary:
         monkeypatch.setattr(
             wiz.subprocess,
             "run",
-            lambda cmd, check=True: (
+            lambda cmd, check=True, **kwargs: (
                 calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", "")
             ),
         )
@@ -1547,7 +1547,7 @@ class TestDownloadModelSummary:
         monkeypatch.setattr(
             wiz.subprocess,
             "run",
-            lambda cmd, check=True: subprocess.CompletedProcess(cmd, 0, "", ""),
+            lambda cmd, check=True, **kwargs: subprocess.CompletedProcess(cmd, 0, "", ""),
         )
         monkeypatch.setattr(wiz, "_lms_model_size_hint", lambda tag: "512.0 MiB")
         state = wiz.WizardState(

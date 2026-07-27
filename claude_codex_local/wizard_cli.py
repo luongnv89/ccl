@@ -67,6 +67,14 @@ from claude_codex_local.wizard_ui import (
     warn,
 )
 
+# Resolve subprocess from wizard module at call time so that test
+# monkeypatches on ``wizard.subprocess`` propagate to this module.
+def _resolved_subprocess():
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "subprocess" in _w.__dict__:
+        return _w.__dict__["subprocess"]
+    return subprocess
+
 STEPS: list[tuple[str, str, Callable]] = [
     ("1", "Discover environment", step_2_1_discover),
     ("2", "Select harness", step_2_select_harness),
@@ -458,14 +466,14 @@ def _resolve_wire_env(wire_result: dict[str, Any]) -> dict[str, str]:
     keys_alt = "|".join(re.escape(k) for k in raw_env)
     script_lines.append(f"env | grep -E '^({keys_alt})='")
     try:
-        proc = subprocess.run(
+        proc = _resolved_subprocess().run(
             ["bash", "-c", "\n".join(script_lines)],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, _resolved_subprocess().TimeoutExpired):
         return env
     if proc.returncode != 0:
         return env
@@ -669,7 +677,7 @@ def run_session(
             return 1
         helper_cmd = [str(helper), *(native_params or [])]
         try:
-            proc = subprocess.run(helper_cmd)
+            proc = _resolved_subprocess().run(helper_cmd)
         except KeyboardInterrupt:
             return 130
         rc = proc.returncode
@@ -699,7 +707,7 @@ def run_session(
     env_overlay = _resolve_wire_env(state.wire_result)
     full_env = {**os.environ, **env_overlay}
     try:
-        proc = subprocess.run(cmd, env=full_env)
+        proc = _resolved_subprocess().run(cmd, env=full_env)
     except FileNotFoundError as exc:
         fail(f"Cannot launch harness: {exc}")
         return 127
@@ -1166,7 +1174,12 @@ def run_find_model_standalone() -> int:
     engines = profile["presence"]["engines"] or ["ollama"]
     engine = engines[0]
     info(f"Ranking models for engine: {engine}")
-    picked = _find_model_interactive(engine, profile)
+    # Resolve _find_model_interactive from wizard module at call time
+    # so that test monkeypatches on ``wizard._find_model_interactive``
+    # propagate to this function.
+    _wz = sys.modules.get("claude_codex_local.wizard")
+    _fmi = getattr(_wz, "_find_model_interactive", _find_model_interactive) if _wz else _find_model_interactive
+    picked = _fmi(engine, profile)
     if picked:
         console.print(f"\n[bold]You picked:[/bold] {picked['display']}")
         console.print(f"[bold]Engine tag:[/bold] {picked['tag']}")
@@ -1432,7 +1445,11 @@ def main() -> int:
 
     cmd = args.cmd or "setup"
     if cmd == "setup":
-        return run_wizard(
+        # Resolve run_wizard from wizard module at call time so that
+        # test monkeypatches on ``wizard.run_wizard`` propagate.
+        _wiz = sys.modules.get("claude_codex_local.wizard")
+        _rw = getattr(_wiz, "run_wizard", run_wizard) if _wiz else run_wizard
+        return _rw(
             resume=getattr(args, "resume", False),
             non_interactive=getattr(args, "non_interactive", False),
             force_harness=getattr(args, "harness", None),
@@ -1441,11 +1458,18 @@ def main() -> int:
             run_llmfit_flag=getattr(args, "run_llmfit", False),
         )
     if cmd == "find-model":
-        return run_find_model_standalone()
+        # Resolve from wizard module at call time for test monkeypatch propagation.
+        _wz = sys.modules.get("claude_codex_local.wizard")
+        _rfs = getattr(_wz, "run_find_model_standalone", run_find_model_standalone) if _wz else run_find_model_standalone
+        return _rfs()
     if cmd == "doctor":
-        return run_doctor()
+        _wz = sys.modules.get("claude_codex_local.wizard")
+        _rd = getattr(_wz, "run_doctor", run_doctor) if _wz else run_doctor
+        return _rd()
     if cmd == "status":
-        return run_status()
+        _wz = sys.modules.get("claude_codex_local.wizard")
+        _rs = getattr(_wz, "run_status", run_status) if _wz else run_status
+        return _rs()
     if cmd == "session":
         from claude_codex_local import session as sess
         from claude_codex_local.core import print_payload

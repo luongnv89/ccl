@@ -98,9 +98,17 @@ def _detect_shell_rc():
         return _val()
     # Fallback: call the local implementation
     return _detect_shell_rc_impl()
-from claude_codex_local.wizard_ui import fail, header, info, ok, warn
+from claude_codex_local.wizard_ui import fail, header, info, ok, warn  # noqa: E402
 
 console = Console()
+
+# Resolve subprocess from wizard module at call time so that test
+# monkeypatches on ``wizard.subprocess`` propagate to this module.
+def _resolved_subprocess():
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "subprocess" in _w.__dict__:
+        return _w.__dict__["subprocess"]
+    return subprocess
 
 
 def step_2_select_harness(state: WizardState, non_interactive: bool = False) -> bool:
@@ -1705,11 +1713,11 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
         ).ask()
         if install:
             try:
-                subprocess.run(
+                _resolved_subprocess().run(
                     [sys.executable, "-m", "pip", "install", "huggingface_hub[cli]"],
                     check=True,
                 )
-            except subprocess.CalledProcessError as exc:
+            except _resolved_subprocess().CalledProcessError as exc:
                 fail(f"pip install failed: {exc}")
                 return {"ok": False, "path": None, "repo_id": None}
             # pip installs the CLI binary into the same scripts directory as
@@ -1962,15 +1970,18 @@ def _download_model_impl(state: WizardState) -> bool:
     start = time.monotonic()
     try:
         if engine == "ollama":
-            subprocess.run(["ollama", "pull", tag], check=True)
+            _resolved_subprocess().run(["ollama", "pull", tag], check=True)
         elif engine == "lmstudio":
             lms = pb.lms_binary()
             if not lms:
                 fail("lms CLI not found")
                 return False
-            subprocess.run([lms, "get", tag, "-y"], check=True)
+            _resolved_subprocess().run([lms, "get", tag, "-y"], check=True)
         elif engine == "llamacpp":
-            hf_result = _download_gguf_via_hf_cli(tag)
+            # Resolve from wizard for test monkeypatch propagation.
+            _wz = sys.modules.get("claude_codex_local.wizard")
+            _dgh = getattr(_wz, "_download_gguf_via_hf_cli", _download_gguf_via_hf_cli) if _wz else _download_gguf_via_hf_cli
+            hf_result = _dgh(tag)
             if not hf_result.get("ok"):
                 return False
             llamacpp_model_path = hf_result.get("path")
@@ -1988,7 +1999,7 @@ def _download_model_impl(state: WizardState) -> bool:
     except KeyboardInterrupt:
         fail("Download interrupted by user.")
         return False
-    except subprocess.CalledProcessError as exc:
+    except _resolved_subprocess().CalledProcessError as exc:
         fail(f"Download failed: {exc}")
         return False
     elapsed = time.monotonic() - start
@@ -2003,9 +2014,14 @@ def _download_model_impl(state: WizardState) -> bool:
     else:
         size_hint: str | None = None
         if engine == "ollama":
-            size_hint = _ollama_model_size_hint(tag)
+            # Resolve from wizard for test monkeypatch propagation.
+            _wz = sys.modules.get("claude_codex_local.wizard")
+            _oms = getattr(_wz, "_ollama_model_size_hint", _ollama_model_size_hint) if _wz else _ollama_model_size_hint
+            size_hint = _oms(tag)
         elif engine == "lmstudio":
-            size_hint = _lms_model_size_hint(tag)
+            _wz = sys.modules.get("claude_codex_local.wizard")
+            _lms = getattr(_wz, "_lms_model_size_hint", _lms_model_size_hint) if _wz else _lms_model_size_hint
+            size_hint = _lms(tag)
         bits = []
         if size_hint:
             bits.append(size_hint)
@@ -3842,14 +3858,14 @@ def step_2_7_verify(state: WizardState, non_interactive: bool = False) -> bool:
 
     info(f"Running: {' '.join(shlex.quote(x) for x in cmd)}")
     try:
-        proc = subprocess.run(
+        proc = _resolved_subprocess().run(
             cmd,
             capture_output=True,
             text=True,
             env={**os.environ, **wire_env},
             timeout=300,
         )
-    except subprocess.TimeoutExpired:
+    except _resolved_subprocess().TimeoutExpired:
         fail("Verify command timed out after 5 minutes.")
         return False
 

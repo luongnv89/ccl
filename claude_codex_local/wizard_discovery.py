@@ -25,6 +25,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,14 @@ import questionary
 from rich.table import Table
 
 from claude_codex_local import core as pb
+
+# Resolve subprocess from wizard module at call time so that test
+# monkeypatches on ``wizard.subprocess`` propagate to this module.
+def _resolved_subprocess():
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "subprocess" in _w.__dict__:
+        return _w.__dict__["subprocess"]
+    return subprocess
 from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 from claude_codex_local.wizard_state import WizardState
 from claude_codex_local.wizard_ui import console, fail, info, ok, warn
@@ -320,8 +329,8 @@ def _ensure_tool(key: str) -> bool:
                 )
                 return False
             try:
-                subprocess.run(["npm", "install", "-g", "9router"], check=True)
-            except subprocess.CalledProcessError as exc:
+                _resolved_subprocess().run(["npm", "install", "-g", "9router"], check=True)
+            except _resolved_subprocess().CalledProcessError as exc:
                 fail(f"npm install -g 9router failed: {exc}")
                 return False
             ok("9router installed.")
@@ -401,8 +410,8 @@ def _ensure_tool(key: str) -> bool:
         return False
 
     try:
-        subprocess.run(["bash", "-c", cmd_str], check=True)
-    except subprocess.CalledProcessError as exc:
+        _resolved_subprocess().run(["bash", "-c", cmd_str], check=True)
+    except _resolved_subprocess().CalledProcessError as exc:
         fail(f"Install failed: {exc}")
         return False
 
@@ -438,8 +447,8 @@ def _ensure_llmfit() -> bool:
         return False
 
     try:
-        subprocess.run(["bash", "-c", _LLMFIT_INSTALL_SCRIPT], check=True)
-    except subprocess.CalledProcessError as exc:
+        _resolved_subprocess().run(["bash", "-c", _LLMFIT_INSTALL_SCRIPT], check=True)
+    except _resolved_subprocess().CalledProcessError as exc:
         fail(f"llmfit install failed: {exc}")
         return False
 

@@ -23,6 +23,8 @@ Monkeypatch note:
 
 from __future__ import annotations
 
+from typing import Any
+
 # ---------------------------------------------------------------------------
 # Stdlib / third-party re-exports — kept at the top of wizard.py so that
 # tests which monkeypatch ``wizard.subprocess``, ``wizard.pb``, etc. still
@@ -68,7 +70,7 @@ from claude_codex_local.wizard_state import (
     WireResult,
     WizardState,
     _backup_invalid_wizard_state,
-)
+)  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Re-export from wizard_ui — but wrap print_welcome_banner so it uses
@@ -79,7 +81,7 @@ from claude_codex_local.wizard_ui import (
     _CCL_BANNER as _UI_BANNER,
     _CCL_TAGLINE as _UI_TAGLINE,
     _CCL_REPO_URL as _UI_REPO_URL,
-)
+)  # noqa: E402
 
 
 def print_welcome_banner() -> None:
@@ -125,7 +127,7 @@ from claude_codex_local.wizard_discovery import (
     _try_llmfit_fallback,
     step_2_1_discover,
     step_2_2_install_missing,
-)
+)  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Re-export from wizard_steps — but NOT step_3_select_engine.
@@ -156,6 +158,8 @@ from claude_codex_local.wizard_steps import (
     _download_gguf_via_hf_cli,
     _ensure_llamacpp_server_running,
     _download_model,
+    _lms_model_size_hint,
+    _ollama_model_size_hint,
     _env_block,
     _estimate_model_size,
     _fence_tag_for,
@@ -175,6 +179,7 @@ from claude_codex_local.wizard_steps import (
     _looks_like_missing_repo,
     _map_to_engine,
     _materialize_pi_api_key_files,
+    _materialize_raw_env,
     _model_already_installed,
     _model_known_incompatible_with_claude_code,
     _normalize_model_id,
@@ -220,7 +225,7 @@ from claude_codex_local.wizard_steps import (
     step_2_7_verify,
     step_2_8_generate_guide,
     step_2_select_harness,
-)
+)  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Local-vs-remote engine list — used by step_3_select_engine.
@@ -243,7 +248,7 @@ from claude_codex_local.wizard_cli import (
     _infer_engine_from_script,
     _get_engine_health,
     _resolve_wire_env as _cli_resolve_wire_env,
-)
+)  # noqa: E402
 
 # Also re-export these names so tests can access them directly.
 _build_oneshot_cmd = _cli_build_oneshot_cmd
@@ -437,10 +442,10 @@ STEPS: list[tuple[str, str, Callable[[WizardState, bool], bool]]] = [
 # values so that ``monkeypatch.setattr(wizard, 'X', ...)`` patches
 # propagate to all wizard sub-modules after reload.
 # ---------------------------------------------------------------------------
-import claude_codex_local.wizard_ui as _wizard_ui
-import claude_codex_local.wizard_steps as _wizard_steps_mod
-import claude_codex_local.wizard_cli as _wizard_cli_mod
-import claude_codex_local.wizard_discovery as _wizard_discovery_mod
+import claude_codex_local.wizard_ui as _wizard_ui  # noqa: E402
+import claude_codex_local.wizard_steps as _wizard_steps_mod  # noqa: E402
+import claude_codex_local.wizard_cli as _wizard_cli_mod  # noqa: E402
+import claude_codex_local.wizard_discovery as _wizard_discovery_mod  # noqa: E402
 
 _wizard_ui.console = console
 _wizard_steps_mod.console = console
@@ -448,8 +453,8 @@ _wizard_cli_mod.console = console
 _wizard_discovery_mod.console = console
 
 _wizard_steps_mod.questionary = questionary
-_wizard_cli_mod.questionary = questionary
-_wizard_discovery_mod.questionary = questionary
+_wizard_cli_mod.questionary = questionary  # type: ignore[attr-defined]
+_wizard_discovery_mod.questionary = questionary  # type: ignore[attr-defined]
 
 # Keep private references to objects used by __getattr__.
 _q = questionary
@@ -569,7 +574,7 @@ from claude_codex_local.wizard_cli import (
     run_status as _cli_run_status,
     run_find_model_standalone as _cli_run_find_model_standalone,
     main as _cli_main,
-)
+)  # noqa: E402
 
 
 def __getattr__(name: str):
@@ -577,20 +582,20 @@ def __getattr__(name: str):
     if name == "_refresh_selected_engine":
         val = globals().get("_refresh_selected_engine", _rs_e)
         _wizard_steps_mod._refresh_selected_engine = val
-        _wizard_discovery_mod._refresh_selected_engine = val
-        _wizard_cli_mod._refresh_selected_engine = val
+        _wizard_discovery_mod._refresh_selected_engine = val  # type: ignore[attr-defined]
+        _wizard_cli_mod._refresh_selected_engine = val  # type: ignore[attr-defined]
         return val
     if name == "_ensure_tool":
         val = globals().get("_ensure_tool", _et)
         _wizard_steps_mod._ensure_tool = val
-        _wizard_discovery_mod._ensure_tool = val
-        _wizard_cli_mod._ensure_tool = val
+        _wizard_discovery_mod._ensure_tool = val  # type: ignore[attr-defined]
+        _wizard_cli_mod._ensure_tool = val  # type: ignore[attr-defined]
         return val
     if name == "questionary":
         val = globals().get("questionary", _q)
         _wizard_steps_mod.questionary = val
-        _wizard_cli_mod.questionary = val
-        _wizard_discovery_mod.questionary = val
+        _wizard_cli_mod.questionary = val  # type: ignore[attr-defined]
+        _wizard_discovery_mod.questionary = val  # type: ignore[attr-defined]
         return val
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -601,19 +606,19 @@ def __setattr__(name: str, value):
         object.__setattr__(sys.modules[__name__], name, value)
         if name == "_refresh_selected_engine":
             _wizard_steps_mod._refresh_selected_engine = value
-            _wizard_discovery_mod._refresh_selected_engine = value
-            _wizard_cli_mod._refresh_selected_engine = value
+            _wizard_discovery_mod._refresh_selected_engine = value  # type: ignore[attr-defined]
+            _wizard_cli_mod._refresh_selected_engine = value  # type: ignore[attr-defined]
         elif name == "_ensure_tool":
             _wizard_steps_mod._ensure_tool = value
-            _wizard_discovery_mod._ensure_tool = value
-            _wizard_cli_mod._ensure_tool = value
+            _wizard_discovery_mod._ensure_tool = value  # type: ignore[attr-defined]
+            _wizard_cli_mod._ensure_tool = value  # type: ignore[attr-defined]
         elif name == "questionary":
             _wizard_steps_mod.questionary = value
-            _wizard_cli_mod.questionary = value
-            _wizard_discovery_mod.questionary = value
+            _wizard_cli_mod.questionary = value  # type: ignore[attr-defined]
+            _wizard_discovery_mod.questionary = value  # type: ignore[attr-defined]
     else:
         object.__setattr__(sys.modules[__name__], name, value)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
