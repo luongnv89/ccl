@@ -60,16 +60,21 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     # Pi coding agent: prevent _pi_agent_dir() from resolving to the real ~/.pi/agent.
     monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
-    # Engine base URLs and API keys: prevent remote URLs/keys from leaking into unit tests.
+    # Engine base URLs, API keys, and server ports: prevent remote URLs/keys
+    # from leaking into unit tests, and clear stale values left by
+    # test_e2e_vllm_real.py or test_e2e_llamacpp_real.py core fixtures.
     for _key in (
         "LLAMACPP_BASE_URL",
-        "VLLM_BASE_URL",
-        "LMS_BASE_URL",
-        "OLLAMA_API_KEY",
         "LLAMACPP_API_KEY",
+        "LLAMACPP_SERVER_PORT",
+        "VLLM_BASE_URL",
         "VLLM_API_KEY",
-        "OPENROUTER_API_KEY",
+        "LMS_BASE_URL",
+        "LMS_API_KEY",
+        "OLLAMA_API_KEY",
         "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY",
+        "9ROUTER_API_KEY",
     ):
         monkeypatch.delenv(_key, raising=False)
 

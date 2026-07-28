@@ -204,12 +204,18 @@ def core(live_server):
     os.environ.setdefault("VLLM_TIMEOUT", "120")
     os.environ.setdefault("VLLM_MAX_TOKENS", "32")
 
+    import claude_codex_local._config as _cfg
+
+    importlib.reload(_cfg)
     import claude_codex_local.core as pb
 
     pb = importlib.reload(pb)
     yield pb
 
-    # Don't unset — other tests may want them, and the process is exiting.
+    # Clean up so other tests aren't affected by stale env vars.
+    os.environ.pop("VLLM_BASE_URL", None)
+    os.environ.pop("VLLM_TIMEOUT", None)
+    os.environ.pop("VLLM_MAX_TOKENS", None)
 
 
 # ---------------------------------------------------------------------------

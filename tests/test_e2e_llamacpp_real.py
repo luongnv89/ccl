@@ -194,12 +194,21 @@ def live_server(model_path: Path):
 @pytest.fixture(scope="module")
 def core(model_path):
     """
-    Import (or reload) core with LLAMACPP_SERVER_PORT pointing at our
-    test port.  Returns the core module with the patched port constant.
+    Import (or reload) core + _llamacpp_lifecycle + _config with
+    LLAMACPP_SERVER_PORT pointing at our test port.  Returns the core module
+    with the patched port constant.
     """
     import importlib
 
     os.environ["LLAMACPP_SERVER_PORT"] = str(REAL_TEST_PORT)
+    # Reload _config first so its constants pick up the new port.
+    import claude_codex_local._config as _cfg
+
+    importlib.reload(_cfg)
+    # Then reload everything that imports from _config at module level.
+    import claude_codex_local._llamacpp_lifecycle as _ll
+
+    importlib.reload(_ll)
     import claude_codex_local.core as pb
 
     pb = importlib.reload(pb)
