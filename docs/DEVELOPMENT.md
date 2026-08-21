@@ -24,6 +24,12 @@ pre-commit install                 # set up git hooks
 
 The editable install puts the `ccl` entry point on your `PATH` inside the virtualenv.
 
+> **Agent note:** for a copy-paste sequence that reproduces the CI environment
+> from a clean checkout — including the recorded test/lint commands, the
+> known-red baseline, and every environment variable
+> `claude_codex_local/_config.py` reads at import time — see
+> [AGENT_SETUP.md](AGENT_SETUP.md).
+
 ## Running the Wizard
 
 ```bash
