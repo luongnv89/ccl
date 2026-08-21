@@ -36,6 +36,30 @@ jobs:
           done
           echo "ci-ok did not complete in time — refusing to publish"; exit 1
 
+  # F-SEC-013: publish the sha256 of the exact codeload tarball the installer
+  # downloads, as a SHA256SUMS asset on the release. install.sh refuses to
+  # install a ref without a published or pinned checksum.
+  checksum:
+    name: Publish tarball checksum
+    needs: [guard]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # upload the SHA256SUMS asset to the release
+    steps:
+      - name: Hash tagged tarball and upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          name="ccl-${tag}.tar.gz"
+          curl -fsSL "https://codeload.github.com/${GITHUB_REPOSITORY}/tar.gz/${tag}" -o "${name}"
+          sha256sum "${name}" > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "${tag}" SHA256SUMS --clobber --repo "${GITHUB_REPOSITORY}"
+
   build:
     name: Build distribution
     needs: [guard]

@@ -1,0 +1,20 @@
+# Scenario: install via the documented curl ... | bash one-liner (issue #197)
+# Base: minimal Python image; curl added because slim ships neither curl nor
+# wget, which the installer requires to fetch the release tarball.
+FROM python:3.11-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# The PR's installer, exercised through the same piped-one-liner code path as
+# production (script arrives on stdin). CCL_NO_RUN skips the interactive wizard.
+COPY install.sh /tmp/install.sh
+
+RUN curl -fsSL file:///tmp/install.sh | CCL_NO_RUN=1 bash
+
+# Verify the entry point produced by the installer is present and functional.
+RUN "$HOME/.claude-codex-local-src/.venv/bin/ccl" --version > /dev/null && \
+    "$HOME/.claude-codex-local-src/.venv/bin/ccl" --version
+
+CMD ["echo", "installer one-liner scenario: PASS"]

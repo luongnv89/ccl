@@ -64,13 +64,13 @@ ccl
 ### One-command install (no clone required)
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/ccl/main/install.sh)
 ```
 
 Or with wget:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/luongnv89/ccl/main/install.sh)
 ```
 
 > Use `bash <(...)`, not `curl … | bash`. The wizard is interactive and needs a real TTY — piping steals stdin.
@@ -79,7 +79,7 @@ Override defaults with env vars:
 
 ```bash
 CCL_REF=v0.14.0 CCL_INSTALL_DIR=~/tools/claude-codex-local \
-  bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/claude-codex-local/main/install.sh)
+  bash <(curl -sSL https://raw.githubusercontent.com/luongnv89/ccl/main/install.sh)
 ```
 
 ### Install from a clone
