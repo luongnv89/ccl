@@ -43,6 +43,7 @@ import questionary as questionary
 
 from claude_codex_local import __version__
 from claude_codex_local import core as pb
+from claude_codex_local import wizard_state as _wizard_state
 from claude_codex_local.engines import ALL_ENGINES as _REGISTRY_ENGINES
 
 # ---------------------------------------------------------------------------
@@ -275,7 +276,9 @@ _CCL_REPO_URL = "https://github.com/luongnv89/claude-codex-local"
 # Module-level state references (tests reference these directly).
 # ---------------------------------------------------------------------------
 STATE_DIR = pb.STATE_DIR
-STATE_FILE = STATE_DIR / "wizard-state.json"
+# STATE_FILE is re-exported from wizard_state.py so exactly one object
+# exists across the facade and wizard_cli (#184) — tests patch it here.
+STATE_FILE = _wizard_state.STATE_FILE
 # GUIDE_PATH is re-exported from wizard_state.py — tests patch wizard.GUIDE_PATH
 
 
@@ -527,7 +530,20 @@ def run_session(
     _wizard_cli_mod._resolve_wire_env = sys.modules[__name__].__dict__.get(
         "_resolve_wire_env", _resolve_wire_env
     )
-    return _cli_run_session(
+    # Same propagation for STATE_FILE (#184): sync the facade's current
+    # state-file object into wizard_cli before delegating, mirroring
+    # ``_build_oneshot_cmd`` / ``_resolve_wire_env``. When the facade is
+    # unpatched this resets wizard_cli's binding to the canonical
+    # ``wizard_state.STATE_FILE`` (self-healing across tests); a patch on
+    # ``wizard_cli.STATE_FILE`` itself is honored when ``wizard_cli``
+    # entrypoints are called directly.
+    _wizard_cli_mod.STATE_FILE = sys.modules[__name__].__dict__.get("STATE_FILE", STATE_FILE)
+    # Resolve the implementation at call time (#184): an import-time
+    # ``_cli_run_session`` binding can go stale when ``wizard`` is reloaded
+    # while a test double sits in ``wizard_cli.run_session``, permanently
+    # pinning the facade to the dead mock. Resolving through sys.modules
+    # makes the wrapper self-healing across reloads.
+    return sys.modules["claude_codex_local.wizard_cli"].run_session(
         prompt=prompt,
         no_context=no_context,
         native_params=native_params,
@@ -552,13 +568,11 @@ def run_find_model_standalone() -> int:
 def main() -> int:
     """Delegate to ``wizard_cli.main`` at call time.
 
-    Monkeypatch propagation: resolve run_session from this module at
-    call time so that ``monkeypatch.setattr(wizard, 'run_session', ...)``
-    patches propagate.
+    Monkeypatch propagation for ``wizard.run_session`` happens inside
+    ``wizard_cli.main``'s ``run`` branch, which resolves the facade
+    attribute at call time (#184) — copying the reference here instead
+    leaked patched test doubles into ``wizard_cli`` across tests.
     """
-    # Resolve run_session from this module at call time so monkeypatches
-    # on wizard.run_session propagate.
-    _wizard_cli_mod.run_session = run_session
     return _cli_main()
 
 

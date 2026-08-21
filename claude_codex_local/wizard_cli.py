@@ -39,7 +39,7 @@ from claude_codex_local.wizard_discovery import (
 from claude_codex_local.wizard_state import (
     GUIDE_PATH as _GUIDE_PATH_FALLBACK,
     STATE_DIR,
-    STATE_FILE,
+    STATE_FILE as _STATE_FILE_FALLBACK,
     WizardState,
 )
 from claude_codex_local.wizard_steps import (
@@ -89,6 +89,26 @@ def _resolved_guide_path():
     if _w is not None and "GUIDE_PATH" in _w.__dict__:
         return _w.__dict__["GUIDE_PATH"]
     return _GUIDE_PATH_FALLBACK
+
+
+# Resolve STATE_FILE at call time so that test monkeypatches on
+# ``wizard.STATE_FILE`` (the facade re-export of ``wizard_state.STATE_FILE``)
+# or on this module propagate, instead of hitting a stale import-time
+# binding (#184). The facade's ``run_session`` wrapper syncs its value into
+# this module's namespace before delegating, mirroring ``_build_oneshot_cmd``.
+def _resolved_state_file():
+    _c = sys.modules.get(__name__)
+    if _c is not None and "STATE_FILE" in _c.__dict__:
+        return _c.__dict__["STATE_FILE"]
+    _w = sys.modules.get("claude_codex_local.wizard")
+    if _w is not None and "STATE_FILE" in _w.__dict__:
+        return _w.__dict__["STATE_FILE"]
+    return _STATE_FILE_FALLBACK
+
+
+# Public re-export of the single canonical STATE_FILE object shared with
+# the wizard facade (#184) — kept so existing imports keep working.
+STATE_FILE = _STATE_FILE_FALLBACK
 
 
 STEPS: list[tuple[str, str, Callable]] = [
@@ -193,8 +213,9 @@ def run_doctor() -> int:
     """
     header("doctor — wizard state + presence re-check")
 
-    if not STATE_FILE.exists():
-        warn(f"No wizard state found at {STATE_FILE}. Run `ccl setup` first.")
+    _state_file = _resolved_state_file()
+    if not _state_file.exists():
+        warn(f"No wizard state found at {_state_file}. Run `ccl setup` first.")
         return 1
 
     state = WizardState.load()
@@ -203,7 +224,7 @@ def run_doctor() -> int:
     state_table = Table(title="Stored wizard state", show_header=False, box=None)
     state_table.add_column("key", style="bold")
     state_table.add_column("value")
-    state_table.add_row("state file", str(STATE_FILE))
+    state_table.add_row("state file", str(_state_file))
     state_table.add_row("completed steps", ", ".join(state.completed_steps) or "(none)")
     state_table.add_row("harness", state.primary_harness or "(unset)")
     state_table.add_row("engine", state.primary_engine or "(unset)")
@@ -642,8 +663,9 @@ def run_session(
     Returns the harness's exit code, or a non-zero CCL-level code when
     preconditions fail (no setup, missing helper script, unknown harness).
     """
-    if not STATE_FILE.exists():
-        fail(f"No wizard state found at {STATE_FILE}. Run `ccl setup` first.")
+    _state_file = _resolved_state_file()
+    if not _state_file.exists():
+        fail(f"No wizard state found at {_state_file}. Run `ccl setup` first.")
         return 1
     state = WizardState.load()
     harness = state.primary_harness
@@ -749,8 +771,9 @@ def run_serve() -> int:
     Returns 0 on success (server already up or freshly started), 1 on
     misconfiguration or start failure.
     """
-    if not STATE_FILE.exists():
-        fail(f"No wizard state found at {STATE_FILE}. Run `ccl setup` first.")
+    _state_file = _resolved_state_file()
+    if not _state_file.exists():
+        fail(f"No wizard state found at {_state_file}. Run `ccl setup` first.")
         return 1
     state = WizardState.load()
     if state.primary_engine != "llamacpp":
@@ -959,8 +982,9 @@ def run_status() -> int:
     """Exposed as `ccl status`. Display current setup and shortcut availability."""
     header("status — current ccl setup and shortcut availability")
 
-    if not STATE_FILE.exists():
-        warn(f"No wizard state found at {STATE_FILE}.")
+    _state_file = _resolved_state_file()
+    if not _state_file.exists():
+        warn(f"No wizard state found at {_state_file}.")
         console.print("\nRun [bold]ccl setup[/bold] to configure your ccl setup.")
         console.print("\n[italic]No shortcuts are available until setup is complete.[/italic]")
         return 1
@@ -1526,7 +1550,14 @@ def main() -> int:
     if cmd == "serve":
         return run_serve()
     if cmd == "run":
-        return run_session(
+        # Resolve from wizard module at call time for test monkeypatch
+        # propagation (#184): copying the facade's (possibly patched)
+        # ``run_session`` into this module's namespace during ``main()``
+        # left a dead test double behind after monkeypatch.undo(), which
+        # then poisoned later tests through the facade delegation.
+        _wz = sys.modules.get("claude_codex_local.wizard")
+        _rsess = getattr(_wz, "run_session", run_session) if _wz else run_session
+        return _rsess(
             prompt=getattr(args, "prompt", None),
             no_context=bool(getattr(args, "no_context", False)),
             native_params=native_params,
