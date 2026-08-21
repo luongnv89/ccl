@@ -86,14 +86,3 @@ ignore_missing_imports = true
 check_untyped_defs = false
 warn_unused_ignores = false
 exclude = ["\\.venv", "\\.claude-codex-local", "tests/"]
-
-[dependency-groups]
-dev = [
-  "pytest>=8.0",
-  "pytest-cov>=5.0",
-  "ruff>=0.6",
-  "mypy>=1.11",
-  "bandit>=1.7",
-  "detect-secrets>=1.5",
-  "pre-commit>=3.8",
-]

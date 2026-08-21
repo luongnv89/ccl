@@ -19,10 +19,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: constraints-dev.txt
       - name: Install dev deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev]" -c constraints-dev.txt
       - name: Run pre-commit (all files, commit stage)
         run: pre-commit run --all-files --show-diff-on-failure
 
@@ -39,11 +40,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: constraints-dev.txt
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest pytest-cov
+          pip install -e . -c constraints-dev.txt
+          pip install pytest pytest-cov -c constraints-dev.txt
       - name: Run pytest with coverage
         run: |
           python -m pytest -q --cov=claude_codex_local --cov-report=xml --cov-report=term-missing
@@ -64,10 +66,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: constraints-dev.txt
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e . -c constraints-dev.txt
       - name: Run CLI smoke script
         env:
           PYTHON: python
@@ -82,7 +85,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: constraints-dev.txt
       - name: Install build tool
-        run: pip install --upgrade build
+        run: pip install --upgrade build -c constraints-dev.txt
       - name: Run Docker E2E scenarios
         run: bash tests/e2e_docker/run_e2e_docker.sh
