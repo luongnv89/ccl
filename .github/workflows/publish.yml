@@ -3,15 +3,45 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
   id-token: write # required for trusted publishing (OIDC)
+  checks: read # guard queries the tagged commit's check runs
 
 jobs:
+  # Green-CI precondition (#192 / F-CI-003): the publish path stays closed
+  # unless the `ci-ok` aggregate job succeeded on this exact commit. The
+  # query is fail-closed — no completed successful ci-ok run means no build.
+  guard:
+    name: Require green CI on the tagged commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Query ci-ok on ${{ github.sha }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            conclusion="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${{ github.sha }}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "ci-ok")][0].conclusion // "pending"')"
+            case "$conclusion" in
+              success) echo "ci-ok: success"; exit 0 ;;
+              pending|queued|null|"")
+                echo "ci-ok: ${conclusion:-pending} — waiting"; sleep 20 ;;
+              *) echo "ci-ok: ${conclusion} — refusing to publish a red commit"; exit 1 ;;
+            esac
+          done
+          echo "ci-ok did not complete in time — refusing to publish"; exit 1
+
   build:
     name: Build distribution
+    needs: [guard]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,8 +58,9 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/p/claude-codex-local
