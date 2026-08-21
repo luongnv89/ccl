@@ -137,7 +137,7 @@ setup_venv() {
     info "Installing claude-codex-local (editable)"
     "$pip" install --quiet -e "$CCL_INSTALL_DIR" \
         || die "Failed to install claude-codex-local"
-    ok "Package installed — `ccl` available at $venv/bin/ccl"
+    ok "Package installed — 'ccl' available at $venv/bin/ccl"
 }
 
 run_wizard() {
