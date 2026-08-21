@@ -20,12 +20,22 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Process-wide state-dir sandbox (#186 / F-BUG-002): bound at conftest import
+# — BEFORE any test module (and therefore any production constant) is
+# imported — so every ``_config.STATE_DIR`` binding, including stale copies
+# resurrected by the module-dict restores below, resolves into a throwaway
+# directory instead of the developer's real home. Tests that need their own
+# isolation override the variable per-test as usual.
+_TEST_STATE_SANDBOX = Path(tempfile.mkdtemp(prefix="ccl-test-state-"))
+os.environ.setdefault("CLAUDE_CODEX_LOCAL_STATE_DIR", str(_TEST_STATE_SANDBOX))
 
 # The developer's real ccl state directory, captured at conftest import time
 # — before any fixture patches HOME — so the guard below can detect tests
