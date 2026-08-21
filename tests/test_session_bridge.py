@@ -24,15 +24,16 @@ from claude_codex_local.session import SessionMessage
 
 
 @pytest.fixture
-def isolated_state(tmp_path, monkeypatch):
-    """CCL state dir + native-home overrides — every test starts on a clean slate."""
-    state_dir = tmp_path / "ccl-state"
+def bridge_state(isolated_state, tmp_path, monkeypatch):
+    """Conftest's hardened ``isolated_state`` + the bridge-specific
+    native-home sandbox (#186). Delegating keeps the module-reload
+    sequence and its teardown; this layer only adds ``CCL_NATIVE_HOME_OVERRIDE``
+    and the cwd/native-home handles the adapter tests need."""
+    _, _, state_dir = isolated_state
     native_home = tmp_path / "native-home"
-    state_dir.mkdir()
     native_home.mkdir()
-    monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(state_dir))
     monkeypatch.setenv("CCL_NATIVE_HOME_OVERRIDE", str(native_home))
-    yield {
+    return {
         "state": state_dir,
         "native_home": native_home,
         "cwd": "/repo/example",
@@ -81,10 +82,10 @@ def _seed_pi_native(native_home: Path, cwd: str, rows: list[dict]) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_claude_adapter_keeps_user_assistant_drops_internals(isolated_state):
+def test_claude_adapter_keeps_user_assistant_drops_internals(bridge_state):
     path = _seed_claude_native(
-        isolated_state["native_home"],
-        isolated_state["cwd"],
+        bridge_state["native_home"],
+        bridge_state["cwd"],
         [
             {"type": "permission-mode", "permissionMode": "default"},
             {"type": "attachment", "attachment": {"x": 1}},
@@ -120,10 +121,10 @@ def test_claude_adapter_keeps_user_assistant_drops_internals(isolated_state):
     ]
 
 
-def test_codex_adapter_keeps_message_drops_tool_chatter(isolated_state):
+def test_codex_adapter_keeps_message_drops_tool_chatter(bridge_state):
     path = _seed_codex_native(
-        isolated_state["native_home"],
-        isolated_state["cwd"],
+        bridge_state["native_home"],
+        bridge_state["cwd"],
         [
             {
                 "timestamp": "t1",
@@ -176,10 +177,10 @@ def test_codex_adapter_keeps_message_drops_tool_chatter(isolated_state):
     ]
 
 
-def test_pi_adapter_keeps_message_drops_metadata(isolated_state):
+def test_pi_adapter_keeps_message_drops_metadata(bridge_state):
     path = _seed_pi_native(
-        isolated_state["native_home"],
-        isolated_state["cwd"],
+        bridge_state["native_home"],
+        bridge_state["cwd"],
         [
             {"type": "model_change", "modelId": "gpt-5"},
             {"type": "thinking_level_change", "thinkingLevel": "high"},
@@ -210,10 +211,10 @@ def test_pi_adapter_keeps_message_drops_metadata(isolated_state):
     assert [(m.role, m.content) for m in msgs] == [("user", "ping"), ("assistant", "pong")]
 
 
-def test_adapter_redacts_secrets_in_content(isolated_state):
+def test_adapter_redacts_secrets_in_content(bridge_state):
     path = _seed_claude_native(
-        isolated_state["native_home"],
-        isolated_state["cwd"],
+        bridge_state["native_home"],
+        bridge_state["cwd"],
         [
             {
                 "type": "user",
@@ -230,9 +231,9 @@ def test_adapter_redacts_secrets_in_content(isolated_state):
     assert "[REDACTED]" in msgs[0].content
 
 
-def test_read_native_session_dispatches_by_harness(isolated_state):
-    cwd = isolated_state["cwd"]
-    home = isolated_state["native_home"]
+def test_read_native_session_dispatches_by_harness(bridge_state):
+    cwd = bridge_state["cwd"]
+    home = bridge_state["native_home"]
     cp = _seed_claude_native(
         home, cwd, [{"type": "user", "message": {"role": "user", "content": "c"}}]
     )
@@ -265,10 +266,10 @@ def test_read_native_session_dispatches_by_harness(isolated_state):
 # ---------------------------------------------------------------------------
 
 
-def test_find_latest_native_session_claude_cwd_match(isolated_state):
-    cwd = isolated_state["cwd"]
+def test_find_latest_native_session_claude_cwd_match(bridge_state):
+    cwd = bridge_state["cwd"]
     p = _seed_claude_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         cwd,
         [{"type": "user", "message": {"role": "user", "content": "x"}}],
     )
@@ -277,9 +278,9 @@ def test_find_latest_native_session_claude_cwd_match(isolated_state):
     assert sess.find_latest_native_session("claude", "/repo/other") is None
 
 
-def test_find_latest_native_session_codex_matches_via_session_meta(isolated_state):
-    cwd = isolated_state["cwd"]
-    home = isolated_state["native_home"]
+def test_find_latest_native_session_codex_matches_via_session_meta(bridge_state):
+    cwd = bridge_state["cwd"]
+    home = bridge_state["native_home"]
     # Older file for a different cwd, newer file for ours: must pick ours.
     _seed_codex_native(
         home,
@@ -316,7 +317,7 @@ def test_find_latest_native_session_codex_matches_via_session_meta(isolated_stat
     assert sess.find_latest_native_session("codex", cwd) == expected
 
 
-def test_find_latest_native_session_returns_none_when_missing(isolated_state):
+def test_find_latest_native_session_returns_none_when_missing(bridge_state):
     assert sess.find_latest_native_session("claude", "/no/such/cwd") is None
     assert sess.find_latest_native_session("codex", "/no/such/cwd") is None
     assert sess.find_latest_native_session("pi", "/no/such/cwd") is None
@@ -328,10 +329,10 @@ def test_find_latest_native_session_returns_none_when_missing(isolated_state):
 # ---------------------------------------------------------------------------
 
 
-def test_import_native_session_idempotent(isolated_state):
-    cwd = isolated_state["cwd"]
+def test_import_native_session_idempotent(bridge_state):
+    cwd = bridge_state["cwd"]
     _seed_claude_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         cwd,
         [
             {"type": "user", "message": {"role": "user", "content": "hello"}},
@@ -349,7 +350,7 @@ def test_import_native_session_idempotent(isolated_state):
     assert [m.role for m in msgs] == ["user", "assistant"]
 
 
-def test_import_native_session_no_source_is_clean(isolated_state):
+def test_import_native_session_no_source_is_clean(bridge_state):
     result = sess.import_native_session("claude", "claude", "/nope")
     assert result["success"] is True
     assert result["imported"] == 0
@@ -361,11 +362,11 @@ def test_import_native_session_no_source_is_clean(isolated_state):
 # ---------------------------------------------------------------------------
 
 
-def test_build_context_prefix_empty_when_no_messages(isolated_state):
+def test_build_context_prefix_empty_when_no_messages(bridge_state):
     assert sess.build_context_prefix("nobody") == ""
 
 
-def test_build_context_prefix_wraps_in_delimiters_and_tail_keeps(isolated_state):
+def test_build_context_prefix_wraps_in_delimiters_and_tail_keeps(bridge_state):
     for i in range(5):
         sess.save_message(
             "claude",
@@ -379,7 +380,7 @@ def test_build_context_prefix_wraps_in_delimiters_and_tail_keeps(isolated_state)
         assert f"m{i}" in prefix
 
 
-def test_build_context_prefix_drops_oldest_when_over_budget(isolated_state):
+def test_build_context_prefix_drops_oldest_when_over_budget(bridge_state):
     for i in range(5):
         sess.save_message(
             "claude",
@@ -416,14 +417,14 @@ def _stub_wizard_state(
     monkeypatch.setattr(wizard, "_build_oneshot_cmd", lambda *a, **kw: ["echo", "harness-stub"])
 
 
-def test_run_session_one_shot_injects_other_agent_prefix(isolated_state, monkeypatch, tmp_path):
+def test_run_session_one_shot_injects_other_agent_prefix(bridge_state, monkeypatch, tmp_path):
     """When codex has a native session for cwd and we run as claude, the
     prefix from the codex transcript must be prepended to the prompt."""
     cwd = str(tmp_path)
     monkeypatch.chdir(tmp_path)
     # Codex has prior conversation for this cwd.
     _seed_codex_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         cwd,
         [
             {
@@ -467,13 +468,13 @@ def test_run_session_one_shot_injects_other_agent_prefix(isolated_state, monkeyp
 
 
 def test_run_session_one_shot_prefix_threaded_to_oneshot_builder(
-    isolated_state, monkeypatch, tmp_path
+    bridge_state, monkeypatch, tmp_path
 ):
     """Spy on _build_oneshot_cmd to assert the prefix is actually in the prompt."""
     cwd = str(tmp_path)
     monkeypatch.chdir(tmp_path)
     _seed_codex_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         cwd,
         [
             {
@@ -504,11 +505,11 @@ def test_run_session_one_shot_prefix_threaded_to_oneshot_builder(
     assert received["prompt"].endswith("new question")
 
 
-def test_run_session_no_context_flag_skips_bridge(isolated_state, monkeypatch, tmp_path):
+def test_run_session_no_context_flag_skips_bridge(bridge_state, monkeypatch, tmp_path):
     cwd = str(tmp_path)
     monkeypatch.chdir(tmp_path)
     _seed_codex_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         cwd,
         [
             {
@@ -539,11 +540,11 @@ def test_run_session_no_context_flag_skips_bridge(isolated_state, monkeypatch, t
     assert not sess.get_session_path("claude").exists()
 
 
-def test_run_session_env_opt_out_skips_bridge(isolated_state, monkeypatch, tmp_path):
+def test_run_session_env_opt_out_skips_bridge(bridge_state, monkeypatch, tmp_path):
     monkeypatch.setenv("CCL_SESSION_BRIDGE", "0")
     monkeypatch.chdir(tmp_path)
     _seed_claude_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         str(tmp_path),
         [{"type": "user", "message": {"role": "user", "content": "x"}}],
     )
@@ -556,11 +557,11 @@ def test_run_session_env_opt_out_skips_bridge(isolated_state, monkeypatch, tmp_p
     assert not sess.get_session_path("claude").exists()
 
 
-def test_run_session_post_run_capture_imports_native(isolated_state, monkeypatch, tmp_path):
+def test_run_session_post_run_capture_imports_native(bridge_state, monkeypatch, tmp_path):
     cwd = str(tmp_path)
     monkeypatch.chdir(tmp_path)
     _seed_claude_native(
-        isolated_state["native_home"],
+        bridge_state["native_home"],
         cwd,
         [
             {"type": "user", "message": {"role": "user", "content": "ran something"}},
@@ -583,7 +584,7 @@ def test_run_session_post_run_capture_imports_native(isolated_state, monkeypatch
     ]
 
 
-def test_run_session_capture_failure_does_not_break_run(isolated_state, monkeypatch, tmp_path):
+def test_run_session_capture_failure_does_not_break_run(bridge_state, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     _stub_wizard_state(monkeypatch, tmp_path, harness="claude")
     monkeypatch.setattr(
