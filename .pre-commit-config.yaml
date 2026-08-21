@@ -55,7 +55,7 @@ repos:
 
       - id: pytest-full
         name: pytest (full non-local suite w/ coverage)
-        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q -m "not local" --cov=claude_codex_local --cov-report=term-missing'
+        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" -m pytest -q -m "not local" --cov=claude_codex_local --cov-report=term-missing --cov-fail-under=79'
         language: system
         pass_filenames: false
         stages: [pre-push]
