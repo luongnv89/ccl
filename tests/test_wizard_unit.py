@@ -2087,9 +2087,9 @@ class TestStep24PickerIntegration:
         for _mode, rec in recs.items():
             if rec is None:
                 continue
-            assert (
-                ":" not in rec["engine_tag"]
-            ), f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            assert ":" not in rec["engine_tag"], (
+                f"{_mode} leaked an ollama-style tag: {rec['engine_tag']}"
+            )
 
         wiz.step_2_4_pick_model(state, non_interactive=False)
 
@@ -6081,3 +6081,79 @@ class TestDetectExistingShortcuts:
         assert result["cp"]["harness"] == "pi"
         assert result["cp"]["engine_kind"] == "local"
         assert result["cp"]["legacy"] is True
+
+
+# ---------------------------------------------------------------------------
+# #184 — STATE_FILE must be a single shared object resolved at call time,
+# so patches on either the wizard facade or wizard_cli are observed.
+# ---------------------------------------------------------------------------
+
+
+class TestStateFileSingleObject:
+    def test_state_file_is_single_shared_object(self, isolated_state):
+        """Acceptance criterion #1: facade and cli reference one object."""
+        import claude_codex_local.wizard_cli as wcli
+        import claude_codex_local.wizard_state as wstate
+
+        _, wiz, _ = isolated_state
+        assert wiz.STATE_FILE is wstate.STATE_FILE
+        assert wcli.STATE_FILE is wstate.STATE_FILE
+
+    def _stub_run_session(self, monkeypatch, wiz, fake_state):
+        fake_state.write_text("{}")
+
+        class _State:
+            primary_harness = "claude"
+            primary_engine = "ollama"
+            engine_model_tag = "test-model"
+            wire_result = {"argv": ["echo", "stub"]}
+            helper_script_path = None
+
+        monkeypatch.setattr(wiz.WizardState, "load", staticmethod(lambda: _State()))
+        monkeypatch.setattr(wiz, "_resolve_wire_env", lambda wr: {})
+        monkeypatch.setenv("CCL_SESSION_BRIDGE", "0")
+        monkeypatch.setattr(
+            wiz.subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0})()
+        )
+
+    def test_run_session_observes_facade_state_file_patch(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """A patch on ``wizard.STATE_FILE`` must be observed by run_session's
+        guard — this is the exact scenario that failed in CI (#184)."""
+        _, wiz, _ = isolated_state
+        fake_state = tmp_path / "facade-patched-state.json"
+        self._stub_run_session(monkeypatch, wiz, fake_state)
+        monkeypatch.setattr(wiz, "STATE_FILE", fake_state)
+
+        received: dict = {}
+        monkeypatch.setattr(
+            wiz,
+            "_build_oneshot_cmd",
+            lambda *a, **kw: received.setdefault("fired", True) or ["echo", "stub"],
+        )
+        rc = wiz.run_session(prompt="hi")
+        assert rc == 0
+        assert received.get("fired") is True
+
+    def test_run_session_observes_wizard_cli_state_file_patch(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """A patch on ``wizard_cli.STATE_FILE`` must also be observed when
+        the cli entrypoint is invoked directly."""
+        import claude_codex_local.wizard_cli as wcli
+
+        _, wiz, _ = isolated_state
+        fake_state = tmp_path / "cli-patched-state.json"
+        self._stub_run_session(monkeypatch, wiz, fake_state)
+        monkeypatch.setattr(wcli, "STATE_FILE", fake_state)
+
+        received: dict = {}
+        monkeypatch.setattr(
+            wcli,
+            "_build_oneshot_cmd",
+            lambda *a, **kw: received.setdefault("fired", True) or ["echo", "stub"],
+        )
+        rc = wcli.run_session(prompt="hi")
+        assert rc == 0
+        assert received.get("fired") is True
