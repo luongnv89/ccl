@@ -164,6 +164,7 @@ verify_checksum() {
         [ -n "$expected" ] || die "Checksum file for ${CCL_REF} is empty or malformed."
         info "Verifying tarball against published SHA256SUMS for ${CCL_REF}"
     elif pinned_sha256 "$CCL_REF" > /dev/null 2>&1; then
+        rm -f "$sums_tmp"
         expected="$(pinned_sha256 "$CCL_REF")"
         info "No SHA256SUMS asset for ${CCL_REF} — using checksum pinned in this installer."
     else
@@ -192,7 +193,9 @@ install_repo() {
     url="https://codeload.github.com/${CCL_REPO}/tar.gz/${CCL_REF}"
 
     tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' EXIT
+    # tmpdir is local to this function — guard the expansion so the EXIT trap
+    # does not trip `set -u` after main() returns (caught by the installer E2E).
+    trap 'rm -rf "${tmpdir:-}"' EXIT
     tarball="$tmpdir/repo.tar.gz"
 
     if [ -d "$CCL_INSTALL_DIR" ] && [ -n "$(ls -A "$CCL_INSTALL_DIR" 2>/dev/null || true)" ]; then
