@@ -17,10 +17,14 @@ def temp_state_dir(tmp_path):
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     # Mock STATE_DIR by setting environment variable
-    original_state_dir = os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", "")
+    original_state_dir = os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR")
     os.environ["CLAUDE_CODEX_LOCAL_STATE_DIR"] = str(state_dir)
     yield state_dir
-    if original_state_dir:
+    # Always restore — including the unset case, otherwise the env var leaks
+    # a deleted tmp directory into every later module reload (issue #185).
+    if original_state_dir is None:
+        os.environ.pop("CLAUDE_CODEX_LOCAL_STATE_DIR", None)
+    else:
         os.environ["CLAUDE_CODEX_LOCAL_STATE_DIR"] = original_state_dir
 
 

@@ -32,6 +32,41 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 
 
+def _snapshot_modules(names):
+    """Snapshot ``__dict__``s of *names*; return (saved_states, fresh_names).
+
+    Modules not yet imported are listed in *fresh_names* so the restore step
+    can evict them instead of leaving sandbox-initialised copies behind.
+    """
+    saved = {}
+    fresh = []
+    for name in names:
+        mod = sys.modules.get(name)
+        if mod is None:
+            fresh.append(name)
+        else:
+            saved[name] = dict(mod.__dict__)
+    return saved, fresh
+
+
+def _restore_modules(saved, fresh):
+    """Undo a :func:`_snapshot_modules` capture — evict fresh modules and
+    put every snapshotted module's ``__dict__`` back verbatim."""
+    for name in fresh:
+        orphan = sys.modules.pop(name, None)
+        if orphan is not None:
+            parent_name, _, child_name = name.rpartition(".")
+            parent = sys.modules.get(parent_name)
+            if parent is not None and getattr(parent, child_name, None) is orphan:
+                delattr(parent, child_name)
+    for name, saved_dict in saved.items():
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        mod.__dict__.clear()
+        mod.__dict__.update(saved_dict)
+
+
 @pytest.fixture
 def isolated_state(tmp_path, monkeypatch):
     """
@@ -39,7 +74,15 @@ def isolated_state(tmp_path, monkeypatch):
     module-level STATE_DIR constants pick up the override. Also reroutes
     Path.home() to tmp_path so shell-alias installs land in the sandbox.
     Returns (core_module, wizard_module, state_dir).
+
+    On teardown every reloaded module is restored to its exact pre-test
+    state, so tests that do *not* request this fixture never observe
+    constants frozen at a deleted tmp directory (order-independence).
     """
+    # Snapshot the current __dict__ of every module about to be reloaded so
+    # the teardown can restore them verbatim (issue #185 / F-TEST-002).
+    saved_module_states, newly_imported = _snapshot_modules(_ISOLATED_RELOAD_MODULES)
+
     state_dir = tmp_path / "state"
     guide_root = tmp_path / "repo"
     guide_root.mkdir()
@@ -130,7 +173,37 @@ def isolated_state(tmp_path, monkeypatch):
     # Redirect the wizard's guide.md so it doesn't splatter the real repo.
     monkeypatch.setattr(wiz_mod, "GUIDE_PATH", guide_root / "guide.md")
 
-    return pb_mod, wiz_mod, state_dir
+    yield pb_mod, wiz_mod, state_dir
+
+    # Teardown — restore every reloaded module to its exact pre-test state so
+    # constants no longer stay frozen at this test's (now deleted) tmp_path.
+    # Without this, tests that do not request ``isolated_state`` observe
+    # stale state-derived constants and outcomes depend on test order
+    # (issue #185 / F-TEST-002).
+    #
+    # ``monkeypatch.undo()`` must run HERE, before the dict restore: pytest
+    # would otherwise invoke it *after* this teardown, re-writing values that
+    # were recorded while the sandboxed (reloaded) modules were live back
+    # into the freshly restored modules.
+    monkeypatch.undo()
+    _restore_modules(saved_module_states, newly_imported)
+
+
+@pytest.fixture(autouse=True)
+def _order_independent_modules():
+    """Order-independence umbrella (issue #185 / F-TEST-002).
+
+    Snapshots the state-derived modules before every test and restores them
+    afterwards. This catches residue that per-fixture teardowns cannot see —
+    e.g. ``wizard.run_session``'s monkeypatch propagation writes test doubles
+    into ``wizard_cli`` module globals (#184), and some test files shadow
+    ``isolated_state`` with local fixtures. Running last (autouse fixtures
+    finalize after the ones the test requested), it guarantees no test ever
+    starts from another test's leftovers, whatever the execution order.
+    """
+    saved, fresh = _snapshot_modules(_ISOLATED_RELOAD_MODULES)
+    yield
+    _restore_modules(saved, fresh)
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +441,21 @@ _CONFIG_MODULES = (
     "claude_codex_local._shell",
     "claude_codex_local._openrouter",
     "claude_codex_local._router9",
+)
+
+# Every module the isolated_state fixture reloads to rebind state-derived
+# constants. Used both for the reload sweep and for the teardown that puts
+# each module back to its pre-test state (issue #185 / F-TEST-002).
+_ISOLATED_RELOAD_MODULES = (
+    "claude_codex_local._config",
+    *_CONFIG_MODULES,
+    "claude_codex_local.core",
+    "claude_codex_local.wizard_ui",
+    "claude_codex_local.wizard_state",
+    "claude_codex_local.wizard_discovery",
+    "claude_codex_local.wizard_steps",
+    "claude_codex_local.wizard_cli",
+    "claude_codex_local.wizard",
 )
 
 
