@@ -27,9 +27,41 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The developer's real ccl state directory, captured at conftest import time
+# — before any fixture patches HOME — so the guard below can detect tests
+# that escape their sandbox and touch it (issue #186 / F-BUG-002).
+_REAL_STATE_DIR = Path(os.environ.get("HOME") or str(Path.home())) / ".claude-codex-local"
+
 # ---------------------------------------------------------------------------
 # State isolation — every test gets its own STATE_DIR under tmp_path.
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _guard_real_state_dir(tmp_path, monkeypatch):
+    """Sandbox HOME for every test; fail the suite if the real state dir is
+    touched (issue #186 / F-BUG-002).
+
+    Two layers:
+    * ``HOME`` / ``Path.home()`` point at a tmp path for the duration of the
+      test, so state-path resolution can never land in the real home unless
+      code captured an absolute path at import time.
+    * Before/after mtime + existence check on the real ``~/.claude-codex-local``
+      catches anything that still escapes (e.g. hardcoded absolute paths).
+    """
+    fake_home = tmp_path / "guarded-home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    existed = _REAL_STATE_DIR.exists()
+    mtime_before = _REAL_STATE_DIR.stat().st_mtime_ns if existed else None
+    yield
+    if existed:
+        if _REAL_STATE_DIR.stat().st_mtime_ns != mtime_before:
+            pytest.fail(f"test modified the real ccl state dir: {_REAL_STATE_DIR}")
+    elif _REAL_STATE_DIR.exists():
+        pytest.fail(f"test created the real ccl state dir: {_REAL_STATE_DIR}")
 
 
 def _snapshot_modules(names):
