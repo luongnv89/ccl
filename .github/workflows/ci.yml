@@ -104,3 +104,12 @@ jobs:
         run: pip install --upgrade build -c constraints-dev.txt
       - name: Run Docker E2E scenarios
         run: bash tests/e2e_docker/run_e2e_docker.sh
+
+  ci-ok:
+    name: ci-ok
+    needs: [quality, test, e2e, e2e-docker]
+    if: always() && !failure() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "All CI jobs passed"
