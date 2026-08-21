@@ -19,7 +19,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "questionary>=2.0",
+  "questionary>=2.1.1",
   "rich>=13.0",
 ]
 
@@ -29,7 +29,7 @@ dev = [
   "pytest-cov>=5.0",
   "ruff>=0.6",
   "mypy>=1.11",
-  "bandit>=1.7",
+  "bandit>=1.9.4",
   "detect-secrets>=1.5",
   "pre-commit>=3.8",
 ]
