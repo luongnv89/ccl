@@ -5,9 +5,11 @@ logic, presence checks, and the Claude/Codex wiring helpers.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -3930,9 +3932,11 @@ class TestEnsureTool9Router:
         assert wiz._ensure_tool("9router") is False
         assert called["subprocess_run"] is False
 
-    def test_offers_npm_install_user_accepts_runs_install(self, isolated_state, monkeypatch):
-        """User accepts → wizard runs `npm install -g 9router`, then asks
-        the user to start the daemon and re-probes."""
+    def test_offers_npm_install_user_accepts_runs_pinned_install(self, isolated_state, monkeypatch):
+        """User accepts → wizard runs the PINNED `npm install -g 9router@<ver>`
+        argv (#194), then asks the user to start the daemon and re-probes."""
+        from claude_codex_local import wizard_discovery as wdis
+
         pb, wiz, _ = isolated_state
         # Reachability flips to True after install + manual start.
         detect_calls = {"n": 0}
@@ -3967,7 +3971,15 @@ class TestEnsureTool9Router:
         monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _AcceptConfirm())
 
         assert wiz._ensure_tool("9router") is True
-        assert ["npm", "install", "-g", "9router"] in run_calls
+        assert [
+            "npm",
+            "install",
+            "-g",
+            f"9router@{wdis._NPM_PIN_9ROUTER}",
+        ] in run_calls
+        # Never a shell string (#194).
+        for argv in run_calls:
+            assert argv[0] != "bash"
 
 
 # ---------------------------------------------------------------------------
@@ -4747,8 +4759,13 @@ class TestEnsureToolCacheInvalidation:
         # Confirm install dialog returns True.
         monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _StubAsk(True))
 
-        # Install command "succeeds" — flip the present flag.
+        # Install command "succeeds" — flip the present flag.  For ollama the
+        # first call is the guarded script download (#194): materialise the
+        # temp file so the SHA-256 step sees a real download.
         def fake_run(cmd, check=True):
+            argv = list(cmd)
+            if "-o" in argv:
+                Path(argv[argv.index("-o") + 1]).write_text("#!/bin/sh\nexit 0\n")
             present_state["present"] = True
 
             class _R:
@@ -4813,6 +4830,354 @@ class TestEnsureToolCacheInvalidation:
         with wiz.console.capture():
             assert wiz._ensure_tool("ollama") is False
         assert invalidations == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #194 — no pipe-to-shell installs: fail-closed llmfit installer,
+# guarded ollama script execution, classified install lookup table.
+# ---------------------------------------------------------------------------
+
+
+def _write_fake_curl(bin_dir: Path, mode: str, tampered_digest: str) -> Path:
+    """Write a fake ``curl`` serving deterministic offline llmfit responses.
+
+    Modes:
+      - ``corrupt``: serves an asset and a digest that does not match it.
+      - ``digest-fetch-fails``: the .sha256 fetch fails (exit 7).
+      - ``empty-tag``: the /releases/latest redirect carries no Location.
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shim = bin_dir / "curl"
+    shim.write_text(
+        "#!/bin/sh\n"
+        "set -u\n"
+        f'MODE="{mode}"\n'
+        'OUT=""\n'
+        'prev=""\n'
+        'for arg in "$@"; do\n'
+        '  if [ "$prev" = "-o" ]; then OUT="$arg"; fi\n'
+        '  prev="$arg"\n'
+        "done\n"
+        'case "$*" in\n'
+        '  *"-fsSI"*)\n'
+        '    if [ "$MODE" = "empty-tag" ]; then\n'
+        "      printf 'HTTP/1.1 302 Found\\r\\n'\n"
+        "    else\n"
+        "      printf 'HTTP/1.1 302 Found\\r\\nLocation: "
+        "https://github.com/AlexsJones/llmfit/releases/tag/v9.9.9\\r\\n'\n"
+        "    fi\n"
+        "    exit 0\n"
+        "    ;;\n"
+        '  *".sha256"*)\n'
+        '    if [ "$MODE" = "digest-fetch-fails" ]; then exit 7; fi\n'
+        f'    printf \'{tampered_digest}  %s\\n\' "$(basename "$OUT")" > "$OUT"\n'
+        "    exit 0\n"
+        "    ;;\n"
+        "esac\n"
+        "printf 'CORRUPTED\\n' > \"$OUT\"\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
+class TestLlmfitInstallerFailClosed:
+    """Issue #194 — the llmfit bootstrap script must be fail-closed."""
+
+    def test_script_hardens_by_construction(self, isolated_state):
+        from claude_codex_local import wizard_discovery as wdis
+
+        script = wdis._LLMFIT_INSTALL_SCRIPT
+        assert script.startswith("set -euo pipefail\n")
+        # macOS-compatible digest command, preferred only when sha256sum is absent.
+        assert "command -v sha256sum >/dev/null 2>&1 || DIGEST_CMD='shasum -a 256'" in script
+        # A failed digest fetch must abort the install (no unverified binary).
+        digest_guard = script.split("if ! curl", 1)[1].split("\nfi\n", 1)[0]
+        assert "exit 1" in digest_guard
+        # An empty release tag must abort before building a download URL.
+        assert '[ -z "${TAG}" ]' in script
+
+    @pytest.mark.parametrize(
+        ("mode", "stderr_fragment"),
+        [
+            ("corrupt", "FAILED"),
+            ("digest-fetch-fails", "FATAL: could not fetch checksum"),
+            ("empty-tag", "FATAL: could not determine"),
+        ],
+    )
+    def test_corrupted_or_unverifiable_download_aborts(
+        self, isolated_state, tmp_path, monkeypatch, mode, stderr_fragment
+    ):
+        """Run the installer offline against a fake curl; it must exit non-zero."""
+        from claude_codex_local import wizard_discovery as wdis
+
+        tampered = hashlib.sha256(b"TAMPERED\n").hexdigest()
+        fake_bin = tmp_path / "bin"
+        _write_fake_curl(fake_bin, mode, tampered)
+        script = tmp_path / "llmfit-install.sh"
+        script.write_text(wdis._LLMFIT_INSTALL_SCRIPT, encoding="utf-8")
+        env = {**os.environ, "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
+        proc = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode != 0
+        # coreutils prints the per-file FAILED line on stdout, the WARNING on
+        # stderr — check both.
+        assert stderr_fragment in proc.stdout + proc.stderr
+
+
+class TestInstallHintsClassification:
+    """Issue #194 AC2/AC3 — every install entry carries an explicit `runnable`
+    classification, argv lists are preferred over `bash -c` strings, and all
+    `npm install -g` invocations name a pinned version."""
+
+    def test_every_entry_has_explicit_runnable_classification(self):
+        from claude_codex_local import wizard_discovery as wdis
+
+        assert wdis.INSTALL_HINTS
+        for key, hint in wdis.INSTALL_HINTS.items():
+            assert isinstance(hint.get("runnable"), bool), f"{key}: missing runnable flag"
+
+    def test_runnable_entries_execute_exact_argv_lists(self):
+        from claude_codex_local import wizard_discovery as wdis
+
+        for key, hint in wdis.INSTALL_HINTS.items():
+            if not hint["runnable"]:
+                continue
+            argv = hint.get("argv")
+            assert isinstance(argv, list) and argv, f"{key}: runnable entry lacks argv list"
+            assert all(isinstance(tok, str) for tok in argv), key
+
+    def test_no_entry_carries_shell_pipe_or_bash_c(self):
+        """No install path may pipe a fetched script into a shell (#194)."""
+        from claude_codex_local import wizard_discovery as wdis
+
+        blob = json.dumps(wdis.INSTALL_HINTS)
+        for needle in ("| sh", "|sh", "| sh ", "bash -c", "curl *|"):
+            assert needle not in blob, needle
+        for key, hint in wdis.INSTALL_HINTS.items():
+            for tok in hint.get("argv", []):
+                for meta in ("|", ";", "&&", "`", "$("):
+                    assert meta not in tok, f"{key}: shell metachar {meta!r} in argv token"
+
+    def test_non_runnable_entries_carry_no_executable_argv(self):
+        from claude_codex_local import wizard_discovery as wdis
+
+        for key, hint in wdis.INSTALL_HINTS.items():
+            if not hint["runnable"]:
+                assert not hint.get("argv"), (
+                    f"{key}: non-runnable entry must not carry an executable argv"
+                )
+
+    def test_npm_global_installs_are_pinned(self):
+        from claude_codex_local import wizard_discovery as wdis
+
+        pinned_specs = []
+        for key, hint in wdis.INSTALL_HINTS.items():
+            argv = hint.get("argv") or []
+            if argv[:3] == ["npm", "install", "-g"]:
+                spec = argv[3]
+                name, _, version = spec.rpartition("@")
+                assert name, f"{key}: unpinned npm spec {spec!r}"
+                assert version and version[0].isdigit(), f"{key}: npm spec {spec!r} not pinned"
+                pinned_specs.append(spec)
+        # The four known npm-backed tools must all still be covered.
+        assert len(pinned_specs) == 4
+
+    def test_router9_lifecycle_command_pin_matches_wizard_pin(self):
+        """The engines/router9 dry-run command and the wizard's executable argv
+        must name the same pinned version (single source of truth per pin)."""
+        from claude_codex_local import wizard_discovery as wdis
+        from claude_codex_local.engines.router9 import install as r9_install
+
+        commands = r9_install.run()["commands"]
+        matching = [c for c in commands if c.startswith("npm install -g 9router@")]
+        assert matching, commands
+        assert matching[0] == f"npm install -g 9router@{wdis._NPM_PIN_9ROUTER}"
+
+
+class TestOllamaInstallGate:
+    """Issue #194 AC1 — the ollama installer downloads the official script to a
+    temp file, shows its URL and SHA-256, and only executes it after an
+    explicit NON-DEFAULT confirmation."""
+
+    @staticmethod
+    def _patch_console(monkeypatch, printed):
+        from claude_codex_local import wizard_discovery as wdis
+
+        class _RecorderConsole:
+            def print(self, *args, **kw):
+                printed.append(" ".join(str(a) for a in args))
+
+        monkeypatch.setattr(wdis, "console", _RecorderConsole())
+
+    @staticmethod
+    def _confirm_recorder(monkeypatch, wiz, reply):
+        prompts = []
+
+        class _Confirm:
+            def __init__(self, *args, **kw):
+                prompts.append({"args": args, "kwargs": kw})
+
+            def ask(self):
+                return reply
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _Confirm(*a, **kw))
+        return prompts
+
+    def _install_ollama(self, isolated_state, monkeypatch, reply, run_error_on=None):
+        """Drive _install_ollama with a recorded fake subprocess.run.
+
+        Returns (wdis, calls, prompts, printed). run_error_on maps a 1-based
+        call index to the exception to raise instead of succeeding.
+        """
+        pb, wiz, _ = isolated_state
+        from claude_codex_local import wizard_discovery as wdis
+
+        run_error_on = run_error_on or {}
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, check=False, **kw):
+            argv = list(cmd)
+            # Materialise the download so the SHA-256 step sees a real file.
+            if "-o" in argv:
+                Path(argv[argv.index("-o") + 1]).write_text("#!/bin/sh\necho ollama\n")
+            calls.append(argv)
+            exc = run_error_on.get(len(calls))
+            if exc is not None:
+                raise exc
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(wiz.subprocess, "run", fake_run)
+        prompts = self._confirm_recorder(monkeypatch, wiz, reply)
+        printed: list[str] = []
+        self._patch_console(monkeypatch, printed)
+        return wdis, calls, prompts, printed
+
+    def test_explicit_yes_downloads_to_temp_file_and_executes(self, isolated_state, monkeypatch):
+        wdis, calls, prompts, printed = self._install_ollama(isolated_state, monkeypatch, True)
+
+        assert wdis._install_ollama() is True
+        assert len(calls) == 2
+        curl_argv, sh_argv = calls
+        # Download goes to a temp file via argv — never `curl ... | sh`.
+        assert curl_argv[0] == "curl" and "-o" in curl_argv
+        out_path = Path(curl_argv[curl_argv.index("-o") + 1])
+        assert "ollama-install-" in str(out_path.parent)
+        assert sh_argv == ["sh", str(out_path)]
+        # The confirmation gate defaults to NO.
+        assert len(prompts) == 1
+        assert prompts[0]["kwargs"].get("default") is False
+        # URL and SHA-256 of the downloaded script are shown before execution.
+        blob = "\n".join(printed)
+        assert "https://ollama.com/install.sh" in blob
+        assert "SHA-256" in blob
+        assert not out_path.exists(), "temp download dir must be cleaned up"
+
+    def test_decline_aborts_without_executing(self, isolated_state, monkeypatch):
+        wdis, calls, prompts, _printed = self._install_ollama(isolated_state, monkeypatch, False)
+
+        assert wdis._install_ollama() is False
+        # Only the download ran; the script was never executed.
+        assert len(calls) == 1 and calls[0][0] == "curl"
+        assert prompts[0]["kwargs"].get("default") is False
+        assert not Path(calls[0][calls[0].index("-o") + 1]).exists()
+
+    def test_download_failure_aborts_before_any_prompt(self, isolated_state, monkeypatch):
+        error = subprocess.CalledProcessError(7, ["curl"])
+        wdis, calls, prompts, _printed = self._install_ollama(
+            isolated_state, monkeypatch, True, run_error_on={1: error}
+        )
+
+        assert wdis._install_ollama() is False
+        assert len(calls) == 1
+        assert prompts == [], "must not prompt when the download itself failed"
+
+    def test_script_execution_failure_reports_and_returns_false(self, isolated_state, monkeypatch):
+        error = subprocess.CalledProcessError(3, ["sh"])
+        wdis, calls, prompts, _printed = self._install_ollama(
+            isolated_state, monkeypatch, True, run_error_on={2: error}
+        )
+
+        assert wdis._install_ollama() is False
+        assert len(calls) == 2
+
+
+class TestEnsureToolArgvExecution:
+    """Issue #194 AC2 — runnable INSTALL_HINTS entries execute their exact
+    argv list; `bash -c` strings are never used on the install path."""
+
+    def test_claude_install_runs_pinned_argv_not_bash_c(self, isolated_state, monkeypatch):
+        pb, wiz, _ = isolated_state
+        from claude_codex_local import wizard_discovery as wdis
+
+        detect_calls = {"n": 0}
+
+        def fake_command_version(cmd):
+            detect_calls["n"] += 1
+            return {"present": detect_calls["n"] >= 2, "version": ""}
+
+        monkeypatch.setattr(pb, "command_version", fake_command_version)
+
+        run_calls: list[list[str]] = []
+
+        def fake_run(cmd, check=False, **kw):
+            run_calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(wiz.subprocess, "run", fake_run)
+
+        class _AcceptConfirm:
+            def ask(self):
+                return True
+
+        monkeypatch.setattr(wiz.questionary, "confirm", lambda *a, **kw: _AcceptConfirm())
+
+        assert wiz._ensure_tool("claude") is True
+        assert run_calls == [wdis.INSTALL_HINTS["claude"]["argv"]]
+        # Pinned npm spec, executed as argv — never a shell string (#194).
+        spec = run_calls[0][3]
+        assert spec.rpartition("@")[1] == "@" and spec.rpartition("@")[2][0].isdigit()
+        for argv in run_calls:
+            assert "bash" not in argv
+
+    def test_non_runnable_entry_reaching_tail_is_never_executed(self, isolated_state, monkeypatch):
+        """A hint without a runnable classification must not be shell-executed
+        behind a confirm prompt — defensive guard for future entries (#194)."""
+        pb, wiz, _ = isolated_state
+        from claude_codex_local import wizard_discovery as wdis
+
+        monkeypatch.setitem(
+            wdis.INSTALL_HINTS,
+            "future-tool",
+            {
+                "name": "Future Tool",
+                "cmd": "curl -fsSL https://example.com/install.sh | sh",
+                "url": "https://example.com",
+            },
+        )
+        monkeypatch.setattr(pb, "command_version", lambda cmd: {"present": False, "version": ""})
+
+        import questionary as qmod
+
+        def _no_confirm(*a, **kw):
+            raise AssertionError("must not prompt to execute a non-runnable entry")
+
+        monkeypatch.setattr(qmod, "confirm", _no_confirm)
+        monkeypatch.setattr(
+            wiz.subprocess,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not subprocess.run a non-runnable entry")
+            ),
+        )
+
+        assert wiz._ensure_tool("future-tool") is False
 
 
 # ---------------------------------------------------------------------------
