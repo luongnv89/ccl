@@ -5,9 +5,11 @@ logic, presence checks, and the Claude/Codex wiring helpers.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -4813,6 +4815,105 @@ class TestEnsureToolCacheInvalidation:
         with wiz.console.capture():
             assert wiz._ensure_tool("ollama") is False
         assert invalidations == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #194 — no pipe-to-shell installs: fail-closed llmfit installer,
+# guarded ollama script execution, classified install lookup table.
+# ---------------------------------------------------------------------------
+
+
+def _write_fake_curl(bin_dir: Path, mode: str, tampered_digest: str) -> Path:
+    """Write a fake ``curl`` serving deterministic offline llmfit responses.
+
+    Modes:
+      - ``corrupt``: serves an asset and a digest that does not match it.
+      - ``digest-fetch-fails``: the .sha256 fetch fails (exit 7).
+      - ``empty-tag``: the /releases/latest redirect carries no Location.
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    shim = bin_dir / "curl"
+    shim.write_text(
+        "#!/bin/sh\n"
+        "set -u\n"
+        f'MODE="{mode}"\n'
+        'OUT=""\n'
+        'prev=""\n'
+        'for arg in "$@"; do\n'
+        '  if [ "$prev" = "-o" ]; then OUT="$arg"; fi\n'
+        '  prev="$arg"\n'
+        "done\n"
+        'case "$*" in\n'
+        '  *"-fsSI"*)\n'
+        '    if [ "$MODE" = "empty-tag" ]; then\n'
+        "      printf 'HTTP/1.1 302 Found\\r\\n'\n"
+        "    else\n"
+        "      printf 'HTTP/1.1 302 Found\\r\\nLocation: "
+        "https://github.com/AlexsJones/llmfit/releases/tag/v9.9.9\\r\\n'\n"
+        "    fi\n"
+        "    exit 0\n"
+        "    ;;\n"
+        '  *".sha256"*)\n'
+        '    if [ "$MODE" = "digest-fetch-fails" ]; then exit 7; fi\n'
+        f'    printf \'{tampered_digest}  %s\\n\' "$(basename "$OUT")" > "$OUT"\n'
+        "    exit 0\n"
+        "    ;;\n"
+        "esac\n"
+        'printf \'CORRUPTED\\n\' > "$OUT"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    return shim
+
+
+class TestLlmfitInstallerFailClosed:
+    """Issue #194 — the llmfit bootstrap script must be fail-closed."""
+
+    def test_script_hardens_by_construction(self, isolated_state):
+        from claude_codex_local import wizard_discovery as wdis
+
+        script = wdis._LLMFIT_INSTALL_SCRIPT
+        assert script.startswith("set -euo pipefail\n")
+        # macOS-compatible digest command, preferred only when sha256sum is absent.
+        assert "command -v sha256sum >/dev/null 2>&1 || DIGEST_CMD='shasum -a 256'" in script
+        # A failed digest fetch must abort the install (no unverified binary).
+        digest_guard = script.split("if ! curl", 1)[1].split("\nfi\n", 1)[0]
+        assert "exit 1" in digest_guard
+        # An empty release tag must abort before building a download URL.
+        assert '[ -z "${TAG}" ]' in script
+
+    @pytest.mark.parametrize(
+        ("mode", "stderr_fragment"),
+        [
+            ("corrupt", "FAILED"),
+            ("digest-fetch-fails", "FATAL: could not fetch checksum"),
+            ("empty-tag", "FATAL: could not determine"),
+        ],
+    )
+    def test_corrupted_or_unverifiable_download_aborts(
+        self, isolated_state, tmp_path, monkeypatch, mode, stderr_fragment
+    ):
+        """Run the installer offline against a fake curl; it must exit non-zero."""
+        from claude_codex_local import wizard_discovery as wdis
+
+        tampered = hashlib.sha256(b"TAMPERED\n").hexdigest()
+        fake_bin = tmp_path / "bin"
+        _write_fake_curl(fake_bin, mode, tampered)
+        script = tmp_path / "llmfit-install.sh"
+        script.write_text(wdis._LLMFIT_INSTALL_SCRIPT, encoding="utf-8")
+        env = {**os.environ, "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
+        proc = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode != 0
+        # coreutils prints the per-file FAILED line on stdout, the WARNING on
+        # stderr — check both.
+        assert stderr_fragment in proc.stdout + proc.stderr
 
 
 # ---------------------------------------------------------------------------

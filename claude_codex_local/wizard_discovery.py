@@ -243,7 +243,12 @@ def _show_install_hint(key: str) -> None:
     console.print(f"    [cyan]{fallback_hint['cmd']}[/cyan]")
 
 
+# Issue #194: the installer must be fail-closed — `set -euo pipefail` aborts on
+# the first failed command, a failed digest fetch is fatal (no unverified
+# install), the digest tool falls back to `shasum -a 256` on stock macOS, and
+# an empty release TAG aborts instead of building a malformed download URL.
 _LLMFIT_INSTALL_SCRIPT = """\
+set -euo pipefail
 REPO='AlexsJones/llmfit'
 BINARY='llmfit'
 OS=$(uname -s)
@@ -259,15 +264,23 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
 esac
 PLATFORM="${ARCH}-${OS}"
-TAG=$(curl -fsSI "https://github.com/${REPO}/releases/latest" | grep -i '^location:' | head -1 | sed 's|.*/tag/||' | tr -d '\\r\\n')
+TAG=$(curl -fsSI "https://github.com/${REPO}/releases/latest" | grep -i '^location:' | head -1 | sed 's|.*/tag/||' | tr -d '\\r\\n' || true)
+if [ -z "${TAG}" ]; then
+  echo "FATAL: could not determine the latest llmfit release tag" >&2
+  exit 1
+fi
 ASSET="${BINARY}-${TAG}-${PLATFORM}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 curl -fsSL "$URL" -o "$TMPDIR/$ASSET"
-if curl -fsSL --max-time 10 "${URL}.sha256" -o "$TMPDIR/${ASSET}.sha256"; then
-  (cd "$TMPDIR" && sha256sum -c "${ASSET}.sha256")
+DIGEST_CMD='sha256sum'
+command -v sha256sum >/dev/null 2>&1 || DIGEST_CMD='shasum -a 256'
+if ! curl -fsSL --max-time 10 "${URL}.sha256" -o "$TMPDIR/${ASSET}.sha256"; then
+  echo "FATAL: could not fetch checksum ${URL}.sha256 — refusing to install an unverified binary" >&2
+  exit 1
 fi
+(cd "$TMPDIR" && $DIGEST_CMD -c "${ASSET}.sha256")
 tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR"
 install -d "$HOME/.local/bin"
 install -m 0755 "$TMPDIR/$BINARY" "$HOME/.local/bin/$BINARY"
