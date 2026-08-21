@@ -1054,3 +1054,124 @@ class TestStep3LocalVsRemoteCoverageGaps:
         assert pb.OLLAMA_BASE_URL == "http://localhost:11434"
         assert "OLLAMA_HOST" not in os.environ
         assert not any("OLLAMA_HOST" in m for m in warn_calls), warn_calls
+
+
+class TestShellRcKeyMaterial:
+    """Regression tests for issue #200 — no literal API key in the shell rc."""
+
+    _KEY_FILES = {
+        "ollama": "OLLAMA_KEY_FILE",
+        "llamacpp": "LLAMACPP_KEY_FILE",
+        "vllm": "VLLM_KEY_FILE",
+    }
+
+    @pytest.mark.parametrize("engine", ["ollama", "llamacpp", "vllm"])
+    def test_persist_rc_block_has_no_literal_key_and_keyfile_is_0600(
+        self, monkeypatch, tmp_path, engine
+    ):
+        monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+        _, wz = reload_modules()
+        fake_rc = tmp_path / ".zshrc"
+        fake_rc.write_text("# pre-existing rc content\n")
+        monkeypatch.setattr(wz, "_detect_shell_rc", lambda: fake_rc)
+
+        secret = f"{engine}-supersecret-key"
+        rc_path = wz._persist_remote_env_to_shell_rc(engine, "http://gpu-box.local:8000", secret)
+        assert rc_path == fake_rc
+
+        rc_body = fake_rc.read_text()
+        # Regression: the literal key must never appear in the rc.
+        assert secret not in rc_body
+        # Only a $(cat <keyfile>) exec-time reference is allowed.
+        key_file = getattr(wz.pb, self._KEY_FILES[engine])
+        _, key_var = wz._remote_env_var_names(engine)
+        assert f'export {key_var}="$(cat {key_file})"' in rc_body
+
+        # The backing keyfile exists, holds the secret, and is owner-only.
+        assert key_file.exists()
+        assert key_file.stat().st_mode & 0o777 == 0o600
+        assert key_file.read_text().strip() == secret
+
+    @pytest.mark.parametrize("engine", ["ollama", "llamacpp", "vllm"])
+    def test_sourcing_rc_resolves_key_at_exec_time(self, monkeypatch, tmp_path, engine):
+        import subprocess
+
+        monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+        _, wz = reload_modules()
+        fake_rc = tmp_path / ".bashrc"
+        monkeypatch.setattr(wz, "_detect_shell_rc", lambda: fake_rc)
+
+        secret = f"{engine}-exec-time-secret"
+        assert wz._persist_remote_env_to_shell_rc(engine, "http://gpu-box.local:8000", secret)
+
+        _, key_var = wz._remote_env_var_names(engine)
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"set -a && . '{fake_rc}' && eval printf '%s' \"\\${{{key_var}}}\"",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        # Sourcing the block yields exactly the key stored in the keyfile…
+        assert proc.stdout.strip() == secret
+        # …and even the sourced value never round-trips through the rc text.
+        assert secret not in fake_rc.read_text()
+
+    def test_empty_api_key_omits_key_line_entirely(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path))
+        _, wz = reload_modules()
+        fake_rc = tmp_path / ".zshrc"
+        monkeypatch.setattr(wz, "_detect_shell_rc", lambda: fake_rc)
+
+        rc_path = wz._persist_remote_env_to_shell_rc("vllm", "http://gpu-box.local:8000", "")
+        assert rc_path is not None
+        body = rc_path.read_text()
+        assert "VLLM_API_KEY" not in body
+        assert not wz.pb.VLLM_KEY_FILE.exists()
+
+    def test_write_secret_file_creates_owner_only_atomically(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path / "state"))
+        _, wz = reload_modules()
+
+        target = tmp_path / "nested" / "dir" / "api-key"
+        wz._write_secret_file(target, "k\n")
+        assert target.read_text() == "k\n"
+        assert target.stat().st_mode & 0o777 == 0o600
+
+    def test_write_secret_file_tightens_preexisting_loose_mode(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", str(tmp_path / "state"))
+        _, wz = reload_modules()
+
+        target = tmp_path / "api-key"
+        target.write_text("old\n")
+        target.chmod(0o644)
+        wz._write_secret_file(target, "new\n")
+        assert target.read_text() == "new\n"
+        assert target.stat().st_mode & 0o777 == 0o600
+
+    def test_no_write_then_chmod_remains_on_key_writing_sites(self, monkeypatch):
+        """
+        AC guard for issue #200: the three key-writing sites must go through
+        `_write_secret_file` (atomic 0600 creation); a plain write_text()
+        followed by chmod() must not come back.
+        """
+        import inspect
+
+        monkeypatch.setenv("CLAUDE_CODEX_LOCAL_STATE_DIR", "/tmp/ccl-guard-state")
+        _, wz = reload_modules()
+
+        for func_name in (
+            "_step_4_pick_model_9router_impl",
+            "_step_4_pick_model_openrouter_impl",
+            "_materialize_remote_api_key",
+            "_env_block",
+        ):
+            src = inspect.getsource(getattr(wz, func_name))
+            assert ".chmod(0o600)" not in src, (
+                f"{func_name} reintroduced a write-then-chmod sequence"
+            )
+        materialized_src = inspect.getsource(wz._materialize_remote_api_key)
+        assert "_write_secret_file(" in materialized_src

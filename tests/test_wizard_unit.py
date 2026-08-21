@@ -1796,7 +1796,15 @@ class TestStep3LocalVsRemotePrompt:
         # plain http://… and a hyphenated token round-trip un-quoted, which is
         # still a valid `export FOO=bar` line for both bash and zsh.
         assert "export LLAMACPP_BASE_URL=http://llama-box.local:8001" in rc_text
-        assert "export LLAMACPP_API_KEY=test-llamacpp-key" in rc_text
+        # Issue #200: the key must be referenced via a chmod-600 keyfile read
+        # at exec time — never written literally into the rc.
+        assert "test-llamacpp-key" not in rc_text
+        assert 'export LLAMACPP_API_KEY="$(cat ' in rc_text
+        key_file = pb.LLAMACPP_KEY_FILE
+        assert f'export LLAMACPP_API_KEY="$(cat {key_file})"' in rc_text
+        assert key_file.exists()
+        assert key_file.stat().st_mode & 0o777 == 0o600
+        assert key_file.read_text().strip() == "test-llamacpp-key"
         # The live module constants picked up the choice as well.
         assert pb.LLAMACPP_BASE_URL == "http://llama-box.local:8001"
         assert pb.LLAMACPP_API_KEY == "test-llamacpp-key"
