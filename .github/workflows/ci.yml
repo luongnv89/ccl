@@ -56,14 +56,18 @@ jobs:
           pip install -e ".[dev]" -c constraints-dev.txt
       - name: Run pytest with coverage
         run: |
-          python -m pytest -q --cov=claude_codex_local --cov-report=xml --cov-report=term-missing
+          python -m pytest -q --cov=claude_codex_local --cov-report=xml --cov-report=term-missing --cov-fail-under=79
+      - name: Coverage gate (report consumes the measured data)
+        if: matrix.python-version == '3.11'
+        run: python -m coverage report --fail-under=79
+
       - name: Upload coverage
         if: matrix.python-version == '3.11'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
           path: coverage.xml
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   e2e:
     name: CLI E2E smoke
