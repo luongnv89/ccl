@@ -21,11 +21,14 @@ Exports:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -143,39 +146,67 @@ def step_2_1_discover(
 # Step 2 — Defer install prompts
 # ---------------------------------------------------------------------------
 
-INSTALL_HINTS: dict[str, dict[str, str]] = {
+# Issue #194: every `npm install -g` invocation names a pinned version so the
+# wizard never pulls an unreviewed upstream release at install time.
+_NPM_PIN_CLAUDE = "2.1.238"
+_NPM_PIN_CODEX = "0.149.0"
+_NPM_PIN_PI = "0.84.2"
+_NPM_PIN_9ROUTER = "0.5.55"
+
+# Issue #194: install entries carry an explicit `runnable` classification.
+# Runnable entries execute an exact argv list (preferred over `bash -c`
+# strings — no shell interpolation, no pipes).  Non-runnable entries carry
+# display-only manual instructions and are never executed by the wizard.
+INSTALL_HINTS: dict[str, dict[str, Any]] = {
     "claude": {
         "name": "Claude Code CLI",
-        "cmd": "npm install -g @anthropic-ai/claude-code",
+        "runnable": True,
+        "argv": ["npm", "install", "-g", f"@anthropic-ai/claude-code@{_NPM_PIN_CLAUDE}"],
         "url": "https://docs.claude.com/claude-code",
     },
     "codex": {
         "name": "Codex CLI",
-        "cmd": "npm install -g @openai/codex",
+        "runnable": True,
+        "argv": ["npm", "install", "-g", f"@openai/codex@{_NPM_PIN_CODEX}"],
         "url": "https://github.com/openai/codex",
     },
     "pi": {
         "name": "Pi coding agent",
-        "cmd": "npm install -g @earendil-works/pi-coding-agent",
+        "runnable": True,
+        "argv": ["npm", "install", "-g", f"@earendil-works/pi-coding-agent@{_NPM_PIN_PI}"],
         "url": "https://pi.dev/",
     },
     "ollama": {
         "name": "Ollama",
-        "cmd": "curl -fsSL https://ollama.com/install.sh | sh",
+        # Issue #194: the official install.sh is never piped into a shell.
+        # Not runnable as a plain command — _ensure_tool routes ollama through
+        # _install_ollama(), which downloads the script to a temp file, shows
+        # its URL + SHA-256 and requires an explicit non-default confirmation
+        # before executing it.
+        "runnable": False,
+        "cmd": (
+            "# Installed by the wizard via a guarded download: fetch "
+            "https://ollama.com/install.sh to a temp file, show its SHA-256, "
+            "then ask before executing"
+        ),
         "url": "https://ollama.com",
     },
     "lmstudio": {
         "name": "LM Studio",
+        "runnable": False,
         "cmd": "# Download from https://lmstudio.ai, then: npx lmstudio install-cli",
         "url": "https://lmstudio.ai",
     },
     "llamacpp": {
         "name": "llama.cpp",
-        "cmd": "brew install llama.cpp   # or build from https://github.com/ggml-org/llama.cpp",
+        "runnable": True,
+        "argv": ["brew", "install", "llama.cpp"],
+        "note": "or build from https://github.com/ggml-org/llama.cpp",
         "url": "https://github.com/ggml-org/llama.cpp",
     },
     "vllm": {
         "name": "vLLM",
+        "runnable": False,
         "cmd": (
             "pip install vllm  &&  "
             "vllm serve <hf-model-id> --host 0.0.0.0 --port 8000   "
@@ -185,25 +216,37 @@ INSTALL_HINTS: dict[str, dict[str, str]] = {
     },
     "9router": {
         "name": "9router",
-        "cmd": "npm install -g 9router  # OpenAI-compatible API at http://localhost:20128/v1",
+        "runnable": True,
+        "argv": ["npm", "install", "-g", f"9router@{_NPM_PIN_9ROUTER}"],
+        # OpenAI-compatible API at http://localhost:20128/v1
         "url": "https://github.com/decolua/9router",
     },
     "openrouter": {
         "name": "OpenRouter",
+        "runnable": False,
         "cmd": "Get an API key at https://openrouter.ai/keys (no install required — hosted SaaS)",
         "url": "https://openrouter.ai/docs",
     },
     "huggingface-cli": {
         "name": "Hugging Face CLI",
-        "cmd": "pip install 'huggingface_hub[cli]'",
+        "runnable": True,
+        "argv": ["pip", "install", "huggingface_hub[cli]"],
         "url": "https://huggingface.co/docs/huggingface_hub/guides/cli",
     },
     "llmfit": {
         "name": "llmfit",
+        "runnable": False,
         "cmd": "See docs/poc-bootstrap.md for the install script",
         "url": "https://github.com/AlexsJones/llmfit",
     },
 }
+
+
+def _hint_display_cmd(hint: dict[str, Any]) -> str:
+    """Render an install entry for display; argv lists join without a shell."""
+    if hint.get("argv"):
+        return shlex.join(hint["argv"])
+    return hint.get("cmd", "")
 
 
 def step_2_2_install_missing(state: WizardState, non_interactive: bool = False) -> bool:
@@ -240,7 +283,10 @@ def _show_install_hint(key: str) -> None:
     if not fallback_hint:
         return
     console.print(f"\n[bold]{fallback_hint['name']}[/bold] → {fallback_hint['url']}")
-    console.print(f"    [cyan]{fallback_hint['cmd']}[/cyan]")
+    console.print(f"    [cyan]{_hint_display_cmd(fallback_hint)}[/cyan]")
+    note = fallback_hint.get("note")
+    if note:
+        console.print(f"    [dim]# {note}[/dim]")
 
 
 # Issue #194: the installer must be fail-closed — `set -euo pipefail` aborts on
@@ -289,11 +335,67 @@ llmfit --version
 """
 
 
+_OLLAMA_INSTALL_URL = "https://ollama.com/install.sh"
+
+
+def _install_ollama() -> bool:
+    """
+    Install ollama without ever piping a remote script into a shell (#194).
+
+    The official install script is downloaded to a temporary file, its source
+    URL and SHA-256 digest are displayed, and it is only executed after the
+    user explicitly confirms — the confirmation prompt defaults to No.
+    """
+    sp = _resolved_subprocess()
+    tmpdir = Path(tempfile.mkdtemp(prefix="ollama-install-"))
+    try:
+        script_path = tmpdir / "install.sh"
+        try:
+            sp.run(
+                ["curl", "-fsSL", _OLLAMA_INSTALL_URL, "-o", str(script_path)],
+                check=True,
+            )
+        except sp.CalledProcessError as exc:
+            fail(f"Failed to download the ollama install script: {exc}")
+            return False
+        except OSError as exc:
+            fail(f"curl is required to download the install script: {exc}")
+            return False
+        digest = hashlib.sha256(script_path.read_bytes()).hexdigest()
+        console.print(
+            "\n[bold]Ollama install script[/bold]\n"
+            f"    URL: {_OLLAMA_INSTALL_URL}\n"
+            f"    SHA-256: {digest}"
+        )
+        execute = questionary.confirm(
+            f"Execute the downloaded script ({script_path}) now?",
+            default=False,
+        ).ask()
+        if not execute:
+            warn("Ollama install aborted — the downloaded script was discarded.")
+            return False
+        try:
+            sp.run(["sh", str(script_path)], check=True)
+        except sp.CalledProcessError as exc:
+            fail(f"ollama install failed: {exc}")
+            return False
+        except OSError as exc:
+            fail(f"sh is required to execute the install script: {exc}")
+            return False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return True
+
+
 def _ensure_tool(key: str) -> bool:
     """
     Offer to install a tool by key (matching INSTALL_HINTS).
-    For tools with a runnable install command (ollama, llamacpp, claude, codex,
-    pi, huggingface-cli) the command is executed directly.
+    For tools with a runnable entry (llamacpp, claude, codex, pi,
+    huggingface-cli, 9router) the exact argv list is executed directly —
+    never a `bash -c` shell string (#194).  Ollama goes through a
+    guarded download-and-verify flow (_install_ollama): the script is fetched
+    to a temp file, its SHA-256 is shown, and execution requires an explicit
+    non-default confirmation (#194).
     For 9router the npm package is installed, but the long-running daemon
     must be started manually by the user.  For tools requiring manual steps
     (lmstudio, vllm) the hint is shown
@@ -335,7 +437,7 @@ def _ensure_tool(key: str) -> bool:
                 )
                 return False
             install = questionary.confirm(
-                "Install 9router globally now via [npm install -g 9router]?",
+                f"Install 9router globally now via [npm install -g 9router@{_NPM_PIN_9ROUTER}]?",
                 default=True,
             ).ask()
             if not install:
@@ -345,9 +447,11 @@ def _ensure_tool(key: str) -> bool:
                 )
                 return False
             try:
-                _resolved_subprocess().run(["npm", "install", "-g", "9router"], check=True)
+                _resolved_subprocess().run(
+                    ["npm", "install", "-g", f"9router@{_NPM_PIN_9ROUTER}"], check=True
+                )
             except _resolved_subprocess().CalledProcessError as exc:
-                fail(f"npm install -g 9router failed: {exc}")
+                fail(f"npm install -g 9router@{_NPM_PIN_9ROUTER} failed: {exc}")
                 return False
             ok("9router installed.")
         # The dashboard server is long-running — we don't fork-spawn it from
@@ -415,20 +519,41 @@ def _ensure_tool(key: str) -> bool:
             pb.invalidate_machine_profile_inproc_cache()
         return present
 
-    # All other tools have a runnable one-liner.
+    # All other tools install straight from their classified INSTALL_HINTS entry.
     hint = INSTALL_HINTS.get(key, {})
-    cmd_str = hint.get("cmd", "")
-    install = questionary.confirm(
-        f"Run install command now?  [{cmd_str}]",
-        default=True,
-    ).ask()
-    if not install:
-        return False
+    if key == "ollama":
+        # Issue #194: the install script must never be piped into a shell.
+        # _install_ollama() downloads it to a temp file, shows its URL and
+        # SHA-256 and only executes it after an explicit non-default
+        # confirmation.
+        if not _install_ollama():
+            return False
+    elif hint.get("runnable") and hint.get("argv"):
+        # Issue #194: runnable entries execute an exact argv list — never a
+        # `bash -c` shell string, so no interpolation and no pipe-to-shell.
+        install_argv = list(hint["argv"])
+        install = questionary.confirm(
+            f"Run install command now?  [{shlex.join(install_argv)}]",
+            default=True,
+        ).ask()
+        if not install:
+            return False
 
-    try:
-        _resolved_subprocess().run(["bash", "-c", cmd_str], check=True)
-    except _resolved_subprocess().CalledProcessError as exc:
-        fail(f"Install failed: {exc}")
+        try:
+            _resolved_subprocess().run(install_argv, check=True)
+        except _resolved_subprocess().CalledProcessError as exc:
+            fail(f"Install failed: {exc}")
+            return False
+        except OSError as exc:
+            fail(f"Install command could not be executed: {exc}")
+            return False
+    else:
+        # Defensive (#194): an unclassified or non-runnable hint must never be
+        # shell-executed behind a confirm prompt.
+        warn(
+            f"No automated installer for {key} — follow the manual steps "
+            "shown above, then re-run the wizard."
+        )
         return False
 
     if not pb.command_version(detect_cmd).get("present"):
