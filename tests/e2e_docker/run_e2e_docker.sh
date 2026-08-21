@@ -7,12 +7,13 @@
 #   2. uv install    — install via uv from pre-built wheel
 #   3. from source   — install with `pip install .`
 #   4. with extras   — install with `pip install .[dev]`
+#   5. installer     — install via the curl ... | install.sh one-liner
 #
 # Usage:
 #   bash tests/e2e_docker/run_e2e_docker.sh [--scenario <name>]
 #
 # Options:
-#   --scenario <name>   Run only the named scenario (pip|uv|source|extras).
+#   --scenario <name>   Run only the named scenario (pip|uv|source|extras|installer).
 #                       Omit to run all scenarios.
 #   --no-cleanup        Skip removing Docker images after the run.
 #
@@ -134,6 +135,12 @@ run_all() {
   if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "extras" ]]; then
     run_scenario "extras" \
       "$DOCKER_DIR/Dockerfile.extras" \
+      "$REPO"
+  fi
+
+  if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "installer" ]]; then
+    run_scenario "installer" \
+      "$DOCKER_DIR/Dockerfile.installer" \
       "$REPO"
   fi
 
