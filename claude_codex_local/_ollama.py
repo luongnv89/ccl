@@ -31,7 +31,8 @@ def _ollama_http_models(timeout: int = 5) -> list[dict[str, Any]] | None:
     url = f"{ollama_base_url()}/api/tags"
     req = urllib.request.Request(url, headers=_auth_headers(OLLAMA_API_KEY), method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # OLLAMA_HOST is scheme-validated by _normalize_base_url at import time.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             body = json.loads(resp.read())
     except (urllib.error.URLError, OSError):
         return None
@@ -143,7 +144,8 @@ def smoke_test_ollama_model(
     req = urllib.request.Request(url, data=payload, headers=_auth_headers(OLLAMA_API_KEY))
     start = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        # OLLAMA_HOST is scheme-validated by _normalize_base_url at import time.
+        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
             body = json.loads(resp.read())
         wall_seconds = time.time() - start
         text = str(body.get("response", "")).strip()

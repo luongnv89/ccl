@@ -298,13 +298,13 @@ def test_ollama_without_api_key_keeps_placeholder_env(monkeypatch, tmp_path):
 
     claude = wz._wire_claude("ollama", "qwen:7b")
     assert claude is not None
-    assert claude.env["ANTHROPIC_API_KEY"] == "ollama"
+    assert claude.env["ANTHROPIC_API_KEY"] == "ollama"  # pragma: allowlist secret
     assert not wz.pb.OLLAMA_KEY_FILE.exists()
     assert claude.raw_env == {}
 
     codex = wz._wire_codex("ollama", "qwen:7b")
     assert codex is not None
-    assert codex.env["OPENAI_API_KEY"] == "ollama"
+    assert codex.env["OPENAI_API_KEY"] == "ollama"  # pragma: allowlist secret
     assert codex.raw_env == {}
 
     assert wz._pi_api_key_for_engine("ollama") == "ollama"
@@ -382,7 +382,7 @@ def test_verify_materializes_remote_keyfile_raw_env(monkeypatch, tmp_path):
     claude = wz._wire_claude("ollama", "qwen:7b")
     assert claude is not None
     resolved = wz._materialize_raw_env(dict(claude.raw_env))
-    assert resolved["ANTHROPIC_API_KEY"] == "ollama-env-key"
+    assert resolved["ANTHROPIC_API_KEY"] == "ollama-env-key"  # pragma: allowlist secret
     assert resolved["ANTHROPIC_AUTH_TOKEN"] == "ollama-env-key"
 
 
@@ -532,7 +532,7 @@ def test_verify_materializes_vllm_keyfile_raw_env(monkeypatch, tmp_path):
 
     monkeypatch.setattr(wz.subprocess, "run", fake_run)
     assert wz.step_2_7_verify(state, non_interactive=True) is True
-    assert captured["env"]["ANTHROPIC_API_KEY"] == "from-file"
+    assert captured["env"]["ANTHROPIC_API_KEY"] == "from-file"  # pragma: allowlist secret
     assert captured["env"]["ANTHROPIC_AUTH_TOKEN"] == "from-file"
 
 
@@ -953,7 +953,7 @@ class TestStep3LocalVsRemoteCoverageGaps:
         assert len(password_calls) == 1
         assert "llamacpp" in password_calls[0]
         assert pb.LLAMACPP_BASE_URL == "http://llama-box.local:8001"
-        assert pb.LLAMACPP_API_KEY == "a-llamacpp-key"
+        assert pb.LLAMACPP_API_KEY == "a-llamacpp-key"  # pragma: allowlist secret
 
     # -- Bullet 3: vllm remote DOES prompt for API key ----------------------
 
@@ -989,7 +989,7 @@ class TestStep3LocalVsRemoteCoverageGaps:
         assert len(password_calls) == 1
         assert "vllm" in password_calls[0]
         assert pb.VLLM_BASE_URL == "http://gpu-box.local:8000"
-        assert pb.VLLM_API_KEY == "a-vllm-key"
+        assert pb.VLLM_API_KEY == "a-vllm-key"  # pragma: allowlist secret
 
     # -- Bullet 4: picking Local resets a remote env-seeded base URL --------
 

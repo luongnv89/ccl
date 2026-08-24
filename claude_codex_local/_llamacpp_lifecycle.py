@@ -63,7 +63,8 @@ def llamacpp_info() -> dict[str, Any]:
     health_url = f"{base_url}/health"
     req = urllib.request.Request(health_url, headers=_auth_headers(LLAMACPP_API_KEY), method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        # LLAMACPP_BASE_URL is scheme-validated by _normalize_base_url.
+        with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
             base["server_running"] = resp.status in (200, 503)
     except (urllib.error.URLError, OSError):
         return base
@@ -78,7 +79,8 @@ def llamacpp_info() -> dict[str, Any]:
     models_url = f"{base_url}/v1/models"
     req = urllib.request.Request(models_url, headers=_auth_headers(LLAMACPP_API_KEY), method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        # LLAMACPP_BASE_URL is scheme-validated by _normalize_base_url.
+        with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
             body = json.loads(resp.read())
             models_data = body.get("data", [])
             base["model"] = models_data[0]["id"] if models_data else None
@@ -481,7 +483,8 @@ def llamacpp_wait_until_ready(
         if proc is not None and proc.poll() is not None:
             return False
         try:
-            with urllib.request.urlopen(url, timeout=2) as resp:
+            # LLAMACPP_BASE_URL is scheme-validated by _normalize_base_url.
+            with urllib.request.urlopen(url, timeout=2) as resp:  # nosec B310
                 if resp.status == 200:
                     return True
         except (urllib.error.URLError, OSError):
@@ -874,7 +877,8 @@ def smoke_test_llamacpp_model(
     req = urllib.request.Request(url, data=payload, headers=_auth_headers(LLAMACPP_API_KEY))
     start = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        # LLAMACPP_BASE_URL is scheme-validated; response is a small JSON completion.
+        with urllib.request.urlopen(req, timeout=120) as resp:  # nosec B310
             body = json.loads(resp.read())
         duration_seconds = max(time.time() - start, 1e-6)
         choice = body["choices"][0]

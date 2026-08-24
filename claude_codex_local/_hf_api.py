@@ -215,7 +215,8 @@ def huggingface_search_models(
         params = urllib.parse.urlencode({"search": query.strip(), "limit": limit})
         url = f"https://huggingface.co/api/models?{params}"
         req = urllib.request.Request(url, headers={"User-Agent": "claude-codex-local"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # Fixed https://huggingface.co API host built from a validated repo id.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             body = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         if raise_on_error:
@@ -275,7 +276,8 @@ def huggingface_list_repo_files(
         encoded = urllib.parse.quote(repo_id.strip(), safe="/")
         url = f"https://huggingface.co/api/models/{encoded}"
         req = urllib.request.Request(url, headers={"User-Agent": "claude-codex-local"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # Fixed https://huggingface.co API host built from a validated repo id.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             body = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         return []

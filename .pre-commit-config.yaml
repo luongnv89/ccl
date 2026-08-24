@@ -30,16 +30,20 @@ repos:
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
     hooks:
+      # Whole package is in scope; per-line `# nosec B310` comments carry the
+      # justifications instead of a blanket --skip list.
       - id: bandit
-        args: [-q, -ll, --skip, "B310,B404,B603,B607"]
-        files: ^claude_codex_local/(core|wizard)\.py$
+        args: [-q, -ll]
+        files: ^claude_codex_local/
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
         args: [--baseline, .secrets.baseline]
-        exclude: ^(\.claude-codex-local/|tests/|.*\.lock$|\.secrets\.baseline$)
+        # tests/ is scanned like any other code; secret-shaped fixture strings
+        # carry inline `# pragma: allowlist secret` markers instead.
+        exclude: ^(\.claude-codex-local/|\.venv/|.*\.lock$|\.secrets\.baseline$)
 
   - repo: local
     hooks:
@@ -59,6 +63,13 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+
+      - id: check-bash-c
+        name: gate bash -c shell-outs (issue #201 allowlist)
+        entry: bash -c 'PY="${PWD}/.venv/bin/python"; [ -x "$PY" ] || PY=python3; "$PY" scripts/check_bash_c.py'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
 
       - id: e2e-cli
         name: CLI end-to-end smoke

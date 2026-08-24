@@ -142,8 +142,8 @@ def test_save_message_redacts_secrets(temp_state_dir, temp_session_dir):
     agent_id = "redact-agent"
     secrets = {
         "openai": "sk-1234567890abcdef1234567890abcdef",
-        "aws": "AKIAIOSFODNN7EXAMPLE",
-        "github": "ghp_1234567890abcdef1234567890abcdef1234",
+        "aws": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+        "github": "ghp_1234567890abcdef1234567890abcdef1234",  # pragma: allowlist secret
     }
     message = SessionMessage(
         role="user",
@@ -164,7 +164,7 @@ def test_sync_session_redacts_secrets(temp_state_dir, temp_session_dir):
     """Synced rows must be redacted and keep the source agent_id."""
     source = "claude"
     target = "codex"
-    secret = "sk-1234567890abcdef1234567890abcdef"
+    secret = "sk-1234567890abcdef1234567890abcdef"  # pragma: allowlist secret
     message = SessionMessage(
         role="user",
         content=f"token={secret}",

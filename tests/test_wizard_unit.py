@@ -644,7 +644,7 @@ class TestWireCodex:
         result = wiz._wire_codex("lmstudio", "qwen/qwen3-coder-30b")
         assert result.argv == ["codex", "-m", "qwen/qwen3-coder-30b"]
         assert result.env["OPENAI_BASE_URL"] == f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
-        assert result.env["OPENAI_API_KEY"] == "lmstudio"
+        assert result.env["OPENAI_API_KEY"] == "lmstudio"  # pragma: allowlist secret
 
     def test_llamacpp_path(self, isolated_state):
         _, wiz, _ = isolated_state
@@ -719,7 +719,7 @@ class TestWirePi:
         provider = models["providers"]["ccl-ollama"]
         assert provider["baseUrl"] == "http://localhost:11434/v1"
         assert provider["api"] == "openai-completions"
-        assert provider["apiKey"] == "ollama"
+        assert provider["apiKey"] == "ollama"  # pragma: allowlist secret
         assert provider["compat"]["supportsDeveloperRole"] is False
         assert provider["models"][0]["id"] == "qwen2.5-coder:7b"
         assert not (pb.STATE_DIR / "pi-agent").exists()
@@ -734,7 +734,9 @@ class TestWirePi:
             models["providers"]["ccl-lmstudio"]["baseUrl"]
             == f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
         )
-        assert models["providers"]["ccl-lmstudio"]["apiKey"] == "lmstudio"
+        assert (
+            models["providers"]["ccl-lmstudio"]["apiKey"] == "lmstudio"
+        )  # pragma: allowlist secret
 
     def test_9router_uses_keyfile_command_not_literal_key(self, isolated_state):
         pb, wiz, _ = isolated_state
@@ -788,7 +790,7 @@ class TestWirePi:
                         "existing": {
                             "baseUrl": "https://example.test/v1",
                             "api": "openai-completions",
-                            "apiKey": "existing-key",
+                            "apiKey": "existing-key",  # pragma: allowlist secret
                             "models": [{"id": "existing-model"}],
                         }
                     }
@@ -871,7 +873,7 @@ class TestHelperScriptWriter:
             argv=["claude", "--model", "qwen/qwen2.5-coder-7b"],
             env={
                 "ANTHROPIC_BASE_URL": f"http://localhost:{pb.LMS_SERVER_PORT}",
-                "ANTHROPIC_API_KEY": "lmstudio",
+                "ANTHROPIC_API_KEY": "lmstudio",  # pragma: allowlist secret
             },
             effective_tag="qwen/qwen2.5-coder-7b",
         )
@@ -1807,7 +1809,7 @@ class TestStep3LocalVsRemotePrompt:
         assert key_file.read_text().strip() == "test-llamacpp-key"
         # The live module constants picked up the choice as well.
         assert pb.LLAMACPP_BASE_URL == "http://llama-box.local:8001"
-        assert pb.LLAMACPP_API_KEY == "test-llamacpp-key"
+        assert pb.LLAMACPP_API_KEY == "test-llamacpp-key"  # pragma: allowlist secret
 
 
 class TestTargetedPreferenceRefresh:
@@ -5872,7 +5874,7 @@ class TestStep5SmokeTestOpenRouter:
         )
         assert wiz.step_2_5_smoke_test(state, non_interactive=True) is True
         assert seen["model"] == "anthropic/claude-sonnet-4.6"
-        assert seen["api_key"] == "openrouter-test-key"
+        assert seen["api_key"] == "openrouter-test-key"  # pragma: allowlist secret
         assert state.smoke_test_result["ok"] is True
         assert state.smoke_test_result["model"] == "anthropic/claude-sonnet-4.6"
 

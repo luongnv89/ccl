@@ -89,7 +89,7 @@ def _stub_candidates(*a, **k):
             "memory_required_gb": 18,
             "best_quant": "mlx-4bit",
             "ollama_tag": "qwen3-coder:30b",
-            "lms_mlx_path": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",
+            "lms_mlx_path": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-4bit",  # pragma: allowlist secret
             "lms_hub_name": "qwen/qwen3-coder-30b",
         }
     ]

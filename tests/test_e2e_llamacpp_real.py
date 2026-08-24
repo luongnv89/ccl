@@ -43,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_TEST_PORT = 18001
 
 # Tiny model — ~90 MB download, loads in ~2 s on Apple Silicon.
-MODEL_REPO = "bartowski/SmolLM2-135M-Instruct-GGUF"
+MODEL_REPO = "bartowski/SmolLM2-135M-Instruct-GGUF"  # pragma: allowlist secret
 MODEL_FILE = "SmolLM2-135M-Instruct-Q4_K_M.gguf"
 
 # Where to cache the model for tests (avoid polluting the user's HF cache dir).
