@@ -43,8 +43,11 @@ def trusted_raw_env_path(expr: object) -> Path | None:
 
     A trusted expression is exactly what this codebase writes into
     ``WireResult.raw_env``: a double-quoted ``"$(cat <path>)"`` whose path
-    survives ``shlex.split`` intact. Anything else — including shell
-    metacharacters — yields None and must never be executed.
+    survives ``shlex.split`` intact and whose canonical reconstruction
+    (``shlex.quote`` of the resolved path) reproduces the original byte
+    for byte. Anything else — including shell metacharacters or a second
+    command substitution such as ``"$(cat a)$(id)"`` — yields None and
+    must never be executed.
     """
     if not isinstance(expr, str):
         return None
@@ -57,7 +60,10 @@ def trusted_raw_env_path(expr: object) -> Path | None:
         return None
     if len(parts) != 2 or parts[0] != "cat":
         return None
-    return Path(parts[1])
+    path = Path(parts[1])
+    if expr != f'"$(cat {shlex.quote(str(path))})"':
+        return None
+    return path
 
 
 def valid_env_var_name(key: object) -> bool:

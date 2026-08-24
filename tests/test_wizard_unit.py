@@ -188,6 +188,25 @@ class TestWizardState:
             "ANTHROPIC_API_KEY": '"$(cat /tmp/k2)"',
         }
 
+    def test_wizard_state_load_rejects_compound_substitution_raw_env(self, isolated_state):
+        """A second command substitution inside the cat expression must not load."""
+        _, wiz, state_dir = isolated_state
+        self._write_state_with_wire_result(
+            wiz,
+            state_dir,
+            {
+                "argv": ["claude"],
+                "env": {},
+                "effective_tag": "x",
+                "raw_env": {"ANTHROPIC_AUTH_TOKEN": '"$(cat a)$(id)"'},
+            },
+        )
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.wire_result == {}
+        assert "is not a trusted" in cap.get()
+        assert len(list(state_dir.glob("wizard-state.json.invalid-*.bak"))) == 1
+
 
 # ---------------------------------------------------------------------------
 # Step 5.5 benchmark — optional and non-blocking.
@@ -1051,6 +1070,19 @@ class TestHelperScriptWriter:
         body = path.read_text()
         assert 'export ANTHROPIC_AUTH_TOKEN="$(cat /tmp/key)"' in body
 
+    def test_raw_env_compound_substitution_aborts_helper_script_write(self, isolated_state):
+        """A second command substitution must not land executable shell code on disk."""
+        _, wiz, state_dir = isolated_state
+        result = wiz.WireResult(
+            argv=["claude"],
+            env={},
+            effective_tag="x",
+            raw_env={"ANTHROPIC_AUTH_TOKEN": '"$(cat a)$(id)"'},
+        )
+        with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
+            wiz._write_helper_script("claude", result)
+        assert not (state_dir / "bin" / "cc").exists()
+
 
 class TestRawEnvRunGate:
     """The `ccl run` one-shot bash subshell must gate raw_env (issue #203)."""
@@ -1080,6 +1112,17 @@ class TestRawEnvRunGate:
         monkeypatch.setattr(wiz, "subprocess", _Boom)
         with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
             wcli._resolve_wire_env(self._wire_result({"ANTHROPIC_AUTH_TOKEN": '"$(id)"'}))
+
+    def test_raw_env_compound_substitution_aborts_before_bash(self, monkeypatch):
+        """`"$(cat a)$(id)"` must be rejected, not partially evaluated."""
+        import claude_codex_local.wizard_cli as wcli
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("bash must never see a compound-substitution raw_env")
+
+        monkeypatch.setattr(wcli.subprocess, "run", _boom)
+        with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
+            wcli._resolve_wire_env(self._wire_result({"ANTHROPIC_AUTH_TOKEN": '"$(cat a)$(id)"'}))
 
     def test_raw_env_trusted_cat_expression_is_materialized(
         self, isolated_state, monkeypatch, tmp_path
