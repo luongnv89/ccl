@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+import claude_codex_local._llamacpp_lifecycle as lifecycle_mod
 import claude_codex_local.core as pb
 import claude_codex_local.engines as engines_pkg
 import claude_codex_local.engines.registry as registry
@@ -156,3 +157,189 @@ class TestEngineLifecycleCliE2E:
         assert data["engine"] == "vllm"
         assert data["action"] == "benchmark"
         assert data["data"]["dry_run"] is True
+
+
+def _write_pid_record_file(path, pid: int, **overrides):
+    record = {"pid": pid, "create_time": "1000", "boot_id": "b0", "image": "llama-server"}
+    record.update(overrides)
+    path.write_text(json.dumps(record))
+    return record
+
+
+class TestLlamaCppLifecyclePidSafety:
+    """F-BUG-005: a persisted pid file must never cause an unrelated process
+    to be signalled. The recorded (pid, create_time, boot_id) plus the live
+    process image are re-verified before any signal; signalling is
+    single-PID (no killpg)."""
+
+    def test_recycled_pid_with_foreign_create_time_is_not_signalled(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(lifecycle_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        _write_pid_record_file(pid_file, 4242)
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            lifecycle_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
+        )
+        monkeypatch.setattr(lifecycle_mod, "_pid_gone", lambda pid: False)
+        monkeypatch.setattr(lifecycle_mod, "_read_boot_id", lambda: "b0")
+        # The live process at PID 4242 was created after the recorded one:
+        # the PID was recycled by an unrelated process.
+        monkeypatch.setattr(lifecycle_mod, "_process_start_marker", lambda pid: "9999")
+
+        out = pb_mod.llamacpp_stop_server_by_port(8001)
+
+        assert out["ok"] is False
+        assert out["pid"] == 4242
+        assert signals == [], "a recycled PID belonging to an unrelated process was signalled"
+        assert "create-time-mismatch" in out["error"]
+        assert not pid_file.exists()
+
+    def test_boot_id_mismatch_is_not_signalled(self, isolated_state, monkeypatch, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(lifecycle_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        _write_pid_record_file(pid_file, 4242, boot_id="previous-boot")
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            lifecycle_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
+        )
+        monkeypatch.setattr(lifecycle_mod, "_pid_gone", lambda pid: False)
+        monkeypatch.setattr(lifecycle_mod, "_read_boot_id", lambda: "current-boot")
+        monkeypatch.setattr(lifecycle_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(lifecycle_mod, "_process_image_name", lambda pid: "llama-server")
+
+        out = pb_mod.llamacpp_stop_server_by_port(8001)
+
+        assert out["ok"] is False
+        assert signals == []
+        assert "boot-id-mismatch" in out["error"]
+
+    def test_matching_record_signals_single_recorded_pid(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(lifecycle_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        _write_pid_record_file(pid_file, 4242)
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            lifecycle_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
+        )
+        monkeypatch.setattr(lifecycle_mod, "_pid_gone", lambda pid: False)
+        monkeypatch.setattr(lifecycle_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(lifecycle_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(lifecycle_mod, "_process_image_name", lambda pid: "llama-server")
+
+        def _gone(pid):
+            # Alive until the first signal lands, then gone.
+            return bool(signals)
+
+        monkeypatch.setattr(lifecycle_mod, "_pid_gone", _gone)
+        monkeypatch.setattr(pb_mod.time, "sleep", lambda _s: None)
+
+        out = pb_mod.llamacpp_stop_server_by_port(8001, grace_seconds=0.1)
+
+        assert out["ok"] is True
+        # Exactly the recorded PID was signalled — no process-group signal.
+        assert (4242, 15) in signals
+        assert all(pid == 4242 for pid, _sig in signals)
+        assert not pid_file.exists()
+
+    def test_process_image_mismatch_is_not_signalled(self, isolated_state, monkeypatch, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(lifecycle_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        _write_pid_record_file(pid_file, 4242)
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            lifecycle_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
+        )
+        monkeypatch.setattr(lifecycle_mod, "_pid_gone", lambda pid: False)
+        monkeypatch.setattr(lifecycle_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(lifecycle_mod, "_process_start_marker", lambda pid: "1000")
+        # Same boot, same create time, but the image is now something else.
+        monkeypatch.setattr(lifecycle_mod, "_process_image_name", lambda pid: "yes")
+
+        out = pb_mod.llamacpp_stop_server_by_port(8001)
+
+        assert out["ok"] is False
+        assert signals == []
+        assert "process-image-mismatch" in out["error"]
+
+    def test_legacy_plain_pid_file_is_refused(self, isolated_state, monkeypatch, tmp_path):
+        """Pid files written by older ccl versions carry no verifiable
+        identity — they must never be signalled."""
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(lifecycle_mod, "LLAMACPP_PID_DIR", tmp_path)
+        pid_file = tmp_path / "llama-server-8001.pid"
+        pid_file.write_text("4242")
+
+        signals: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            lifecycle_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
+        )
+
+        out = pb_mod.llamacpp_stop_server_by_port(8001)
+
+        assert out["ok"] is False
+        assert out["pid"] is None
+        assert signals == []
+        assert "unrecognized pid-file format" in out["error"]
+
+    def test_keyboard_interrupt_during_readiness_wait_stops_server_and_removes_pid_file(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        """F-BUG-006: Ctrl-C while waiting for readiness must stop the child
+        and remove the pid file before re-raising."""
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(
+            lifecycle_mod,
+            "llamacpp_detect",
+            lambda: {"present": True, "binary": "llama-server"},
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name: "/usr/local/bin/llama-server" if name == "llama-server" else None,
+        )
+        model_file = tmp_path / "fake.gguf"
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 424242
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        # Keep the pid-record probes off the real /proc and ps so the fake
+        # PID never triggers a live process lookup or a ps subprocess.
+        monkeypatch.setattr(lifecycle_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(lifecycle_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(lifecycle_mod, "_process_image_name", lambda pid: "llama-server")
+
+        def _raise_interrupt(**kw):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(lifecycle_mod, "llamacpp_wait_until_ready", _raise_interrupt)
+
+        stopped: list = []
+        monkeypatch.setattr(
+            lifecycle_mod,
+            "llamacpp_stop_server",
+            lambda h, **kw: stopped.append(h) or True,
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            pb_mod.llamacpp_start_server(model_path=str(model_file), port=18042)
+
+        assert len(stopped) == 1
+        assert stopped[0].pid == 424242
+        assert not (pb_mod.LLAMACPP_PID_DIR / "llama-server-18042.pid").exists()
