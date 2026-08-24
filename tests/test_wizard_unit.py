@@ -735,8 +735,8 @@ class TestWirePi:
             == f"http://localhost:{pb.LMS_SERVER_PORT}/v1"
         )
         assert (
-            models["providers"]["ccl-lmstudio"]["apiKey"] == "lmstudio"
-        )  # pragma: allowlist secret
+            models["providers"]["ccl-lmstudio"]["apiKey"] == "lmstudio"  # pragma: allowlist secret
+        )
 
     def test_9router_uses_keyfile_command_not_literal_key(self, isolated_state):
         pb, wiz, _ = isolated_state
