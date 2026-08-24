@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -117,7 +117,7 @@ def _file_fallback_ts(path: Path) -> str:
         ts = path.stat().st_mtime
     except OSError:
         return ""
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat()
 
 
 def read_claude(path: Path) -> list[SessionMessage]:

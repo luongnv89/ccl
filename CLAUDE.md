@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Python 3.10+ CLI (`ccl`, package `claude_codex_local`) that wires local LLM
+Python 3.11+ CLI (`ccl`, package `claude_codex_local`) that wires local LLM
 engines — Ollama, LM Studio, llama.cpp, vLLM, OpenRouter, 9router — into
 coding-agent harnesses.
 

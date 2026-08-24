@@ -4,7 +4,7 @@ This document covers local development setup, tooling, and debugging.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - git
 - At least one engine installed for integration tests: Ollama, LM Studio, vLLM, or llama.cpp
 - (Optional) `llmfit` on `PATH`

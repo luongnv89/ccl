@@ -58,15 +58,15 @@ detect_os() {
 
 check_python() {
     if ! command -v "$CCL_PYTHON" >/dev/null 2>&1; then
-        die "Python not found. Install Python 3.10+ and re-run, or set CCL_PYTHON=/path/to/python3."
+        die "Python not found. Install Python 3.11+ and re-run, or set CCL_PYTHON=/path/to/python3."
     fi
     local ver
     ver="$("$CCL_PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
     local major minor
     major="${ver%.*}"
     minor="${ver#*.}"
-    if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 10 ]; }; then
-        die "Python >= 3.10 required, found $ver at $(command -v "$CCL_PYTHON")."
+    if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 11 ]; }; then
+        die "Python >= 3.11 required, found $ver at $(command -v "$CCL_PYTHON")."
     fi
     ok "Python $ver at $(command -v "$CCL_PYTHON")"
 }
