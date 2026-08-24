@@ -9,9 +9,11 @@ from claude_codex_local._config import (
     OPENROUTER_BASE_URL,
     OPENROUTER_KEY_FILE,
     ROUTER9_BASE_URL,
+    _ensure_http_url,
     _is_local_base_url,
     _normalize_base_url,
     _probe_openai_models_endpoint,
+    _read_bounded,
 )
 from claude_codex_local._shell import (
     _auth_headers,
@@ -241,10 +243,11 @@ class VLLMAdapter:
             import urllib.error
             import urllib.request
 
-            url = self._full_url("/v1/models")
+            url = _ensure_http_url(self._full_url("/v1/models"))
             req = urllib.request.Request(url, headers=self._build_headers(), method="GET")
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                body = json.loads(resp.read())
+            # base_url normalized in __post_init__; body read capped by _read_bounded.
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # nosec B310
+                body = json.loads(_read_bounded(resp))
                 models = body.get("data", [])
                 return {
                     "ok": True,

@@ -6,7 +6,9 @@ from typing import Any
 
 from claude_codex_local._config import (
     OPENROUTER_BASE_URL,
+    _ensure_http_url,
     _probe_openai_models_endpoint,
+    _read_bounded,
 )
 
 
@@ -29,7 +31,10 @@ def smoke_test_openrouter_model(
     import urllib.error
     import urllib.request
 
-    url = f"{(base_url or OPENROUTER_BASE_URL).rstrip('/')}/chat/completions"
+    try:
+        url = f"{_ensure_http_url((base_url or OPENROUTER_BASE_URL).rstrip('/'))}/chat/completions"
+    except ValueError as exc:
+        return {"ok": False, "model": model, "error": str(exc)}
     payload = json.dumps(
         {
             "model": model,
@@ -49,8 +54,9 @@ def smoke_test_openrouter_model(
     req = urllib.request.Request(url, data=payload, headers=headers)
     start = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read())
+        # Scheme enforced by _ensure_http_url; body read capped by _read_bounded.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+            body = json.loads(_read_bounded(resp))
         duration_seconds = max(time.time() - start, 1e-6)
         text = body["choices"][0]["message"]["content"].strip()
         usage = body.get("usage") or {}
@@ -80,11 +86,15 @@ def fetch_openrouter_free_models(
     import urllib.error
     import urllib.request
 
-    url = f"{(base_url or OPENROUTER_BASE_URL).rstrip('/')}/models"
+    try:
+        url = f"{_ensure_http_url((base_url or OPENROUTER_BASE_URL).rstrip('/'))}/models"
+    except ValueError as exc:
+        return {"ok": False, "models": [], "error": str(exc)}
     req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read())
+        # Scheme enforced by _ensure_http_url; body read capped by _read_bounded.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+            body = json.loads(_read_bounded(resp))
     except urllib.error.URLError as exc:
         return {"ok": False, "models": [], "error": f"OpenRouter unreachable: {exc}"}
     except Exception as exc:

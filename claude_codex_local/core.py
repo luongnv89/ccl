@@ -67,6 +67,7 @@ from claude_codex_local._config import (
     LMS_SERVER_PORT,
     MACHINE_PROFILE_CACHE_FILE,
     MACHINE_PROFILE_TTL_SECONDS,
+    MAX_RESPONSE_BYTES,
     MLX_QUANT_RANK,
     MLX_QUANT_SUFFIX,
     OLLAMA_API_KEY,
@@ -81,9 +82,12 @@ from claude_codex_local._config import (
     VLLM_API_KEY,
     VLLM_BASE_URL,
     VLLM_KEY_FILE,
+    ResponseTooLargeError,
+    _ensure_http_url,
     _is_local_base_url,
     _normalize_base_url,
     _probe_openai_models_endpoint,
+    _read_bounded,
 )
 from claude_codex_local._doctor import (
     doctor,

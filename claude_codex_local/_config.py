@@ -16,12 +16,32 @@ STATE_DIR = Path(os.environ.get("CLAUDE_CODEX_LOCAL_STATE_DIR", ORIG_HOME / ".cl
 LMS_SERVER_PORT = int(os.environ.get("LMS_SERVER_PORT", "1234"))
 
 
-def _normalize_base_url(value: str, *, default_scheme: str = "http") -> str:
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
+
+class ResponseTooLargeError(ValueError):
+    """An HTTP response exceeded the bounded-read cap."""
+
+
+def _normalize_base_url(
+    value: str,
+    *,
+    default_scheme: str = "http",
+    allow_path: bool = False,
+) -> str:
     base = value.strip().rstrip("/")
-    if not base.startswith(("http://", "https://")):
+    if "://" not in base:
+        # Scheme-less input ("host:port", "gpu-box.local") gets the default
+        # scheme; anything that already carries a scheme is validated below.
         base = f"{default_scheme}://{base}"
     parsed = urlparse(base)
-    if parsed.path or parsed.query or parsed.fragment:
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError(
+            f"Engine endpoint base URL {value!r} must use http:// or https:// "
+            f"(got scheme {parsed.scheme!r}); refusing to send API keys or "
+            f"requests over other schemes"
+        )
+    if not allow_path and (parsed.path or parsed.query or parsed.fragment):
         warnings.warn(
             f"Engine endpoint base URL {value!r} should not include a path, "
             f"query, or fragment (engine probes append their own paths). "
@@ -32,10 +52,49 @@ def _normalize_base_url(value: str, *, default_scheme: str = "http") -> str:
     return base
 
 
+def _ensure_http_url(url: str) -> str:
+    """Return *url* unchanged unless its scheme is not http/https."""
+    if urlparse(url).scheme.lower() not in ("http", "https"):
+        raise ValueError(f"Refusing non-http(s) endpoint URL: {url!r}")
+    return url
+
+
+def _read_bounded(resp: Any, *, max_bytes: int = MAX_RESPONSE_BYTES) -> bytes:
+    """Read at most *max_bytes* from *resp*, honouring Content-Length.
+
+    Raises ResponseTooLargeError when the declared Content-Length or the
+    actual byte stream exceeds the cap, so untrusted endpoints cannot make
+    the CLI buffer unbounded data into memory.
+    """
+    headers = getattr(resp, "headers", None)
+    if headers is not None:
+        try:
+            declared = int(headers.get("Content-Length"))
+        except (TypeError, ValueError, AttributeError):
+            declared = None
+        if declared is not None and declared > max_bytes:
+            raise ResponseTooLargeError(
+                f"Response Content-Length {declared} exceeds the {max_bytes}-byte cap"
+            )
+    try:
+        data = resp.read(max_bytes + 1)
+    except TypeError:
+        # Test doubles and non-HTTP responses may only support read().
+        data = resp.read()
+    if len(data) > max_bytes:
+        raise ResponseTooLargeError(f"Response exceeded the {max_bytes}-byte cap")
+    return data
+
+
 def _is_local_base_url(base_url: str) -> bool:
-    host = (urlparse(base_url).hostname or "").lower()
+    parsed = urlparse(base_url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        # No explicit http(s) scheme: cannot classify the endpoint as a
+        # local engine ("evil.com:8001" parses as scheme 'evil.com').
+        return False
+    host = (parsed.hostname or "").lower()
     if not host:
-        return True
+        return False
     if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
@@ -63,10 +122,16 @@ LLAMACPP_DEFAULT_SPEC_DRAFT_N_MAX = 5
 LLAMACPP_LOG_DIR = STATE_DIR / "logs"
 LLAMACPP_PID_DIR = STATE_DIR / "run"
 
-ROUTER9_BASE_URL = os.environ.get("CCL_9ROUTER_BASE_URL", "http://localhost:20128/v1")
+ROUTER9_BASE_URL = _normalize_base_url(
+    os.environ.get("CCL_9ROUTER_BASE_URL", "http://localhost:20128/v1"),
+    allow_path=True,
+)
 ROUTER9_KEY_FILE = STATE_DIR / "9router-api-key"
 
-OPENROUTER_BASE_URL = os.environ.get("CCL_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_BASE_URL = _normalize_base_url(
+    os.environ.get("CCL_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+    allow_path=True,
+)
 OPENROUTER_KEY_FILE = STATE_DIR / "openrouter-api-key"
 
 VLLM_BASE_URL = _normalize_base_url(os.environ.get("VLLM_BASE_URL", "http://localhost:8000"))
@@ -149,7 +214,7 @@ def _probe_openai_models_endpoint(
     import urllib.error
     import urllib.request
 
-    base = base_url.rstrip("/")
+    base = _ensure_http_url(base_url.rstrip("/"))
     url = f"{base}/models"
     req = urllib.request.Request(
         url,
@@ -157,9 +222,10 @@ def _probe_openai_models_endpoint(
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # base_url is scheme-checked by _normalize_base_url/_ensure_http_url upstream.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             status = getattr(resp, "status", 200)
-            raw_body = resp.read()
+            raw_body = _read_bounded(resp)
             response_headers = getattr(resp, "headers", {})
     except urllib.error.HTTPError as exc:
         return {
@@ -176,6 +242,14 @@ def _probe_openai_models_endpoint(
             "models": [],
             "error": f"{service_name} unreachable at {url}: {exc}",
             "error_type": "network_error",
+            "url": url,
+        }
+    except ResponseTooLargeError as exc:
+        return {
+            "ok": False,
+            "models": [],
+            "error": f"{service_name} response at {url} too large: {exc}",
+            "error_type": "response_too_large",
             "url": url,
         }
 
