@@ -1170,8 +1170,8 @@ class TestShellRcKeyMaterial:
             "_env_block",
         ):
             src = inspect.getsource(getattr(wz, func_name))
-            assert (
-                ".chmod(0o600)" not in src
-            ), f"{func_name} reintroduced a write-then-chmod sequence"
+            assert ".chmod(0o600)" not in src, (
+                f"{func_name} reintroduced a write-then-chmod sequence"
+            )
         materialized_src = inspect.getsource(wz._materialize_remote_api_key)
         assert "_write_secret_file(" in materialized_src
