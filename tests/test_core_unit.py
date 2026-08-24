@@ -2115,6 +2115,87 @@ class TestLlamaCppArgBuilders:
         extra_idx = argv.index("--no-warmup")
         assert mtp_idx < extra_idx
 
+    # -- extra_argv security guard (issue #204 / F-SEC-006/007/014) ---------
+
+    def test_build_argv_rejects_extra_argv_host_override(self):
+        # llama-server is last-wins, so "--host 0.0.0.0" appended via
+        # extra_argv must NOT silently re-bind the server to every interface.
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            host="127.0.0.1",
+            extra_argv=["--host", "0.0.0.0"],
+        )
+        assert argv.count("--host") == 1
+        assert argv[argv.index("--host") + 1] == "127.0.0.1"
+        assert "0.0.0.0" not in argv
+
+    def test_build_argv_rejects_port_and_api_key_overrides(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            port=8001,
+            api_key="managed-secret",
+            extra_argv=["--port", "9999", "--api-key", "attacker-key", "--no-warmup"],
+        )
+        assert argv[argv.index("--port") + 1] == "8001"
+        assert argv[argv.index("--api-key") + 1] == "managed-secret"
+        assert "9999" not in argv and "attacker-key" not in argv
+        assert "--no-warmup" in argv
+
+    def test_build_argv_rejects_equals_form_override(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            host="127.0.0.1",
+            extra_argv=["--host=0.0.0.0"],
+        )
+        assert "0.0.0.0" not in argv
+        assert argv[argv.index("--host") + 1] == "127.0.0.1"
+
+    def test_build_argv_appends_api_key_when_set(self):
+        argv = pb.build_llamacpp_server_args(
+            binary="llama-server",
+            model_path="/tmp/m.gguf",
+            api_key="sk-local-test",
+        )
+        assert argv.index("--api-key") < argv.index("sk-local-test")
+        assert argv[argv.index("--api-key") + 1] == "sk-local-test"
+
+    def test_build_argv_omits_api_key_when_unset(self):
+        argv = pb.build_llamacpp_server_args(binary="llama-server", model_path="/tmp/m.gguf")
+        assert "--api-key" not in argv
+
+    def test_config_includes_api_key_in_kwargs(self):
+        cfg = pb.LlamaServerConfig(binary="b", model_path="m", api_key="k")
+        assert cfg.to_kwargs()["api_key"] == "k"
+        assert pb.LlamaServerConfig(binary="b", model_path="m").to_kwargs()["api_key"] is None
+
+    def test_is_loopback_host_variants(self):
+        f = _llamacpp_mod._is_loopback_host
+        assert f("127.0.0.1") is True
+        assert f("localhost") is True
+        assert f("::1") is True
+        assert f("[::1]") is True
+        assert f("") is True
+        assert f(None) is True
+        assert f("0.0.0.0") is False
+        assert f("192.168.1.10") is False
+        assert f("example.com") is False
+
+    def test_sanitize_extra_argv_reports_ignored_managed_flags(self):
+        cleaned, warnings = _llamacpp_mod._sanitize_extra_argv(
+            ["--host", "0.0.0.0", "--port=9999", "--api-key", "x", "--keep-me"]
+        )
+        assert cleaned == ["--keep-me"]
+        assert len(warnings) == 3
+        assert all("ignoring extra_argv entry" in w for w in warnings)
+
+    def test_sanitize_extra_argv_keeps_unmanaged_flags(self):
+        cleaned, warnings = _llamacpp_mod._sanitize_extra_argv(["--threads", "4", "--log-prefix", "ccl"])
+        assert cleaned == ["--threads", "4", "--log-prefix", "ccl"]
+        assert warnings == []
+
     # -- LlamaServerConfig --------------------------------------------------
 
     def test_config_defaults(self):
@@ -2962,6 +3043,133 @@ class TestLlamaCppStartServer:
         assert "after readiness probe" in out["error"]
         # Pid file must NOT remain on disk pointing at a dead process.
         assert not (pb_mod.LLAMACPP_PID_DIR / "llama-server-18006.pid").exists()
+
+    # -- auth / bind-address hardening (issue #204) --------------------------
+
+    def _spawnable_env(self, monkeypatch, pb_mod, tmp_path, name="fake.gguf"):
+        monkeypatch.setattr(
+            _llamacpp_mod, "llamacpp_detect", lambda: {"present": True, "binary": "llama-server"}
+        )
+        monkeypatch.setattr(
+            pb_mod.shutil,
+            "which",
+            lambda name_: "/usr/local/bin/llama-server" if name_ == "llama-server" else None,
+        )
+        model_file = tmp_path / name
+        model_file.write_bytes(b"\x00")
+
+        class _FakeProc:
+            pid = 31313
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
+        monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        return model_file
+
+    def test_start_refuses_nonloopback_host_without_api_key(self, monkeypatch, isolated_state, tmp_path):
+        # Binding 0.0.0.0 without an API key must refuse startup — anything
+        # that can reach the port would get unauthenticated inference.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_API_KEY", "")
+
+        def _boom(*a, **kw):
+            raise AssertionError("Popen must not be called for insecure binds")
+
+        monkeypatch.setattr(pb_mod.subprocess, "Popen", _boom)
+        out = pb_mod.llamacpp_start_server(model_path="/tmp/m.gguf", host="0.0.0.0")
+        assert out["ok"] is False
+        assert "refusing to bind llama-server to non-loopback host" in out["error"]
+        assert "LLAMACPP_API_KEY" in out["error"]
+        assert out["argv"] == [] and out["handle"] is None
+
+    def test_start_passes_api_key_for_nonloopback_host(self, monkeypatch, isolated_state, tmp_path):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_API_KEY", "")
+        model_file = self._spawnable_env(monkeypatch, pb_mod, tmp_path)
+
+        spawned: dict = {}
+
+        class _FakeProc:
+            pid = 31414
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(
+            pb_mod.subprocess, "Popen", lambda argv, **kw: spawned.update(argv=argv) or _FakeProc()
+        )
+        out = pb_mod.llamacpp_start_server(
+            model_path=str(model_file), port=18009, host="0.0.0.0", api_key="sk-lan"
+        )
+        assert out["ok"] is True
+        idx = spawned["argv"].index("--api-key")
+        assert spawned["argv"][idx + 1] == "sk-lan"
+
+    def test_start_uses_llamacpp_api_key_env_for_nonloopback_host(
+        self, monkeypatch, isolated_state, tmp_path
+    ):
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_API_KEY", "env-secret")
+        model_file = self._spawnable_env(monkeypatch, pb_mod, tmp_path)
+
+        spawned: dict = {}
+
+        class _FakeProc:
+            pid = 31515
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(
+            pb_mod.subprocess, "Popen", lambda argv, **kw: spawned.update(argv=argv) or _FakeProc()
+        )
+        out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18010, host="0.0.0.0")
+        assert out["ok"] is True
+        assert "--api-key" in spawned["argv"]
+
+    def test_start_warns_when_extra_argv_tries_host_override(
+        self, monkeypatch, isolated_state, tmp_path
+    ):
+        # Runtime proof: extra_argv "--host 0.0.0.0" cannot silently override
+        # the default loopback bind; it is stripped and surfaced as a warning.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_API_KEY", "")
+        model_file = self._spawnable_env(monkeypatch, pb_mod, tmp_path)
+
+        spawned: dict = {}
+
+        class _FakeProc:
+            pid = 31616
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(
+            pb_mod.subprocess, "Popen", lambda argv, **kw: spawned.update(argv=argv) or _FakeProc()
+        )
+        out = pb_mod.llamacpp_start_server(
+            model_path=str(model_file),
+            port=18011,
+            extra_argv=["--host", "0.0.0.0", "--no-warmup"],
+        )
+        assert out["ok"] is True
+        argv = out["handle"].argv
+        assert argv.count("--host") == 1
+        assert argv[argv.index("--host") + 1] == "127.0.0.1"
+        assert "0.0.0.0" not in argv
+        assert any("--host" in w for w in out.get("warnings", []))
+        assert "--no-warmup" in argv
+
+    def test_loopback_host_without_key_still_spawns(self, monkeypatch, isolated_state, tmp_path):
+        # Default loopback bind keeps working with no API key set.
+        pb_mod, _wiz, _ = isolated_state
+        monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_API_KEY", "")
+        model_file = self._spawnable_env(monkeypatch, pb_mod, tmp_path)
+        out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18012)
+        assert out["ok"] is True
+        assert "--api-key" not in out["handle"].argv
 
 
 class TestLlamaCppStopServer:

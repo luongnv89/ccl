@@ -11,5 +11,6 @@ def run(**_: object) -> dict[str, object]:
         commands=[
             "pip install vllm",
             "vllm serve <hf-model-id> --host 0.0.0.0 --port 8000",
+            "# note: binding 0.0.0.0 requires --api-key (unauthenticated otherwise)",
         ],
     )

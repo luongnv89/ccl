@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import os
 import platform
@@ -377,6 +378,51 @@ def detect_llamacpp_mtp(
     }
 
 
+_MANAGED_SERVER_FLAGS = ("--host", "--port", "--api-key")
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    """True when *host* only exposes the server to the local machine."""
+    raw = (host or "").strip().strip("[]").lower()
+    if not raw or raw == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(raw).is_loopback
+    except ValueError:
+        return False
+
+
+def _sanitize_extra_argv(extras: list[str] | None) -> tuple[list[str], list[str]]:
+    """Strip managed flags from ``extra_argv`` and report each collision.
+
+    llama-server is last-wins, so an ``extra_argv`` entry of
+    ``--host 0.0.0.0`` appended after the managed ``--host`` would silently
+    re-expose the server on every interface. Managed flags are removed so a
+    stray entry can never override the ccl-controlled bind address, port or
+    API key; callers surface the returned warnings to the user.
+    """
+    cleaned: list[str] = []
+    warnings: list[str] = []
+    tokens = list(extras) if extras else []
+    i = 0
+    while i < len(tokens):
+        raw = tokens[i]
+        i += 1
+        managed = next(
+            (flag for flag in _MANAGED_SERVER_FLAGS if raw == flag or raw.startswith(flag + "=")),
+            None,
+        )
+        if managed is None:
+            cleaned.append(raw)
+            continue
+        if "=" not in raw and i < len(tokens):
+            # Consume the flag's value so it cannot leak into the argv tail.
+            raw = f"{raw} {tokens[i]}"
+            i += 1
+        warnings.append(f"ignoring extra_argv entry {raw!r}: {managed} is managed by ccl")
+    return cleaned, warnings
+
+
 @dataclass
 class LlamaServerConfig:
     binary: str = ""
@@ -388,6 +434,7 @@ class LlamaServerConfig:
     threads: int = 4
     mtp: dict[str, Any] | None = None
     extra_argv: list[str] | None = None
+    api_key: str | None = None
 
     def to_kwargs(self) -> dict[str, Any]:
         return {
@@ -400,6 +447,7 @@ class LlamaServerConfig:
             "threads": self.threads,
             "mtp": self.mtp,
             "extra_argv": self.extra_argv,
+            "api_key": self.api_key,
         }
 
 
@@ -415,6 +463,7 @@ def build_llamacpp_server_args(
     threads: int | None = None,
     mtp: dict[str, Any] | None = None,
     extra_argv: list[str] | None = None,
+    api_key: str | None = None,
 ) -> list[str]:
     if config is not None:
         c_binary = binary if binary is not None else config.binary
@@ -426,6 +475,7 @@ def build_llamacpp_server_args(
         c_threads = threads if threads is not None else config.threads
         c_mtp = mtp if mtp is not None else config.mtp
         c_extra_argv = extra_argv if extra_argv is not None else config.extra_argv
+        c_api_key = api_key if api_key is not None else config.api_key
     else:
         c_binary = binary or ""
         c_model_path = model_path or ""
@@ -436,8 +486,12 @@ def build_llamacpp_server_args(
         c_threads = threads if threads is not None else 4
         c_mtp = mtp
         c_extra_argv = extra_argv
+        c_api_key = api_key
 
-    extras = list(c_extra_argv) if c_extra_argv else []
+    # Managed flags must never be overridable from extra_argv: llama-server
+    # honours the last occurrence, so a stray "--host 0.0.0.0" at the tail
+    # would silently re-bind an unauthenticated server to every interface.
+    extras, _ignored_warnings = _sanitize_extra_argv(c_extra_argv)
     has_threads = "--threads" in extras
     has_spec_n = "--spec-draft-n-max" in extras
     argv = [
@@ -460,6 +514,8 @@ def build_llamacpp_server_args(
         argv += ["--spec-type", "draft-mtp"]
         if not has_spec_n:
             argv += ["--spec-draft-n-max", str(spec_n)]
+    if c_api_key:
+        argv += ["--api-key", str(c_api_key)]
     if extras:
         argv += extras
     return argv
@@ -562,6 +618,7 @@ def llamacpp_start_server(
     ctx_size: int = LLAMACPP_CTX_SIZE,
     timeout: float = 120.0,
     extra_argv: list[str] | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     base_url = llamacpp_base_url()
     if not _is_local_base_url(base_url):
@@ -577,6 +634,28 @@ def llamacpp_start_server(
             "mtp": None,
             "remote": True,
         }
+
+    # Security gate (F-SEC-006/007/014): never spawn an unauthenticated
+    # server on a non-loopback bind address.
+    resolved_api_key = (api_key if api_key is not None else LLAMACPP_API_KEY) or ""
+    effective_host = host or LLAMACPP_SERVER_HOST
+    cleaned_extra_argv, argv_warnings = _sanitize_extra_argv(extra_argv)
+    if not resolved_api_key and not _is_loopback_host(effective_host):
+        return {
+            "ok": False,
+            "handle": None,
+            "argv": [],
+            "error": (
+                f"refusing to bind llama-server to non-loopback host "
+                f"{effective_host!r} without an API key: set LLAMACPP_API_KEY "
+                f"(or pass api_key) so inference is authenticated, or keep the "
+                f"server on 127.0.0.1"
+            ),
+            "log_path": "",
+            "mtp": None,
+            "warnings": argv_warnings,
+        }
+
     detect = llamacpp_detect()
     if not detect.get("present"):
         return {
@@ -601,7 +680,7 @@ def llamacpp_start_server(
 
     gpu = detect_llamacpp_gpu_offload(profile)
     threads = detect_llamacpp_threads(profile)
-    mtp = detect_llamacpp_mtp(model_path, extra_argv=extra_argv)
+    mtp = detect_llamacpp_mtp(model_path, extra_argv=cleaned_extra_argv)
     server_config = LlamaServerConfig(
         binary=binary,
         model_path=model_path,
@@ -611,7 +690,8 @@ def llamacpp_start_server(
         n_gpu_layers=int(gpu["n_gpu_layers"]),
         threads=threads,
         mtp=mtp,
-        extra_argv=extra_argv,
+        extra_argv=cleaned_extra_argv,
+        api_key=resolved_api_key or None,
     )
     argv = build_llamacpp_server_args(config=server_config)
 
@@ -636,6 +716,7 @@ def llamacpp_start_server(
             "error": f"could not open log file {log_path}: {exc}",
             "log_path": str(log_path),
             "mtp": mtp,
+            "warnings": argv_warnings,
         }
 
     try:
@@ -656,6 +737,7 @@ def llamacpp_start_server(
             "error": f"failed to spawn llama-server: {exc}",
             "log_path": str(log_path),
             "mtp": mtp,
+            "warnings": argv_warnings,
         }
     except OSError as exc:
         log_handle.close()
@@ -666,6 +748,7 @@ def llamacpp_start_server(
             "error": f"failed to spawn llama-server: {exc}",
             "log_path": str(log_path),
             "mtp": mtp,
+            "warnings": argv_warnings,
         }
     finally:
         with contextlib.suppress(Exception):
@@ -712,6 +795,7 @@ def llamacpp_start_server(
             "hint": diagnose_llama_server_log(log_path),
             "log_path": str(log_path),
             "mtp": mtp,
+            "warnings": argv_warnings,
         }
 
     if proc.poll() is not None:
@@ -724,6 +808,7 @@ def llamacpp_start_server(
             "hint": diagnose_llama_server_log(log_path),
             "log_path": str(log_path),
             "mtp": mtp,
+            "warnings": argv_warnings,
         }
 
     return {
@@ -733,6 +818,7 @@ def llamacpp_start_server(
         "error": None,
         "log_path": str(log_path),
         "mtp": mtp,
+        "warnings": argv_warnings,
     }
 
 

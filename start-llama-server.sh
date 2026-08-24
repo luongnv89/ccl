@@ -22,8 +22,12 @@ ALIAS="${ALIAS:-montimage-dgx-spark}"
 # Default thinking OFF (low-latency agent mode). Clients can still override per request with
 # chat_template_kwargs:{enable_thinking:true}. Set ENABLE_THINKING=true to flip the default.
 ENABLE_THINKING="${ENABLE_THINKING:-false}"
-HOST="${HOST:-0.0.0.0}"
+HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8001}"
+# API key for llama-server (--api-key). Binding a non-loopback address
+# (e.g. HOST=0.0.0.0) REQUIRES an API key — otherwise anyone who can reach
+# the port gets unauthenticated inference.
+API_KEY="${API_KEY:-}"
 CTX_SIZE="${CTX_SIZE:-400000}"
 N_GPU_LAYERS="${N_GPU_LAYERS:--1}"
 PARALLEL="${PARALLEL:-2}"
@@ -56,17 +60,39 @@ if curl -s -m 2 "http://localhost:${PORT}/health" 2>/dev/null | grep -q '"status
   exit 0
 fi
 
+# --- auth guard -------------------------------------------------------------
+# Never expose unauthenticated inference beyond the loopback interface.
+case "$HOST" in
+  localhost|127.*|::1) : ;;
+  *)
+    if [[ -z "$API_KEY" ]]; then
+      echo "error: refusing to bind llama-server to ${HOST} without authentication." >&2
+      echo "       binding a non-loopback address (e.g. 0.0.0.0) requires --api-key:" >&2
+      echo "       re-run with API_KEY=<secret> ./start-llama-server.sh" >&2
+      exit 1
+    fi
+    ;;
+esac
+AUTH_ARGS=()
+[[ -n "$API_KEY" ]] && AUTH_ARGS=(--api-key "$API_KEY")
+
 # --- launch ----------------------------------------------------------------
 echo "Starting llama-server on ${HOST}:${PORT}"
 echo "  model: ${MODEL}"
 echo "  alias: ${ALIAS}  (clients connect by this name)"
 echo "  ctx-size=${CTX_SIZE} n-gpu-layers=${N_GPU_LAYERS} parallel=${PARALLEL} thinking=${ENABLE_THINKING}"
+if [[ -n "$API_KEY" ]]; then
+  echo "  auth: --api-key enabled (clients send Authorization: Bearer)"
+else
+  echo "  auth: none (loopback-only bind; binding 0.0.0.0 requires --api-key)"
+fi
 
 exec "$LLAMA_BIN" \
   --model "$MODEL" \
   --alias "$ALIAS" \
   --host "$HOST" \
   --port "$PORT" \
+  ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   --ctx-size "$CTX_SIZE" \
   --n-gpu-layers "$N_GPU_LAYERS" \
   --parallel "$PARALLEL" \
