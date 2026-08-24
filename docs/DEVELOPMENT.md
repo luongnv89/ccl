@@ -74,7 +74,8 @@ bash scripts/e2e_smoke.sh
 ruff check .          # lint
 ruff check . --fix    # auto-fix safe issues
 mypy .                # type check
-bandit -r .           # security scan
+bandit -q -ll -r claude_codex_local/   # security scan (per-line nosec justifications)
+python scripts/check_bash_c.py         # gate unreviewed ["bash", "-c", ...] shell-outs
 ```
 
 All of these also run automatically via pre-commit on `git commit`.
