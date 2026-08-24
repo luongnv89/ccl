@@ -108,12 +108,6 @@ def huggingface_download_gguf(
         if problem:
             return _error(problem)
 
-    # Pin the download to an explicit revision (issue #205): resolve the
-    # repo's current HEAD commit when the caller did not pin one, falling
-    # back to the default branch name when resolution fails.
-    if revision is None:
-        revision = huggingface_repo_revision(repo_id) or "main"
-
     det = _core.huggingface_cli_detect()
     if not det.get("present"):
         return {
@@ -123,8 +117,14 @@ def huggingface_download_gguf(
             "bytes_downloaded": None,
             "elapsed_seconds": None,
             "not_found": False,
-            "revision": revision,
+            "revision": None,
         }
+
+    # Pin the download to an explicit revision (issue #205): resolve the
+    # repo's current HEAD commit when the caller did not pin one, falling
+    # back to the default branch name when resolution fails.
+    if revision is None:
+        revision = huggingface_repo_revision(repo_id) or "main"
 
     if local_dir and filename:
         escape = _ensure_under_local_dir(local_dir, filename)
