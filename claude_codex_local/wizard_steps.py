@@ -39,7 +39,13 @@ from claude_codex_local.wizard_discovery import (
     _show_selected_harness_status,
     _sync_presence_from_tools,
 )
-from claude_codex_local.wizard_state import STATE_DIR, WireResult, WizardState
+from claude_codex_local.wizard_state import (
+    STATE_DIR,
+    WireResult,
+    WizardState,
+    trusted_raw_env_path,
+    valid_env_var_name,
+)
 
 _LOCAL_OR_REMOTE_ENGINES = ("ollama", "llamacpp", "vllm")
 
@@ -3644,10 +3650,22 @@ def _write_helper_script(harness: str, result: WireResult, *, engine: str | None
         for key, value in result.env.items():
             lines.append(f"export {key}={shlex.quote(value)}")
     if result.raw_env:
+        # Trust gate (issue #203): raw_env values are emitted unquoted, so
+        # only codebase-shaped "$(cat <path>)" expressions may pass. An
+        # untrusted payload aborts the write instead of landing executable
+        # shell code in the script.
+        untrusted = [
+            key
+            for key, value in result.raw_env.items()
+            if not valid_env_var_name(key) or trusted_raw_env_path(value) is None
+        ]
+        if untrusted:
+            raise ValueError(
+                "refusing to write helper script: raw_env entries "
+                f"{', '.join(sorted(untrusted))} are not trusted "
+                'double-quoted "$(cat <path>)" key-file expressions'
+            )
         for key, value in result.raw_env.items():
-            # raw_env values are shell expressions evaluated at exec-time;
-            # do NOT shlex.quote them, or they become literal strings.
-            # See WireResult.raw_env docstring for the security boundary.
             lines.append(f"export {key}={value}")
     quoted_argv = " ".join(shlex.quote(part) for part in result.argv)
     lines.append(f'exec {quoted_argv} "$@"')
@@ -3767,7 +3785,11 @@ def step_2_65_install_aliases(state: WizardState, non_interactive: bool = False)
     # presentation concern derived from harness + engine. See
     # _fence_tag_for for the rationale.
     fence_tag = _fence_tag_for(state.primary_harness, state.primary_engine)
-    script_path = _write_helper_script(fence_tag, result, engine=state.primary_engine)
+    try:
+        script_path = _write_helper_script(fence_tag, result, engine=state.primary_engine)
+    except ValueError as exc:
+        fail(str(exc))
+        return False
     state.helper_script_path = str(script_path)
     ok(f"Wrote helper script: [bold]{script_path}[/bold]")
 
@@ -3791,17 +3813,11 @@ def _materialize_raw_env(raw_env: dict[str, str]) -> dict[str, str]:
     """Resolve trusted key-file raw env expressions for verify subprocesses."""
     resolved: dict[str, str] = {}
     for key, expr in raw_env.items():
-        match = re.fullmatch(r'"\$\(cat (.+)\)"', expr)
-        if not match:
+        path = trusted_raw_env_path(expr)
+        if path is None:
             continue
         try:
-            parts = shlex.split(f"cat {match.group(1)}")
-        except ValueError:
-            continue
-        if len(parts) != 2 or parts[0] != "cat":
-            continue
-        try:
-            resolved[key] = Path(parts[1]).read_text().strip()
+            resolved[key] = path.read_text().strip()
         except OSError:
             continue
     return resolved
