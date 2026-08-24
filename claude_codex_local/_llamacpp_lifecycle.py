@@ -926,7 +926,10 @@ def _process_image_name(pid: int) -> str | None:
             return comm
     except OSError:
         pass
-    return _ps_field(pid, "comm")
+    name = _ps_field(pid, "comm")
+    # Some ps implementations (macOS) report the full executable path;
+    # compare on the basename like /proc/<pid>/comm does.
+    return Path(name).name if name else None
 
 
 def _write_pid_record(pid_file: Path, proc: subprocess.Popen[bytes], *, image: str) -> None:
