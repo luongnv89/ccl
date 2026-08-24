@@ -3,6 +3,7 @@
 
 import json
 import os
+import stat
 from datetime import datetime, timezone
 
 import pytest
@@ -158,6 +159,61 @@ def test_save_message_redacts_secrets(temp_state_dir, temp_session_dir):
     for label, secret in secrets.items():
         assert secret not in raw, f"{label} secret leaked into persisted JSONL"
     assert "[REDACTED]" in raw
+
+
+def test_save_message_redacts_hf_token_and_bearer_header(temp_state_dir, temp_session_dir):
+    """Regression (#206): hf_ tokens and Authorization: Bearer values are scrubbed."""
+    agent_id = "redact-hf-agent"
+    secrets = {
+        "hf": "hf_abcdefghijklmnopqrstuvwx0123456789",
+        "bearer": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4",
+    }
+    message = SessionMessage(
+        role="user",
+        content=(
+            "huggingface token: hf_abcdefghijklmnopqrstuvwx0123456789\n"
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9."
+            "eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4"
+        ),
+        timestamp=datetime.now(timezone.utc),
+        session_id="redact-hf",
+        agent_id=agent_id,
+    )
+    sess.save_message(agent_id, message)
+
+    raw = sess.get_session_path(agent_id).read_text(encoding="utf-8")
+    for label, secret in secrets.items():
+        assert secret not in raw, f"{label} secret leaked into persisted JSONL"
+    assert "[REDACTED]" in raw
+    assert "Authorization: Bearer [REDACTED]" in raw, "header prefix must stay readable"
+
+
+def test_sessions_dir_created_with_mode_0700(temp_state_dir):
+    """The sessions directory must be private to the owner (#206 / F-SEC-009)."""
+    sessions = sess._ensure_sessions_dir()
+    assert stat.S_IMODE(sessions.stat().st_mode) == 0o700
+
+
+def test_session_file_created_0600_and_loose_file_tightened(temp_state_dir, temp_session_dir):
+    """Session files must be 0600; pre-existing loose files tighten on write."""
+    agent_id = "mode-agent"
+    path = sess.get_session_path(agent_id)
+    # Simulate a file written by an older release with a permissive umask.
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("legacy\n")
+    os.chmod(path, 0o644)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+    message = SessionMessage(role="user", content="hello", agent_id=agent_id)
+    sess.save_message(agent_id, message)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    # A brand-new session file must also land at 0600 even under a loose umask.
+    new_agent = "mode-agent-new"
+    sess.save_message(new_agent, SessionMessage(role="user", content="hi", agent_id=new_agent))
+    new_path = sess.get_session_path(new_agent)
+    assert stat.S_IMODE(new_path.stat().st_mode) == 0o600
 
 
 def test_sync_session_redacts_secrets(temp_state_dir, temp_session_dir):
