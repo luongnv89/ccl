@@ -202,12 +202,17 @@ def isolated_state(tmp_path, monkeypatch):
         "huggingface_list_repo_files",
         "huggingface_fuzzy_find",
         "huggingface_download_gguf",
+        "huggingface_repo_revision",
     )
     for _k in _HF_LAZY:
         pb_mod.__dict__.pop(_k, None)
 
     # Clear any lingering in-process caches from previous test runs (machine profile,
     # llmfit candidates, llmfit system) so each test starts with a clean slate.
+    hf_mod = sys.modules.get("claude_codex_local._hf_api")
+    if hf_mod is not None:
+        hf_mod._GGUF_MIRROR_CACHE.clear()
+        hf_mod._MODEL_PAYLOAD_CACHE.clear()
     if hasattr(pb_mod, "_machine_profile_in_process_cache"):
         ck = "_inproc_cache"
         setattr(pb_mod._machine_profile_in_process_cache, ck, {"timestamp": 0, "data": None})

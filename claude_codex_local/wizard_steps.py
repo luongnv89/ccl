@@ -1895,6 +1895,7 @@ def _download_gguf_via_hf_cli(repo_id: str) -> dict:
                 "repo_id": current,
                 "bytes_downloaded": size,
                 "elapsed_seconds": elapsed,
+                "revision": result.get("revision"),
             }
 
         err = result.get("error") or "unknown error"
@@ -2019,6 +2020,7 @@ def _download_model_impl(state: WizardState) -> bool:
     llamacpp_model_path: str | None = None
     llamacpp_bytes: int | None = None
     llamacpp_elapsed: float | None = None
+    llamacpp_revision: str | None = None
     # Stream sub-command stdout/stderr straight to the user's terminal so the
     # engines' own progress bars (ollama "pulling manifest...", lms download
     # spinner, hf CLI tqdm) are visible. We bracket with time.monotonic() so
@@ -2048,6 +2050,9 @@ def _download_model_impl(state: WizardState) -> bool:
             llamacpp_model_path = hf_result.get("path")
             llamacpp_bytes = hf_result.get("bytes_downloaded")
             llamacpp_elapsed = hf_result.get("elapsed_seconds")
+            revision = hf_result.get("revision")
+            if isinstance(revision, str) and revision:
+                llamacpp_revision = revision
             # A fuzzy-search re-pick returned a different repo ID than the
             # one we started with — persist it so step 6 wires the harness
             # to the model the user actually downloaded (#38).
@@ -2103,6 +2108,10 @@ def _download_model_impl(state: WizardState) -> bool:
         state.profile["llamacpp_model_path"] = llamacpp_model_path
         if llamacpp_bytes:
             state.profile.setdefault("llamacpp", {})["model_bytes"] = llamacpp_bytes
+        # Record the pinned revision the download used (issue #205) so the
+        # installed harness can be traced back to an exact upstream commit.
+        if llamacpp_revision:
+            state.profile["llamacpp_model_revision"] = llamacpp_revision
     return True
 
 
