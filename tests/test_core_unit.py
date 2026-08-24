@@ -225,6 +225,17 @@ class TestEnsureStateDirs:
         assert state_dir.exists()
         assert (state_dir / "bin").exists()
 
+    def test_creates_dirs_mode_0700_and_tightens_loose_dir(self, isolated_state):
+        import stat as _stat
+
+        pb_mod, _, state_dir = isolated_state
+        # Simulate a loose dir created by an older release with the umask.
+        state_dir.mkdir(parents=True)
+        state_dir.chmod(0o755)
+        pb_mod.ensure_state_dirs()
+        assert _stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+        assert _stat.S_IMODE((state_dir / "bin").stat().st_mode) == 0o700
+
 
 # ---------------------------------------------------------------------------
 # llmfit helpers — mock subprocess.
