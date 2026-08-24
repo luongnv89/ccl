@@ -2192,7 +2192,9 @@ class TestLlamaCppArgBuilders:
         assert all("ignoring extra_argv entry" in w for w in warnings)
 
     def test_sanitize_extra_argv_keeps_unmanaged_flags(self):
-        cleaned, warnings = _llamacpp_mod._sanitize_extra_argv(["--threads", "4", "--log-prefix", "ccl"])
+        cleaned, warnings = _llamacpp_mod._sanitize_extra_argv(
+            ["--threads", "4", "--log-prefix", "ccl"]
+        )
         assert cleaned == ["--threads", "4", "--log-prefix", "ccl"]
         assert warnings == []
 
@@ -3068,7 +3070,9 @@ class TestLlamaCppStartServer:
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
         return model_file
 
-    def test_start_refuses_nonloopback_host_without_api_key(self, monkeypatch, isolated_state, tmp_path):
+    def test_start_refuses_nonloopback_host_without_api_key(
+        self, monkeypatch, isolated_state, tmp_path
+    ):
         # Binding 0.0.0.0 without an API key must refuse startup — anything
         # that can reach the port would get unauthenticated inference.
         pb_mod, _wiz, _ = isolated_state
