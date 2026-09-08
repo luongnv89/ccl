@@ -2135,7 +2135,7 @@ class TestLlamaCppArgBuilders:
             binary="llama-server",
             model_path="/tmp/m.gguf",
             port=8001,
-            api_key="managed-secret",
+            api_key="managed-secret",  # pragma: allowlist secret
             extra_argv=["--port", "9999", "--api-key", "attacker-key", "--no-warmup"],
         )
         assert argv[argv.index("--port") + 1] == "8001"
@@ -2157,7 +2157,7 @@ class TestLlamaCppArgBuilders:
         argv = pb.build_llamacpp_server_args(
             binary="llama-server",
             model_path="/tmp/m.gguf",
-            api_key="sk-local-test",
+            api_key="sk-local-test",  # pragma: allowlist secret
         )
         assert argv.index("--api-key") < argv.index("sk-local-test")
         assert argv[argv.index("--api-key") + 1] == "sk-local-test"
@@ -3068,6 +3068,11 @@ class TestLlamaCppStartServer:
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        # Keep the pid-record probes away from the real /proc and ps: the
+        # Popen stub above would break any ps subprocess they spawn.
+        monkeypatch.setattr(_llamacpp_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(_llamacpp_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(_llamacpp_mod, "_process_image_name", lambda pid: "llama-server")
         return model_file
 
     def test_start_refuses_nonloopback_host_without_api_key(
