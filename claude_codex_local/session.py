@@ -12,14 +12,16 @@ cannot copy credentials between agents.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import stat
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 _AGENT_ID_ENV = "__CCL_AGENT_ID"
 _MAX_AGENT_ID_LENGTH = 80
@@ -32,6 +34,12 @@ _SECRET_PATTERNS = [
     re.compile(r"xox[abprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"glpat-[A-Za-z0-9_-]{20,}"),
     re.compile(r"AIza[0-9A-Za-z_-]{30,}"),
+    # HuggingFace access tokens (hf_...) — the credential a user of this tool
+    # is most likely to paste (issue #206 / F-SEC-008).
+    re.compile(r"hf_[A-Za-z0-9]{20,}"),
+    # Generic Authorization: Bearer catch-all — redact only the token value so
+    # the header text stays readable in transcripts.
+    re.compile(r"(?<=Bearer )[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE),
 ]
 
 
@@ -52,10 +60,36 @@ def _get_sessions_dir() -> Path:
     return _get_state_dir() / "sessions"
 
 
+def _ensure_private_dir(path: Path) -> None:
+    """Create ``path`` as 0700 and tighten a pre-existing loose directory.
+
+    Transcripts and state under this tree hold full agent context, so the
+    group/other bits are stripped from any directory that was created by an
+    older release with the process umask (issue #206 / F-SEC-009).
+    """
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    current = stat.S_IMODE(path.stat().st_mode)
+    if current & 0o077:
+        path.chmod(0o700)
+
+
+def _open_private(path: Path, flags: int) -> IO[str]:
+    """Open ``path`` for writing via os.open with 0600 and return a text handle.
+
+    ``os.open(..., 0o600)`` applies to newly created files; :func:`os.fchmod`
+    additionally guarantees the mode regardless of umask and tightens any
+    pre-existing loose file on first write (issue #206 / F-SEC-009).
+    """
+    fd = os.open(path, flags, 0o600)
+    with contextlib.suppress(OSError):
+        os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "a" if flags & os.O_APPEND else "w", encoding="utf-8")
+
+
 def _ensure_sessions_dir() -> Path:
-    """Ensure the sessions directory exists and return it."""
+    """Ensure the sessions directory exists (mode 0700) and return it."""
     path = _get_sessions_dir()
-    path.mkdir(parents=True, exist_ok=True)
+    _ensure_private_dir(path)
     return path
 
 
@@ -173,7 +207,7 @@ def load_session(agent_id: str) -> list[SessionMessage]:
 def _append_message(path: Path, agent_id: str, message: SessionMessage) -> None:
     _ensure_sessions_dir()
     payload = message.to_dict(agent_id=agent_id)
-    with path.open("a", encoding="utf-8") as handle:
+    with _open_private(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND) as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
@@ -274,7 +308,7 @@ def truncate_session(agent_id: str, keep_last: int | None = None) -> dict[str, A
     messages = load_session(agent_id)
     kept_messages = messages[-keep:] if keep else []
     try:
-        with path.open("w", encoding="utf-8") as handle:
+        with _open_private(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC) as handle:
             for message in kept_messages:
                 handle.write(
                     json.dumps(

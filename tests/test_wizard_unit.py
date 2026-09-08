@@ -207,6 +207,46 @@ class TestWizardState:
         assert "is not a trusted" in cap.get()
         assert len(list(state_dir.glob("wizard-state.json.invalid-*.bak"))) == 1
 
+    def test_save_creates_private_dir_and_file(self, isolated_state):
+        """save() must create STATE_DIR 0700 and wizard-state.json 0600 (#206)."""
+        import stat as _stat
+
+        _, wiz, state_dir = isolated_state
+        state = wiz.WizardState(primary_harness="claude")
+        state.save()
+        assert state_dir.exists()
+        assert _stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+        assert _stat.S_IMODE(wiz.STATE_FILE.stat().st_mode) == 0o600
+
+    def test_save_tightens_loose_existing_modes(self, isolated_state):
+        """A state file/dir written by an older release must tighten on save."""
+        import stat as _stat
+
+        _, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True)
+        state_dir.chmod(0o755)
+        wiz.STATE_FILE.write_text("{}")
+        os.chmod(wiz.STATE_FILE, 0o644)
+
+        wiz.WizardState(primary_harness="claude").save()
+
+        assert _stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+        assert _stat.S_IMODE(wiz.STATE_FILE.stat().st_mode) == 0o600
+
+    def test_load_refuses_world_writable_state_dir(self, isolated_state):
+        """load() must refuse state from a world-writable directory (#206)."""
+        _, wiz, state_dir = isolated_state
+        state_dir.mkdir(parents=True)
+        state_dir.chmod(0o777)
+        wiz.STATE_FILE.write_text(json.dumps({"completed_steps": ["1"]}))
+        try:
+            with wiz.console.capture() as cap:
+                state = wiz.WizardState.load()
+            assert state.completed_steps == []
+            assert "world-writable" in cap.get()
+        finally:
+            state_dir.chmod(0o755)
+
 
 # ---------------------------------------------------------------------------
 # Step 5.5 benchmark — optional and non-blocking.

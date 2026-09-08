@@ -8,12 +8,16 @@ Exports:
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
 import shlex
+import stat
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import IO, Any
 
 from claude_codex_local import core as _pb
 from claude_codex_local.wizard_ui import warn as _warn
@@ -21,6 +25,32 @@ from claude_codex_local.wizard_ui import warn as _warn
 STATE_DIR = _pb.STATE_DIR
 STATE_FILE = STATE_DIR / "wizard-state.json"
 GUIDE_PATH = Path.cwd() / "guide.md"
+
+
+def _ensure_private_state_dir() -> None:
+    """Create ``STATE_DIR`` as 0700 and tighten a pre-existing loose directory.
+
+    The state file holds ``raw_env`` expressions that the helper script
+    evaluates at exec time, so group/other bits are stripped from directories
+    created by older releases with the process umask (issue #206 / F-SEC-009).
+    """
+    STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    current = stat.S_IMODE(STATE_DIR.stat().st_mode)
+    if current & 0o077:
+        STATE_DIR.chmod(0o700)
+
+
+def _open_private(path: Path, flags: int, mode: str = "w") -> IO[Any]:
+    """Open ``path`` for writing via os.open with 0600 and return a file handle.
+
+    ``os.open(..., 0o600)`` applies to newly created files; :func:`os.fchmod`
+    additionally guarantees the mode regardless of umask and tightens any
+    pre-existing loose file on first write (issue #206 / F-SEC-009).
+    """
+    fd = os.open(path, flags, 0o600)
+    with contextlib.suppress(OSError):
+        os.fchmod(fd, 0o600)
+    return os.fdopen(fd, mode, encoding="utf-8" if "b" not in mode else None)
 
 
 # ---------------------------------------------------------------------------
@@ -159,12 +189,29 @@ class WizardState:
     config_backups: dict = field(default_factory=dict)
 
     def save(self) -> None:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(asdict(self), indent=2) + "\n")
+        _ensure_private_state_dir()
+        with _open_private(STATE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC) as handle:
+            handle.write(json.dumps(asdict(self), indent=2) + "\n")
 
     @classmethod
     def load(cls) -> WizardState:
         if not STATE_FILE.exists():
+            return cls()
+        try:
+            dir_mode = stat.S_IMODE(STATE_DIR.stat().st_mode)
+        except OSError as exc:
+            _warn(
+                f"Could not stat the wizard state directory; refusing to load state. Reason: {exc}"
+            )
+            return cls()
+        if dir_mode & stat.S_IWOTH:
+            # F-SEC-009: a world-writable state directory lets any local user
+            # replace the state file (which carries raw_env expressions that
+            # are executed at launch). Refuse to trust it.
+            _warn(
+                "Wizard state directory is world-writable "
+                f"({oct(dir_mode)}); refusing to load state from an unsafe location."
+            )
             return cls()
         raw_state = STATE_FILE.read_bytes()
         try:
@@ -210,12 +257,13 @@ class WizardState:
 
 def _backup_invalid_wizard_state(raw_state: bytes) -> Path:
     """Preserve unreadable wizard state so users can inspect or recover it."""
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_private_state_dir()
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     backup_path = STATE_FILE.with_name(f"{STATE_FILE.name}.invalid-{timestamp}.bak")
     counter = 1
     while backup_path.exists():
         backup_path = STATE_FILE.with_name(f"{STATE_FILE.name}.invalid-{timestamp}-{counter}.bak")
         counter += 1
-    backup_path.write_bytes(raw_state)
+    with _open_private(backup_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, "wb") as handle:
+        handle.write(raw_state)
     return backup_path

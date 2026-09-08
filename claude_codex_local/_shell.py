@@ -1,4 +1,5 @@
 import os
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -53,8 +54,13 @@ def state_env() -> dict[str, str]:
 
 
 def ensure_state_dirs() -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    (STATE_DIR / "bin").mkdir(parents=True, exist_ok=True)
+    # STATE_DIR holds transcripts, wizard state and key files, so both it and
+    # bin/ are created 0700; pre-existing loose dirs are tightened (issue #206).
+    for path in (STATE_DIR, STATE_DIR / "bin"):
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        current = stat.S_IMODE(path.stat().st_mode)
+        if current & 0o077:
+            path.chmod(0o700)
 
 
 def require(cmd: str) -> None:
