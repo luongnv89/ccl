@@ -672,7 +672,7 @@ def llamacpp_start_server(
             log_handle.close()
 
     with contextlib.suppress(OSError):
-        pid_file.write_text(str(proc.pid))
+        _write_pid_record(pid_file, proc, image=Path(binary).name)
 
     handle = LlamaServerHandle(
         pid=proc.pid,
@@ -686,7 +686,15 @@ def llamacpp_start_server(
         proc=proc,
     )
 
-    ready = llamacpp_wait_until_ready(port=port, host=host, timeout=timeout, proc=proc)
+    try:
+        ready = llamacpp_wait_until_ready(port=port, host=host, timeout=timeout, proc=proc)
+    except KeyboardInterrupt:
+        # The child was spawned with start_new_session=True: without this
+        # handler Ctrl-C would leak the process, its port and (on GPU hosts)
+        # its VRAM. Stop the server and remove the pid file before re-raising.
+        llamacpp_stop_server(handle, grace_seconds=3.0)
+        _cleanup_pid_file(str(pid_file))
+        raise
     if not ready:
         llamacpp_stop_server(handle, grace_seconds=3.0)
         _cleanup_pid_file(str(pid_file))
@@ -786,19 +794,37 @@ def llamacpp_stop_server_by_port(port: int, *, grace_seconds: float = 5.0) -> di
                 f"the server was started outside ccl"
             ),
         }
-    try:
-        pid = int(pid_file.read_text().strip())
-    except (OSError, ValueError):
-        _cleanup_pid_file(str(pid_file))
+    record = _read_pid_record(str(pid_file))
+    if record is None:
         return {
             "ok": False,
             "pid": None,
-            "error": f"unreadable pid file for port {port}",
+            "error": (
+                f"unrecognized pid-file format for port {port}; refusing to "
+                f"signal an unverified PID — delete {pid_file} manually if it "
+                f"is stale"
+            ),
         }
+
+    pid = int(record["pid"])
 
     if _pid_gone(pid):
         _cleanup_pid_file(str(pid_file))
         return {"ok": True, "pid": pid, "already_gone": True}
+
+    verified, reason = _verify_pid_record(record)
+    if not verified:
+        # The recorded identity no longer matches the live process (or cannot
+        # be proven to match): treat the pid file as stale and never signal.
+        _cleanup_pid_file(str(pid_file))
+        return {
+            "ok": False,
+            "pid": pid,
+            "error": (
+                f"pid-file verification failed for port {port} ({reason}); "
+                f"refusing to signal PID {pid}"
+            ),
+        }
 
     _signal_process(pid, 15)
     deadline = time.monotonic() + max(grace_seconds, 0.0)
@@ -839,14 +865,129 @@ def _pid_gone(pid: int) -> bool:
 
 
 def _signal_process(pid: int, sig: int) -> None:
-    if os.name == "posix":
-        try:
-            os.killpg(os.getpgid(pid), sig)
-            return
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+    # Single-PID signal only: the pid recorded in the pid file has been
+    # verified against its recorded create-time/boot-id/process image before
+    # we get here, so signalling the whole process group is unnecessary and
+    # dangerous (an unrelated process could share the recycled group).
     with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
         os.kill(pid, sig)
+
+
+_BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+
+
+def _read_boot_id() -> str:
+    try:
+        return _BOOT_ID_PATH.read_text().strip()
+    except OSError:
+        return ""
+
+
+def _ps_field(pid: int, field: str) -> str | None:
+    try:
+        cp = subprocess.run(
+            ["ps", "-p", str(pid), "-o", f"{field}="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if cp.returncode != 0:
+        return None
+    return cp.stdout.strip() or None
+
+
+def _process_start_marker(pid: int) -> str | None:
+    """Return a stable per-boot creation marker for ``pid`` or None.
+
+    On Linux this is the process start time in clock ticks since boot
+    (/proc/<pid>/stat field 22); on other POSIX systems it falls back to
+    ``ps -o lstart=``. A recycled PID gets a different marker, which is what
+    makes the pre-signal verification meaningful.
+    """
+    try:
+        stat_text = Path(f"/proc/{pid}/stat").read_text()
+        # Field 22 (starttime) sits after the comm field, which itself may
+        # contain spaces/parentheses — split after the last ')'.
+        tail = stat_text.rpartition(")")[2].split()
+        # tail[0] is field 3 (state); starttime is field 22 → index 19 here.
+        return tail[19]
+    except (OSError, IndexError, ValueError):
+        pass
+    return _ps_field(pid, "lstart")
+
+
+def _process_image_name(pid: int) -> str | None:
+    """Return the running image's command name for ``pid`` or None."""
+    try:
+        comm = Path(f"/proc/{pid}/comm").read_text().strip()
+        if comm:
+            return comm
+    except OSError:
+        pass
+    name = _ps_field(pid, "comm")
+    # Some ps implementations (macOS) report the full executable path;
+    # compare on the basename like /proc/<pid>/comm does.
+    return Path(name).name if name else None
+
+
+def _write_pid_record(pid_file: Path, proc: subprocess.Popen[bytes], *, image: str) -> None:
+    record = {
+        "pid": proc.pid,
+        "create_time": _process_start_marker(proc.pid),
+        "boot_id": _read_boot_id(),
+        "image": image,
+    }
+    with contextlib.suppress(OSError):
+        Path(pid_file).write_text(json.dumps(record))
+
+
+def _read_pid_record(pid_file: str | Path) -> dict[str, Any] | None:
+    """Parse a pid file written by ccl. Legacy plain-pid files return None."""
+    try:
+        data = json.loads(Path(pid_file).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("pid"), int):
+        return None
+    return data
+
+
+def _verify_pid_record(record: dict[str, Any]) -> tuple[bool, str]:
+    """Re-verify a pid-file record against the live system before signalling.
+
+    Checks, in order: process alive, boot id unchanged, creation time
+    unchanged (PID-recycle guard) and process image identity. Returns
+    ``(ok, reason)``; a False reason means the signal must NOT be sent.
+    """
+    pid = int(record["pid"])
+    if _pid_gone(pid):
+        return False, "process-not-running"
+
+    current_boot = _read_boot_id()
+    recorded_boot = record.get("boot_id") or ""
+    if recorded_boot and current_boot and recorded_boot != current_boot:
+        return False, f"boot-id-mismatch ({recorded_boot} != {current_boot})"
+
+    recorded_start = record.get("create_time")
+    if not recorded_start:
+        return False, "record-missing-create-time"
+    current_start = _process_start_marker(pid)
+    if current_start is None:
+        return False, "cannot-read-create-time"
+    if recorded_start != current_start:
+        return False, f"create-time-mismatch (recycled pid {pid}?)"
+
+    recorded_image = record.get("image") or ""
+    live_image = _process_image_name(pid)
+    if not recorded_image or not live_image:
+        return False, "cannot-verify-process-image"
+    if live_image != recorded_image and not recorded_image.startswith(live_image):
+        # Linux truncates /proc/<pid>/comm to 15 chars, so accept a prefix
+        # match of the recorded binary name as well as an exact one.
+        return False, f"process-image-mismatch ({live_image} != {recorded_image})"
+    return True, ""
 
 
 def _cleanup_pid_file(pid_file: str) -> None:

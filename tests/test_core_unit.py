@@ -2762,6 +2762,9 @@ class TestLlamaCppStartServer:
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", _fake_popen)
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(_llamacpp_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(_llamacpp_mod, "_process_image_name", lambda pid: "llama-server")
 
         out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18003)
         assert out["ok"] is True
@@ -2822,6 +2825,9 @@ class TestLlamaCppStartServer:
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: False)
+        monkeypatch.setattr(_llamacpp_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(_llamacpp_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(_llamacpp_mod, "_process_image_name", lambda pid: "llama-server")
         stop_calls: list = []
         monkeypatch.setattr(
             _llamacpp_mod, "llamacpp_stop_server", lambda h, **kw: stop_calls.append(h) or True
@@ -2856,6 +2862,9 @@ class TestLlamaCppStartServer:
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(_llamacpp_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(_llamacpp_mod, "_process_image_name", lambda pid: "llama-server")
 
         out = pb_mod.llamacpp_start_server(
             model_path=str(model_file),
@@ -2894,6 +2903,9 @@ class TestLlamaCppStartServer:
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FakeProc())
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        monkeypatch.setattr(_llamacpp_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(_llamacpp_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(_llamacpp_mod, "_process_image_name", lambda pid: "llama-server")
 
         out = pb_mod.llamacpp_start_server(
             model_path=str(model_file),
@@ -2939,6 +2951,11 @@ class TestLlamaCppStartServer:
 
         monkeypatch.setattr(pb_mod.subprocess, "Popen", lambda argv, **kw: _FlappingProc())
         monkeypatch.setattr(_llamacpp_mod, "llamacpp_wait_until_ready", lambda **kw: True)
+        # Keep the pid-record probes away from the real /proc and ps: the
+        # global Popen stub above would break any ps subprocess they spawn.
+        monkeypatch.setattr(_llamacpp_mod, "_read_boot_id", lambda: "b0")
+        monkeypatch.setattr(_llamacpp_mod, "_process_start_marker", lambda pid: "1000")
+        monkeypatch.setattr(_llamacpp_mod, "_process_image_name", lambda pid: "llama-server")
 
         out = pb_mod.llamacpp_start_server(model_path=str(model_file), port=18006)
         assert out["ok"] is False
@@ -3077,7 +3094,7 @@ class TestLlamaCppStopServerByPort:
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_PID_DIR", tmp_path)
         pid_file = tmp_path / "llama-server-8001.pid"
-        pid_file.write_text("4242")
+        pid_file.write_text(json.dumps({"pid": 4242, "create_time": "100", "boot_id": "b0"}))
         monkeypatch.setattr(_llamacpp_mod, "_pid_gone", lambda pid: True)
         out = pb_mod.llamacpp_stop_server_by_port(8001)
         assert out["ok"] is True
@@ -3089,12 +3106,13 @@ class TestLlamaCppStopServerByPort:
         pb_mod, _wiz, _ = isolated_state
         monkeypatch.setattr(_llamacpp_mod, "LLAMACPP_PID_DIR", tmp_path)
         pid_file = tmp_path / "llama-server-8001.pid"
-        pid_file.write_text("4242")
+        pid_file.write_text(json.dumps({"pid": 4242, "create_time": "100", "boot_id": "b0"}))
 
         signals: list[tuple[int, int]] = []
         monkeypatch.setattr(
             _llamacpp_mod, "_signal_process", lambda pid, sig: signals.append((pid, sig))
         )
+        monkeypatch.setattr(_llamacpp_mod, "_verify_pid_record", lambda record: (True, ""))
 
         gone_states = iter([False, True])
 
