@@ -210,7 +210,8 @@ INSTALL_HINTS: dict[str, dict[str, Any]] = {
         "cmd": (
             "pip install vllm  &&  "
             "vllm serve <hf-model-id> --host 0.0.0.0 --port 8000   "
-            "# expects an OpenAI-compatible API at $VLLM_BASE_URL (default http://localhost:8000)"
+            "# expects an OpenAI-compatible API at $VLLM_BASE_URL "
+            "(default http://localhost:8000); binding 0.0.0.0 requires --api-key"
         ),
         "url": "https://docs.vllm.ai/",
     },
