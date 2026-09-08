@@ -5,14 +5,13 @@ description = "Local backend bridge for Claude Code, Codex, and Pi."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["claude", "codex", "pi", "llm", "local", "ollama", "lm-studio", "bridge", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Software Development :: Libraries",
@@ -63,7 +62,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 extend-exclude = [".venv", ".claude-codex-local", "__pycache__"]
 
 [tool.ruff.lint]
@@ -81,7 +80,7 @@ ignore = ["E501", "B008"]
 "claude_codex_local/wizard_cli.py" = ["F401", "I001"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_unused_ignores = false

@@ -4,7 +4,7 @@
 import json
 import os
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -104,7 +104,7 @@ def test_save_message(temp_state_dir, temp_session_dir):
     message = SessionMessage(
         role="user",
         content="Test message",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         session_id="test123",
         agent_id=agent_id,
     )
@@ -125,7 +125,7 @@ def test_save_message_auto_agent_id(temp_state_dir, temp_session_dir):
     message = SessionMessage(
         role="user",
         content="Test auto-detect",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         session_id="auto123",
     )
     sess.save_message(agent_id="auto-detect-agent", message=message)  # No agent_id specified
@@ -149,7 +149,7 @@ def test_save_message_redacts_secrets(temp_state_dir, temp_session_dir):
     message = SessionMessage(
         role="user",
         content=(f"openai={secrets['openai']} aws={secrets['aws']} github={secrets['github']}"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         session_id="redact1",
         agent_id=agent_id,
     )
@@ -175,7 +175,7 @@ def test_save_message_redacts_hf_token_and_bearer_header(temp_state_dir, temp_se
             "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9."
             "eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4"
         ),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         session_id="redact-hf",
         agent_id=agent_id,
     )
@@ -224,7 +224,7 @@ def test_sync_session_redacts_secrets(temp_state_dir, temp_session_dir):
     message = SessionMessage(
         role="user",
         content=f"token={secret}",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         session_id="sync-redact",
         agent_id=source,
     )

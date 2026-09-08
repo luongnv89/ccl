@@ -19,7 +19,7 @@ import re
 import stat
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any
 
@@ -45,7 +45,7 @@ _SECRET_PATTERNS = [
 
 def _utcnow() -> datetime:
     """Return a timezone-aware UTC timestamp."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _get_state_dir() -> Path:
@@ -397,7 +397,7 @@ def find_latest_native_session(
         return None
 
     cwd_resolved = _normalize_cwd(cwd)
-    cutoff = datetime.now(tz=timezone.utc).timestamp() - max_age_seconds
+    cutoff = datetime.now(tz=UTC).timestamp() - max_age_seconds
 
     def _fresh(path: Path) -> bool:
         try:

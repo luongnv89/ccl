@@ -14,3 +14,14 @@ coverage.xml
 dist/
 .gstack/
 .asm-improver/
+
+# Model weights must never be committed. Two GGUF blobs (21.7 GB + 16.8 GB)
+# were committed here once and bloated .git to 36 GB; the large-file guard in
+# .pre-commit-config.yaml did not fire because core.hooksPath made
+# `pre-commit install` a no-op (fixed in ~/.git-hooks/pre-commit).
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx

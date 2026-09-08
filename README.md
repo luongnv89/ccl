@@ -7,7 +7,7 @@
 </picture>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/luongnv89/claude-codex-local/actions/workflows/ci.yml/badge.svg)](https://github.com/luongnv89/claude-codex-local/actions/workflows/ci.yml)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![PyPI version](https://img.shields.io/pypi/v/claude-codex-local.svg)](https://pypi.org/project/claude-codex-local/)
@@ -282,7 +282,7 @@ entirely.
 ## Prerequisites
 
 - macOS or Linux with zsh or bash
-- Python 3.10+
+- Python 3.11+
 - At least one harness: [Claude Code](https://claude.ai/code), [Codex CLI](https://github.com/openai/codex), or [Pi](https://pi.dev/) (`npm install -g @earendil-works/pi-coding-agent`) — Pi is the model-agnostic terminal coding harness whose tagline is “There are many agent harnesses, but this one is yours.”
 - At least one engine: [Ollama](https://ollama.com) (recommended), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), llama.cpp, [9router](https://github.com/decolua/9router) (local cloud-routing proxy), or [OpenRouter](https://openrouter.ai) (hosted SaaS)
 - [`llmfit`](https://github.com/luongnv89/llmfit) on `PATH` (optional — for automatic model selection)
@@ -604,7 +604,7 @@ The `--oss --local-provider=ollama` flags are required after `--` because Codex 
 
 | Layer         | Tool                                                                                                |
 | ------------- | --------------------------------------------------------------------------------------------------- |
-| Language      | Python 3.10+                                                                                        |
+| Language      | Python 3.11+                                                                                        |
 | UI / prompts  | [questionary](https://github.com/tmbo/questionary), [rich](https://github.com/Textualize/rich)      |
 | Linting       | [ruff](https://github.com/astral-sh/ruff)                                                           |
 | Type checking | [mypy](https://mypy-lang.org)                                                                       |

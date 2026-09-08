@@ -11,7 +11,7 @@ Thank you for your interest in contributing! This guide covers everything you ne
 
 ## Development Setup
 
-**Prerequisites:** Python 3.10+, git
+**Prerequisites:** Python 3.11+, git
 
 ```bash
 git clone https://github.com/luongnv89/claude-codex-local.git

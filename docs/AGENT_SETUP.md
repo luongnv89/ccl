@@ -7,7 +7,7 @@ package, so `python -m pytest --collect-only` fails with
 
 ## Prerequisites
 
-- Python **3.10+** (CI matrix runs 3.10, 3.11 and 3.12)
+- Python **3.11+** (CI matrix runs 3.11 and 3.12)
 - `git`
 
 ## Install from a clean checkout
