@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -311,8 +312,44 @@ def _apply_local_endpoint(engine: str) -> str | None:
     return candidate
 
 
+def _write_secret_file(path: Path, text: str) -> None:
+    """
+    Create (or replace) *path* with owner-only 0600 permissions atomically:
+    write to a 0600 temp file in the same directory, then os.replace() it
+    into place. The secret is therefore never readable by group/other —
+    not even for the instant a plain write_text() + chmod() would leave
+    the file world-readable.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _remote_engine_key_file(engine: str) -> Path | None:
+    """Key file backing the `$(cat …)` expression for a remote engine."""
+    if engine == "ollama":
+        return pb.OLLAMA_KEY_FILE
+    if engine == "llamacpp":
+        return pb.LLAMACPP_KEY_FILE
+    if engine == "vllm":
+        return pb.VLLM_KEY_FILE
+    return None
+
+
 def _env_block(engine: str, url: str, api_key: str) -> str:
-    """Build the fenced shell-rc block of `export FOO=bar` lines for a remote engine."""
+    """
+    Build the fenced shell-rc block of `export FOO=bar` lines for a remote
+    engine. The API key is never embedded literally: the key is materialized
+    to the engine's chmod-600 key file and the block exports
+    `export KEY="$(cat <keyfile>)"` so the secret is resolved at exec time.
+    """
     url_var, key_var = _remote_env_var_names(engine)
     fence = f"claude-codex-local:remote:{engine}"
     body_lines = [
@@ -322,7 +359,10 @@ def _env_block(engine: str, url: str, api_key: str) -> str:
         f"export {url_var}={shlex.quote(url)}",
     ]
     if key_var is not None and api_key:
-        body_lines.append(f"export {key_var}={shlex.quote(api_key)}")
+        key_file = _remote_engine_key_file(engine)
+        if key_file is not None:
+            key_expr = _materialize_remote_api_key(key_file, api_key)
+            body_lines.append(f"export {key_var}={key_expr}")
     body_lines.append(f"# <<< {fence} <<<")
     return "\n".join(body_lines) + "\n"
 
@@ -331,8 +371,9 @@ def _persist_remote_env_to_shell_rc(engine: str, url: str, api_key: str) -> Path
     """
     Append (or replace) a fenced block of `export FOO=bar` lines in the user's
     shell rc so a fresh shell inherits the remote-endpoint env vars without
-    re-running the wizard. Returns the rc path on success, None when no
-    supported shell rc could be found.
+    re-running the wizard. The API key itself lives only in a chmod-600 key
+    file; the block references it via `$(cat …)`. Returns the rc path on
+    success, None when no supported shell rc could be found.
     """
     block = _env_block(engine, url, api_key)
     rc_path = _detect_shell_rc()
@@ -659,8 +700,7 @@ def _step_4_pick_model_9router_impl(state: WizardState, non_interactive: bool = 
                 return False
             api_key = api_key_input.strip()
 
-    pb.ROUTER9_KEY_FILE.write_text(api_key + "\n")
-    pb.ROUTER9_KEY_FILE.chmod(0o600)
+    _write_secret_file(pb.ROUTER9_KEY_FILE, api_key + "\n")
     ok(f"Wrote 9router API key to [bold]{pb.ROUTER9_KEY_FILE}[/bold] (chmod 0600).")
 
     env_model = os.environ.get("CCL_9ROUTER_MODEL", "").strip()
@@ -790,8 +830,7 @@ def _step_4_pick_model_openrouter_impl(state: WizardState, non_interactive: bool
                 fail("No API key provided. Cannot continue.")
                 return False
 
-    pb.OPENROUTER_KEY_FILE.write_text(api_key + "\n")
-    pb.OPENROUTER_KEY_FILE.chmod(0o600)
+    _write_secret_file(pb.OPENROUTER_KEY_FILE, api_key + "\n")
     ok(f"Wrote OpenRouter API key to [bold]{pb.OPENROUTER_KEY_FILE}[/bold] (chmod 0600).")
 
     env_model = os.environ.get("CCL_OPENROUTER_MODEL", "").strip()
@@ -2957,9 +2996,7 @@ def _materialize_remote_api_key(key_file: Path, key_value: str) -> str:
     # re-written on each wizard run so env-as-source-of-truth wins; user-
     # managed key files (e.g. pre-existing VLLM_KEY_FILE) are handled by
     # caller precedence and not overwritten here.
-    key_file.parent.mkdir(parents=True, exist_ok=True)
-    key_file.write_text(key_value + "\n")
-    key_file.chmod(0o600)
+    _write_secret_file(key_file, key_value + "\n")
     return f'"$(cat {shlex.quote(str(key_file))})"'
 
 
