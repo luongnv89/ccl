@@ -97,6 +97,116 @@ class TestWizardState:
         assert len(backups) == 1
         assert backups[0].read_text() == invalid_content
 
+    # -- wire_result / raw_env schema validation (issue #203) ----------------
+
+    @staticmethod
+    def _write_state_with_wire_result(wiz, state_dir, wire_result):
+        state_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "completed_steps": ["6"],
+            "primary_harness": "claude",
+            "primary_engine": "9router",
+            "wire_result": wire_result,
+        }
+        wiz.STATE_FILE.write_text(json.dumps(payload))
+        return payload
+
+    def test_wizard_state_load_rejects_unknown_wire_result_key(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        self._write_state_with_wire_result(
+            wiz,
+            state_dir,
+            {"argv": ["claude"], "env": {}, "effective_tag": "x", "hacked": ["id"]},
+        )
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.wire_result == {}
+        assert "unknown keys: hacked" in cap.get()
+        assert len(list(state_dir.glob("wizard-state.json.invalid-*.bak"))) == 1
+
+    def test_wizard_state_load_rejects_malformed_raw_env_value(self, isolated_state):
+        """A shell-metacharacter raw_env payload must abort the load."""
+        _, wiz, state_dir = isolated_state
+        self._write_state_with_wire_result(
+            wiz,
+            state_dir,
+            {
+                "argv": ["claude"],
+                "env": {},
+                "effective_tag": "x",
+                "raw_env": {"ANTHROPIC_AUTH_TOKEN": '"$(rm -rf ~)"'},
+            },
+        )
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.wire_result == {}
+        assert "raw_env['ANTHROPIC_AUTH_TOKEN'] is not a trusted" in cap.get()
+        assert len(list(state_dir.glob("wizard-state.json.invalid-*.bak"))) == 1
+
+    def test_wizard_state_load_rejects_malformed_env_key(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        self._write_state_with_wire_result(
+            wiz,
+            state_dir,
+            {"argv": ["claude"], "env": {"A B; id": "1"}, "effective_tag": "x"},
+        )
+        with wiz.console.capture():
+            state = wiz.WizardState.load()
+        assert state.wire_result == {}
+
+    def test_wizard_state_load_rejects_non_string_raw_env_value(self, isolated_state):
+        _, wiz, state_dir = isolated_state
+        self._write_state_with_wire_result(
+            wiz,
+            state_dir,
+            {"argv": ["claude"], "env": {}, "effective_tag": "x", "raw_env": {"K": ["v"]}},
+        )
+        with wiz.console.capture():
+            state = wiz.WizardState.load()
+        assert state.wire_result == {}
+
+    def test_wizard_state_load_accepts_canonical_raw_env_roundtrip(self, isolated_state):
+        _, wiz, _ = isolated_state
+        state = wiz.WizardState(
+            primary_harness="claude",
+            primary_engine="9router",
+            completed_steps=["7"],
+            wire_result={
+                "argv": ["claude", "--model", "kr/claude-sonnet-4.5"],
+                "env": {"ANTHROPIC_BASE_URL": "http://localhost:20128/v1"},
+                "effective_tag": "kr/claude-sonnet-4.5",
+                "raw_env": {
+                    "ANTHROPIC_AUTH_TOKEN": '"$(cat /tmp/key)"',
+                    "ANTHROPIC_API_KEY": '"$(cat /tmp/k2)"',
+                },
+            },
+        )
+        state.save()
+        reloaded = wiz.WizardState.load()
+        assert reloaded.wire_result["raw_env"] == {
+            "ANTHROPIC_AUTH_TOKEN": '"$(cat /tmp/key)"',
+            "ANTHROPIC_API_KEY": '"$(cat /tmp/k2)"',
+        }
+
+    def test_wizard_state_load_rejects_compound_substitution_raw_env(self, isolated_state):
+        """A second command substitution inside the cat expression must not load."""
+        _, wiz, state_dir = isolated_state
+        self._write_state_with_wire_result(
+            wiz,
+            state_dir,
+            {
+                "argv": ["claude"],
+                "env": {},
+                "effective_tag": "x",
+                "raw_env": {"ANTHROPIC_AUTH_TOKEN": '"$(cat a)$(id)"'},
+            },
+        )
+        with wiz.console.capture() as cap:
+            state = wiz.WizardState.load()
+        assert state.wire_result == {}
+        assert "is not a trusted" in cap.get()
+        assert len(list(state_dir.glob("wizard-state.json.invalid-*.bak"))) == 1
+
 
 # ---------------------------------------------------------------------------
 # Step 5.5 benchmark — optional and non-blocking.
@@ -922,6 +1032,116 @@ class TestHelperScriptWriter:
         # quotes. The literal $(cat is still un-quoted.
         assert "export ANTHROPIC_BASE_URL='http://example.com/with spaces'" in body
         assert 'export FOO="$(cat /tmp/k)"' in body
+
+    def test_raw_env_untrusted_payload_aborts_helper_script_write(self, isolated_state, tmp_path):
+        """Shell-metacharacter raw_env payloads abort instead of being emitted."""
+        _, wiz, state_dir = isolated_state
+        result = wiz.WireResult(
+            argv=["claude"],
+            env={},
+            effective_tag="x",
+            raw_env={"ANTHROPIC_AUTH_TOKEN": '"$(rm -rf ~)"'},
+        )
+        with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
+            wiz._write_helper_script("claude", result)
+        # No helper script may have landed on disk.
+        assert not (state_dir / "bin" / "cc").exists()
+
+    def test_raw_env_malformed_key_aborts_helper_script_write(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude"],
+            env={},
+            effective_tag="x",
+            raw_env={"FOO; id": '"$(cat /tmp/k)"'},
+        )
+        with pytest.raises(ValueError, match="FOO; id"):
+            wiz._write_helper_script("claude", result)
+
+    def test_raw_env_trusted_expr_still_emitted_after_gate(self, isolated_state):
+        _, wiz, _ = isolated_state
+        result = wiz.WireResult(
+            argv=["claude"],
+            env={},
+            effective_tag="x",
+            raw_env={"ANTHROPIC_AUTH_TOKEN": '"$(cat /tmp/key)"'},
+        )
+        path = wiz._write_helper_script("claude", result)
+        body = path.read_text()
+        assert 'export ANTHROPIC_AUTH_TOKEN="$(cat /tmp/key)"' in body
+
+    def test_raw_env_compound_substitution_aborts_helper_script_write(self, isolated_state):
+        """A second command substitution must not land executable shell code on disk."""
+        _, wiz, state_dir = isolated_state
+        result = wiz.WireResult(
+            argv=["claude"],
+            env={},
+            effective_tag="x",
+            raw_env={"ANTHROPIC_AUTH_TOKEN": '"$(cat a)$(id)"'},
+        )
+        with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
+            wiz._write_helper_script("claude", result)
+        assert not (state_dir / "bin" / "cc").exists()
+
+
+class TestRawEnvRunGate:
+    """The `ccl run` one-shot bash subshell must gate raw_env (issue #203)."""
+
+    @staticmethod
+    def _wire_result(raw_env):
+        return {
+            "argv": ["claude", "-p", "x"],
+            "env": {},
+            "effective_tag": "x",
+            "raw_env": raw_env,
+        }
+
+    def test_raw_env_untrusted_payload_aborts_before_bash(self, isolated_state, monkeypatch):
+        import claude_codex_local.wizard_cli as wcli
+
+        _, wiz, _ = isolated_state
+
+        class _Boom:
+            class TimeoutExpired(Exception):
+                pass
+
+            @staticmethod
+            def run(*args, **kwargs):
+                raise AssertionError("subprocess must never run for an untrusted raw_env")
+
+        monkeypatch.setattr(wiz, "subprocess", _Boom)
+        with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
+            wcli._resolve_wire_env(self._wire_result({"ANTHROPIC_AUTH_TOKEN": '"$(id)"'}))
+
+    def test_raw_env_compound_substitution_aborts_before_bash(self, monkeypatch):
+        """`"$(cat a)$(id)"` must be rejected, not partially evaluated."""
+        import claude_codex_local.wizard_cli as wcli
+
+        def _boom(*args, **kwargs):
+            raise AssertionError("bash must never see a compound-substitution raw_env")
+
+        monkeypatch.setattr(wcli.subprocess, "run", _boom)
+        with pytest.raises(ValueError, match="ANTHROPIC_AUTH_TOKEN"):
+            wcli._resolve_wire_env(self._wire_result({"ANTHROPIC_AUTH_TOKEN": '"$(cat a)$(id)"'}))
+
+    def test_raw_env_trusted_cat_expression_is_materialized(
+        self, isolated_state, monkeypatch, tmp_path
+    ):
+        import claude_codex_local.wizard_cli as wcli
+
+        key_file = tmp_path / "key"
+        key_file.write_text("sk-secret-value\n")
+        resolved = wcli._resolve_wire_env(
+            self._wire_result({"ANTHROPIC_AUTH_TOKEN": f'"$(cat {key_file})"'})
+        )
+        assert resolved["ANTHROPIC_AUTH_TOKEN"] == "sk-secret-value"
+
+    def test_raw_env_empty_passthrough_keeps_literal_env(self, isolated_state):
+        import claude_codex_local.wizard_cli as wcli
+
+        _, _, _ = isolated_state
+        wr = {"argv": ["claude"], "env": {"A": "b"}, "effective_tag": "x", "raw_env": {}}
+        assert wcli._resolve_wire_env(wr) == {"A": "b"}
 
     def test_claude9_dispatches_to_cc9_filename(self, isolated_state):
         """The 9router fence tag claude9 maps to a `cc9` helper script."""

@@ -41,6 +41,8 @@ from claude_codex_local.wizard_state import (
     STATE_DIR,
     STATE_FILE as _STATE_FILE_FALLBACK,
     WizardState,
+    trusted_raw_env_path,
+    valid_env_var_name,
 )
 from claude_codex_local.wizard_steps import (
     _OPENROUTER_MODEL_RE,
@@ -499,6 +501,20 @@ def _resolve_wire_env(wire_result: dict[str, Any]) -> dict[str, str]:
     raw_env: dict[str, str] = dict(wire_result.get("raw_env", {}))
     if not raw_env:
         return env
+    # Trust gate (issue #203): these values are about to be handed to bash.
+    # Only codebase-shaped "$(cat <path>)" key-file expressions may pass —
+    # anything else aborts instead of executing untrusted shell code.
+    untrusted = [
+        key
+        for key, value in raw_env.items()
+        if not valid_env_var_name(key) or trusted_raw_env_path(value) is None
+    ]
+    if untrusted:
+        raise ValueError(
+            "refusing to evaluate raw_env: entries "
+            f"{', '.join(sorted(untrusted))} are not trusted "
+            'double-quoted "$(cat <path>)" key-file expressions'
+        )
     script_lines = [f"export {shlex.quote(k)}={v}" for k, v in raw_env.items()]
     keys_alt = "|".join(re.escape(k) for k in raw_env)
     script_lines.append(f"env | grep -E '^({keys_alt})='")
@@ -742,7 +758,11 @@ def run_session(
         fail(f"Unknown harness for `ccl run`: {harness}")
         return 1
 
-    env_overlay = _resolve_wire_env(state.wire_result)
+    try:
+        env_overlay = _resolve_wire_env(state.wire_result)
+    except ValueError as exc:
+        fail(f"Refusing to launch harness: {exc}")
+        return 1
     full_env = {**os.environ, **env_overlay}
     try:
         proc = _resolved_subprocess().run(cmd, env=full_env)
