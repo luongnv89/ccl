@@ -267,6 +267,7 @@ _hf_lazy_names = (
     "huggingface_download_gguf",
     "huggingface_fuzzy_find",
     "huggingface_list_repo_files",
+    "huggingface_repo_revision",
     "resolve_gguf_mirror",
 )
 

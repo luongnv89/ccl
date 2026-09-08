@@ -36,6 +36,37 @@ def huggingface_cli_detect() -> dict[str, Any]:
     return {"present": False, "binary": "", "version": ""}
 
 
+def _reject_unsafe_positional(value: str, kind: str) -> str | None:
+    """Return an error message when ``value`` is unsafe as a CLI positional.
+
+    Rejects empty values, anything beginning with ``-`` (would be consumed as
+    a flag), path-traversal segments, and absolute paths (issue #205).
+    """
+    if value is None:
+        return f"{kind} must not be empty"
+    v = value.strip()
+    if not v:
+        return f"{kind} must not be empty"
+    if v.startswith("-"):
+        return f"{kind} must not start with '-'"
+    if any(part == ".." for part in re.split(r"[/\\]", v)):
+        return f"{kind} must not contain '..'"
+    if os.path.isabs(v) or v.startswith("/"):
+        return f"{kind} must not be an absolute path"
+    return None
+
+
+def _ensure_under_local_dir(local_dir: str, filename: str) -> str | None:
+    """Return an error message when the resolved destination escapes ``local_dir``."""
+    base = Path(local_dir).resolve()
+    candidate = (base / filename).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return f"resolved path {candidate} escapes local_dir {base} — refusing download"
+    return None
+
+
 def huggingface_download_gguf(
     repo_id: str,
     filename: str | None = None,
@@ -43,12 +74,39 @@ def huggingface_download_gguf(
     *,
     include: str | None = None,
     stream: bool = True,
+    revision: str | None = None,
 ) -> dict[str, Any]:
     # Import core at call time so that test monkeypatches on
     # core.huggingface_cli_detect take effect (some tests patch
     # core directly, others patch _hf_api — core is the common
     # target since tests use the `pb` (core) module reference).
     import claude_codex_local.core as _core
+
+    start = time.monotonic()
+
+    def _error(msg: str, *, not_found: bool = False) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "path": None,
+            "error": msg,
+            "bytes_downloaded": None,
+            "elapsed_seconds": time.monotonic() - start,
+            "not_found": not_found,
+        }
+
+    # Optional components may be None; provided ones must be safe. repo_id is
+    # mandatory and must be non-empty.
+    for value, kind in (
+        (repo_id, "repo_id"),
+        (filename, "filename"),
+        (include, "include"),
+        (revision, "revision"),
+    ):
+        if value is None:
+            continue
+        problem = _reject_unsafe_positional(value, kind)
+        if problem:
+            return _error(problem)
 
     det = _core.huggingface_cli_detect()
     if not det.get("present"):
@@ -59,22 +117,37 @@ def huggingface_download_gguf(
             "bytes_downloaded": None,
             "elapsed_seconds": None,
             "not_found": False,
+            "revision": None,
         }
 
-    cmd = [det["binary"], "download", repo_id]
+    # Pin the download to an explicit revision (issue #205): resolve the
+    # repo's current HEAD commit when the caller did not pin one, falling
+    # back to the default branch name when resolution fails.
+    if revision is None:
+        revision = huggingface_repo_revision(repo_id) or "main"
+
+    if local_dir and filename:
+        escape = _ensure_under_local_dir(local_dir, filename)
+        if escape:
+            return _error(escape)
+
+    # Flags must precede the `--` separator so a hostile repo_id/filename
+    # can never be consumed as an option (issue #205).
+    flags: list[str] = ["--revision", revision]
+    if include:
+        flags += ["--include", include]
+    if local_dir:
+        flags += ["--local-dir", local_dir]
+
+    cmd = [det["binary"], "download", *flags, "--", repo_id]
     if filename:
         cmd.append(filename)
-    elif include:
-        cmd += ["--include", include]
-    if local_dir:
-        cmd += ["--local-dir", local_dir]
 
     # Import core at call time so that test monkeypatches on
     # core.subprocess and core.run take effect (tests patch the re-export
     # on the core facade).
     import claude_codex_local.core as _core
 
-    start = time.monotonic()
     try:
         if stream:
             proc = _core.subprocess.Popen(cmd, env=ensure_path(None))
@@ -103,11 +176,15 @@ def huggingface_download_gguf(
                     "bytes_downloaded": None,
                     "elapsed_seconds": elapsed,
                     "not_found": False,
+                    "revision": revision,
                 }
             resolved_path = None
             size_bytes: int | None = None
             if local_dir:
                 if filename:
+                    escape = _ensure_under_local_dir(local_dir, filename)
+                    if escape:
+                        return _error(escape)
                     candidate = Path(local_dir) / filename
                     if candidate.exists():
                         resolved_path = str(candidate)
@@ -128,6 +205,7 @@ def huggingface_download_gguf(
                 "bytes_downloaded": size_bytes,
                 "elapsed_seconds": elapsed,
                 "not_found": False,
+                "revision": revision,
             }
         cp = _core.run(cmd, timeout=600, check=False)
         elapsed = time.monotonic() - start
@@ -140,6 +218,7 @@ def huggingface_download_gguf(
                 "bytes_downloaded": None,
                 "elapsed_seconds": elapsed,
                 "not_found": _looks_like_not_found(err),
+                "revision": revision,
             }
         path = cp.stdout.strip().splitlines()[-1] if cp.stdout.strip() else None
         size_bytes = None
@@ -159,6 +238,7 @@ def huggingface_download_gguf(
             "bytes_downloaded": size_bytes,
             "elapsed_seconds": elapsed,
             "not_found": False,
+            "revision": revision,
         }
     except Exception as exc:
         elapsed = time.monotonic() - start
@@ -169,6 +249,7 @@ def huggingface_download_gguf(
             "bytes_downloaded": None,
             "elapsed_seconds": elapsed,
             "not_found": _looks_like_not_found(str(exc)),
+            "revision": revision,
         }
 
 
@@ -261,29 +342,56 @@ def huggingface_fuzzy_find(query: str, *, max_results: int = 3) -> list[str]:
     return candidates[:max_results]
 
 
-def huggingface_list_repo_files(
-    repo_id: str,
-    *,
-    timeout: float = 10.0,
-) -> list[str]:
+_MODEL_PAYLOAD_CACHE: dict[str, dict[str, Any] | None] = {}
+
+
+def _fetch_model_payload(repo_id: str, *, timeout: float = 10.0) -> dict[str, Any] | None:
+    """Fetch (and memoize) the HF model-info payload for ``repo_id``.
+
+    The cache doubles as a revision lookup for downloads performed shortly
+    after a listing in the same process — no extra HTTP round-trip.
+    """
     import urllib.error
     import urllib.parse
     import urllib.request
 
-    if not repo_id or not repo_id.strip():
-        return []
+    key = repo_id.strip()
+    if not key:
+        return None
+    if key in _MODEL_PAYLOAD_CACHE:
+        return _MODEL_PAYLOAD_CACHE[key]
     try:
-        encoded = urllib.parse.quote(repo_id.strip(), safe="/")
+        encoded = urllib.parse.quote(key, safe="/")
         url = f"https://huggingface.co/api/models/{encoded}"
         req = urllib.request.Request(url, headers={"User-Agent": "claude-codex-local"})
         # Fixed https://huggingface.co API host built from a validated repo id.
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             body = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    payload: dict[str, Any] | None = body if isinstance(body, dict) else None
+    _MODEL_PAYLOAD_CACHE[key] = payload
+    return payload
+
+
+def huggingface_repo_revision(repo_id: str, *, timeout: float = 10.0) -> str | None:
+    """Return the pinned commit SHA for ``repo_id`` or None when unresolvable."""
+    payload = _fetch_model_payload(repo_id, timeout=timeout)
+    if not payload:
+        return None
+    sha = payload.get("sha")
+    return sha if isinstance(sha, str) and sha else None
+
+
+def huggingface_list_repo_files(
+    repo_id: str,
+    *,
+    timeout: float = 10.0,
+) -> list[str]:
+    payload = _fetch_model_payload(repo_id, timeout=timeout)
+    if not payload:
         return []
-    if not isinstance(body, dict):
-        return []
-    siblings = body.get("siblings")
+    siblings = payload.get("siblings")
     if not isinstance(siblings, list):
         return []
     files: list[str] = []
@@ -353,7 +461,17 @@ def resolve_gguf_mirror(name: str) -> str | None:
         if _core.huggingface_repo_has_gguf(candidate) is True:
             return _remember(candidate)
 
+    # Search fallback (#205): never accept an arbitrary search hit — the
+    # resolved repo's author must be on the curated allowlist, otherwise
+    # search ranking decides whose repository feeds llama.cpp. Non-allowlisted
+    # hits are skipped; callers confirm anything outside this resolver with
+    # the user interactively before download.
     for hit in _core.huggingface_search_models(f"{base}-GGUF", limit=5):
+        if not isinstance(hit, str) or not hit:
+            continue
+        author = hit.split("/", 1)[0]
+        if author not in _GGUF_MIRROR_AUTHORS:
+            continue
         if _core.huggingface_repo_has_gguf(hit) is True:
             return _remember(hit)
 
