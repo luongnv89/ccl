@@ -12,6 +12,8 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Sub-module references for monkeypatching — the refactored sub-modules import
 # ``run``, ``command_version``, and config constants directly from ``_shell``
@@ -278,7 +280,7 @@ class TestLlmfitCodingCandidates:
                     "best_quant": "mlx-4bit",
                 },
                 {
-                    "name": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-8bit",
+                    "name": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-MLX-8bit",  # pragma: allowlist secret
                     "category": "coding",
                     "score": 92,
                     "best_quant": "mlx-8bit",
@@ -1427,8 +1429,6 @@ class TestEndpointProbeDiagnostics:
             "urlopen",
             lambda *a, **kw: (_ for _ in ()).throw(TypeError("bad fake")),
         )
-        import pytest
-
         with pytest.raises(TypeError, match="bad fake"):
             pb.smoke_test_router9_models()
 
@@ -3425,15 +3425,62 @@ class TestNormalizeBaseUrl:
             pb._normalize_base_url("http://gpu-box.local:8001")
         assert not any("should not include a path" in str(w.message) for w in caught)
 
+    # -- scheme validation (issue #201) -------------------------------------
+
+    def test_rejects_file_scheme(self):
+        with pytest.raises(ValueError, match="http:// or https://"):
+            pb._normalize_base_url("file:///home/user/key")
+
+    def test_rejects_ftp_scheme(self):
+        with pytest.raises(ValueError, match="http:// or https://"):
+            pb._normalize_base_url("ftp://gpu-box.local/pub")
+
+    def test_rejects_javascript_scheme(self):
+        with pytest.raises(ValueError, match="http:// or https://"):
+            pb._normalize_base_url("javascript://alert(1)")
+
+    def test_allow_path_preserves_v1_path_without_warning(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = pb._normalize_base_url("http://localhost:20128/v1", allow_path=True)
+        assert result == "http://localhost:20128/v1"
+        assert not any("should not include a path" in str(w.message) for w in caught)
+
+    def test_allow_path_preserves_api_v1_path(self):
+        assert (
+            pb._normalize_base_url("https://openrouter.ai/api/v1", allow_path=True)
+            == "https://openrouter.ai/api/v1"
+        )
+
+    def test_allow_path_still_requires_http_scheme(self):
+        with pytest.raises(ValueError, match="http:// or https://"):
+            pb._normalize_base_url("file:///etc/passwd", allow_path=True)
+
 
 # ---------------------------------------------------------------------------
-# _is_local_base_url (issue #115).
+# _is_local_base_url (issue #115, tightened by #201).
 # ---------------------------------------------------------------------------
 
 
 class TestIsLocalBaseUrl:
-    def test_empty_treated_as_local(self):
-        assert pb._is_local_base_url("") is True
+    def test_empty_string_is_not_local(self):
+        # No scheme -> cannot be classified as a local engine endpoint (#201).
+        assert pb._is_local_base_url("") is False
+
+    def test_schemeless_host_port_is_not_local(self):
+        # urlparse reads "evil.com:8001" as scheme 'evil.com' — never local.
+        assert pb._is_local_base_url("evil.com:8001") is False
+
+    def test_schemeless_localhost_is_not_local(self):
+        assert pb._is_local_base_url("localhost:11434") is False
+
+    def test_file_scheme_is_not_local(self):
+        assert pb._is_local_base_url("file:///etc/passwd") is False
+
+    def test_ftp_scheme_is_not_local(self):
+        assert pb._is_local_base_url("ftp://localhost:21") is False
 
     def test_localhost(self):
         assert pb._is_local_base_url("http://localhost:11434") is True
@@ -3466,6 +3513,138 @@ class TestIsLocalBaseUrl:
 
     def test_localhost_case_insensitive(self):
         assert pb._is_local_base_url("http://LOCALHOST:11434") is True
+
+
+# ---------------------------------------------------------------------------
+# _ensure_http_url / _read_bounded (issue #201).
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureHttpUrl:
+    def test_passes_through_http(self):
+        assert pb._ensure_http_url("http://localhost:8000/v1") == "http://localhost:8000/v1"
+
+    def test_passes_through_https_case_insensitive(self):
+        assert pb._ensure_http_url("HTTPS://openrouter.ai/api") == "HTTPS://openrouter.ai/api"
+
+    def test_rejects_file_scheme(self):
+        with pytest.raises(ValueError, match="Refusing non-http"):
+            pb._ensure_http_url("file:///etc/passwd")
+
+    def test_rejects_schemeless_url(self):
+        with pytest.raises(ValueError, match="Refusing non-http"):
+            pb._ensure_http_url("evil.com:8001")
+
+
+class _FakeBoundedResp:
+    """Fake urllib response supporting bounded reads and headers."""
+
+    def __init__(self, payload: bytes, headers: dict | None = None, supports_amt: bool = True):
+        self._payload = payload
+        self.headers = headers if headers is not None else {}
+        self._supports_amt = supports_amt
+
+    def read(self, amt: int = -1) -> bytes:
+        if not self._supports_amt:
+            if amt != -1:
+                raise TypeError("read() takes no arguments")
+            data, self._payload = self._payload, b""
+            return data
+        if amt < 0:
+            amt = len(self._payload)
+        data = self._payload[:amt]
+        self._payload = self._payload[len(data) :]
+        return data
+
+
+class TestReadBounded:
+    def test_reads_small_payload(self):
+        resp = _FakeBoundedResp(b'{"ok": true}')
+        assert pb._read_bounded(resp) == b'{"ok": true}'
+
+    def test_enforces_cap_without_content_length(self):
+        resp = _FakeBoundedResp(b"x" * (pb.MAX_RESPONSE_BYTES + 1))
+        with pytest.raises(pb.ResponseTooLargeError, match="cap"):
+            pb._read_bounded(resp)
+
+    def test_payload_exactly_at_cap_is_allowed(self):
+        resp = _FakeBoundedResp(b"x" * pb.MAX_RESPONSE_BYTES)
+        assert len(pb._read_bounded(resp)) == pb.MAX_RESPONSE_BYTES
+
+    def test_declared_content_length_over_cap_fails_fast(self):
+        resp = _FakeBoundedResp(
+            b"tiny",
+            headers={"Content-Length": str(pb.MAX_RESPONSE_BYTES + 1)},
+        )
+        with pytest.raises(pb.ResponseTooLargeError, match="Content-Length"):
+            pb._read_bounded(resp)
+
+    def test_declared_content_length_within_cap_reads_stream(self):
+        resp = _FakeBoundedResp(
+            b"x" * 10,
+            headers={"Content-Length": "10"},
+        )
+        assert pb._read_bounded(resp, max_bytes=16) == b"x" * 10
+        # The stream itself is still capped even when the header lies smaller.
+        with pytest.raises(pb.ResponseTooLargeError):
+            pb._read_bounded(_FakeBoundedResp(b"y" * 10), max_bytes=5)
+
+    def test_non_integer_content_length_is_ignored(self):
+        resp = _FakeBoundedResp(b"data", headers={"Content-Length": "abc"})
+        assert pb._read_bounded(resp, max_bytes=100) == b"data"
+
+    def test_read_without_amt_support_still_capped(self):
+        resp = _FakeBoundedResp(
+            b"x" * 64,
+            supports_amt=False,
+        )
+        with pytest.raises(pb.ResponseTooLargeError):
+            pb._read_bounded(resp, max_bytes=32)
+
+    def test_custom_max_bytes(self):
+        resp = _FakeBoundedResp(b"x" * 11)
+        with pytest.raises(pb.ResponseTooLargeError):
+            pb._read_bounded(resp, max_bytes=10)
+
+
+class TestRouterBaseEnvNormalization:
+    """CCL_9ROUTER_BASE_URL / CCL_OPENROUTER_BASE_URL pass through
+    _normalize_base_url at import time (issue #201)."""
+
+    def test_openrouter_env_var_normalized_with_path(self, monkeypatch):
+        import importlib
+
+        import claude_codex_local._config as cfg_mod
+
+        monkeypatch.setenv("CCL_OPENROUTER_BASE_URL", "https://openrouter.example/api/v1/")
+        reloaded = importlib.reload(cfg_mod)
+        try:
+            assert reloaded.OPENROUTER_BASE_URL == "https://openrouter.example/api/v1"
+        finally:
+            importlib.reload(cfg_mod)
+
+    def test_router9_schemeless_env_var_gets_default_scheme(self, monkeypatch):
+        import importlib
+
+        import claude_codex_local._config as cfg_mod
+
+        monkeypatch.setenv("CCL_9ROUTER_BASE_URL", "gpu-box.local:20128/v1")
+        reloaded = importlib.reload(cfg_mod)
+        try:
+            assert reloaded.ROUTER9_BASE_URL == "http://gpu-box.local:20128/v1"
+        finally:
+            importlib.reload(cfg_mod)
+
+    def test_file_scheme_env_var_rejected_at_import(self, monkeypatch):
+        import importlib
+
+        import claude_codex_local._config as cfg_mod
+
+        monkeypatch.setenv("CCL_OPENROUTER_BASE_URL", "file:///home/user/key")
+        with pytest.raises(ValueError, match="http:// or https://"):
+            importlib.reload(cfg_mod)
+        monkeypatch.delenv("CCL_OPENROUTER_BASE_URL", raising=False)
+        importlib.reload(cfg_mod)
 
 
 # ---------------------------------------------------------------------------

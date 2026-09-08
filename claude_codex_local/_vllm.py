@@ -4,7 +4,12 @@ import json
 import time
 from typing import Any
 
-from claude_codex_local._config import VLLM_BASE_URL, _is_local_base_url
+from claude_codex_local._config import (
+    VLLM_BASE_URL,
+    _ensure_http_url,
+    _is_local_base_url,
+    _read_bounded,
+)
 from claude_codex_local._shell import command_version
 
 
@@ -42,7 +47,9 @@ def smoke_test_vllm_model(
     import urllib.error
     import urllib.request
 
-    url = f"{(base_url or 'http://localhost:8000').rstrip('/')}/v1/chat/completions"
+    url = (
+        f"{_ensure_http_url((base_url or 'http://localhost:8000').rstrip('/'))}/v1/chat/completions"
+    )
     payload = json.dumps(
         {
             "model": model,
@@ -60,8 +67,9 @@ def smoke_test_vllm_model(
     start = time.time()
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read())
+        # Scheme enforced by _ensure_http_url; body read capped by _read_bounded.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+            body = json.loads(_read_bounded(resp))
 
         duration_seconds = max(time.time() - start, 1e-6)
         text = body["choices"][0]["message"]["content"].strip()

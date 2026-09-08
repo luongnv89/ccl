@@ -86,7 +86,8 @@ def lms_responses_api_ok(model: str) -> bool:
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        # LMS endpoint is operator-configured; probes only read tiny status bodies.
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
             chunk = resp.read(256)
             return bool(chunk and chunk.strip())
     except Exception:
@@ -169,7 +170,8 @@ def smoke_test_lmstudio_model(
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     start = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        # LMS endpoint is operator-configured; response is a small JSON completion.
+        with urllib.request.urlopen(req, timeout=60) as resp:  # nosec B310
             body = json.loads(resp.read())
         duration_seconds = max(time.time() - start, 1e-6)
         text = body["choices"][0]["message"]["content"].strip()

@@ -115,7 +115,7 @@ class TestVLLMAdapterInit:
 
         adapter = pb.VLLMAdapter()
         assert adapter._base_url == "http://custom-host:9999"
-        assert adapter._api_key == "test-api-key-123"
+        assert adapter._api_key == "test-api-key-123"  # pragma: allowlist secret
         assert adapter._timeout == 120
         assert adapter._max_tokens == 4096
 
@@ -398,7 +398,7 @@ class TestSmokeTestVLLMModelSuccess:
             result = pb.smoke_test_vllm_model(
                 model="test-model",
                 base_url="http://localhost:8000",
-                api_key="secret-key-123",
+                api_key="secret-key-123",  # pragma: allowlist secret
                 timeout=60,
                 max_tokens=512,
             )
@@ -546,7 +546,7 @@ class TestSmokeTestVLLMModelErrors:
             result = pb.smoke_test_vllm_model(
                 model="test-model",
                 base_url="http://localhost:8000",
-                api_key="invalid-key",
+                api_key="invalid-key",  # pragma: allowlist secret
                 timeout=60,
                 max_tokens=2048,
             )
